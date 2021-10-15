@@ -36,7 +36,7 @@ import fr.cirad.mgdb.model.mongo.maintypes.VariantRunData;
 import fr.cirad.mgdb.model.mongodao.MgdbDao;
 import fr.cirad.tools.ProgressIndicator;
 
-public class AsyncExportTool {
+public class AsyncExportToolV2 {
 	
 	private static final Logger LOG = Logger.getLogger(AbstractMarkerOrientedExportHandler.class);
 	
@@ -56,7 +56,7 @@ public class AsyncExportTool {
 	
 	private int nNumberOfChunks;
 
-	public AsyncExportTool(MongoCursor<Document> markerCursor, long nTotalMarkerCount, int nQueryChunkSize, MongoTemplate mongoTemplate, List<GenotypingSample> samples, AbstractDataOutputHandler<Integer, LinkedHashMap/*<VariantData, Collection<VariantRunData>>*/> dataOutputHandler, ProgressIndicator progress) throws Exception
+	public AsyncExportToolV2(MongoCursor<Document> markerCursor, long nTotalMarkerCount, int nQueryChunkSize, MongoTemplate mongoTemplate, List<GenotypingSample> samples, AbstractDataOutputHandler<Integer, LinkedHashMap/*<VariantData, Collection<VariantRunData>>*/> dataOutputHandler, ProgressIndicator progress) throws Exception
 	{
 		if (!markerCursor.hasNext())
 			throw new Exception("markerCursor contains no data!");
