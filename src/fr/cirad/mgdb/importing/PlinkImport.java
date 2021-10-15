@@ -36,6 +36,7 @@ import java.util.StringTokenizer;
 import java.util.TreeSet;
 import java.util.stream.Collectors;
 
+import org.apache.commons.lang.StringUtils;
 import org.apache.log4j.Logger;
 import org.bson.types.ObjectId;
 import org.springframework.beans.factory.BeanDefinitionStoreException;
@@ -48,7 +49,7 @@ import com.mongodb.BasicDBObject;
 import com.sun.org.apache.xpath.internal.functions.WrongNumberArgsException;
 
 import fr.cirad.mgdb.importing.base.AbstractGenotypeImport;
-import fr.cirad.mgdb.model.mongo.maintypes.AutoIncrementCounter;
+import fr.cirad.mgdb.model.mongo.maintypes.Assembly;
 import fr.cirad.mgdb.model.mongo.maintypes.GenotypingProject;
 import fr.cirad.mgdb.model.mongo.maintypes.GenotypingSample;
 import fr.cirad.mgdb.model.mongo.maintypes.Individual;
@@ -59,6 +60,7 @@ import fr.cirad.mgdb.model.mongo.subtypes.SampleGenotype;
 import fr.cirad.mgdb.model.mongodao.MgdbDao;
 import fr.cirad.tools.ProgressIndicator;
 import fr.cirad.tools.genotypes.PlinkEigenstratTool;
+import fr.cirad.tools.mongo.AutoIncrementCounter;
 import fr.cirad.tools.mongo.MongoTemplateManager;
 import htsjdk.variant.variantcontext.VariantContext.Type;
 
@@ -74,8 +76,6 @@ public class PlinkImport extends AbstractGenotypeImport {
 	private String m_processID;
 	
 	private boolean fImportUnknownVariants = false;
-	
-    public boolean m_fCloseContextOpenAfterImport = false;
     
 	/**
 	 * Instantiates a new PLINK import.
@@ -84,77 +84,92 @@ public class PlinkImport extends AbstractGenotypeImport {
 	{
 	}
 
-	/**
-	 * Instantiates a new PLINK import.
-	 *
-	 * @param processID the process id
-	 */
-	public PlinkImport(String processID)
-	{
-		m_processID = processID;
-	}
-
-	/**
-     * Instantiates a new vcf import.
-     */
-    public PlinkImport(boolean fCloseContextOpenAfterImport) {
-        this();
-    	m_fCloseContextOpenAfterImport = fCloseContextOpenAfterImport;
+    public PlinkImport(String processID)
+    {
+        m_processID = processID;
     }
 
     /**
-     * Instantiates a new vcf import.
+     * Instantiates a new PLINK import.
+     */
+    public PlinkImport(boolean fCloseContextOpenAfterImport) {
+        this();
+        m_fCloseContextAfterImport = fCloseContextOpenAfterImport;
+    }
+    
+    /**
+     * Instantiates a new PLINK import.
+     */
+    public PlinkImport(boolean fCloseContextAfterImport, boolean fAllowNewAssembly) {
+        this();
+        this.m_fCloseContextAfterImport = fCloseContextAfterImport;
+        m_fAllowNewAssembly = fAllowNewAssembly;
+    }
+
+    /**
+     * Instantiates a new PLINK import.
      */
     public PlinkImport(String processID, boolean fCloseContextOpenAfterImport) {
         this(processID);
-    	m_fCloseContextOpenAfterImport = fCloseContextOpenAfterImport;
+        m_fCloseContextAfterImport = fCloseContextOpenAfterImport;
     }
 
-	/**
-	 * The main method.
-	 *
-	 * @param args the arguments
-	 * @throws Exception the exception
-	 */
-	public static void main(String[] args) throws Exception
-	{
-		if (args.length < 6)
-			throw new Exception("You must pass 6 parameters as arguments: DATASOURCE name, PROJECT name, RUN name, TECHNOLOGY string, MAP file, and PED file! An optional 7th parameter supports values '1' (empty project data before importing) and '2' (empty all variant data before importing, including marker list).");
+    
+    /**
+     * Instantiates a new PLINK import.
+     */
+    public PlinkImport(String processID, boolean fCloseContextAfterImport, boolean fAllowNewAssembly) {
+        this(processID);
+        m_fCloseContextAfterImport = fCloseContextAfterImport;
+        m_fAllowNewAssembly = fAllowNewAssembly;
+    }
 
-		File mapFile = new File(args[4]);
-		if (!mapFile.exists() || mapFile.length() == 0)
-			throw new Exception("File " + args[4] + " is missing or empty!");
-		
-		File pedFile = new File(args[5]);
-		if (!pedFile.exists() || pedFile.length() == 0)
-			throw new Exception("File " + args[5] + " is missing or empty!");
+    /**
+     * The main method.
+     *
+     * @param args the arguments
+     * @throws Exception the exception
+     */
+    public static void main(String[] args) throws Exception
+    {
+        if (args.length < 7)
+            throw new Exception("You must pass 7 parameters as arguments: DATASOURCE name, PROJECT name, RUN name, TECHNOLOGY string, MAP file, and PED file, assembly name! An optional 8th parameter supports values '1' (empty project data before importing) and '2' (empty all variant data before importing, including marker list).");
 
-		int mode = 0;
-		try
-		{
-			mode = Integer.parseInt(args[6]);
-		}
-		catch (Exception e)
-		{
-			LOG.warn("Unable to parse input mode. Using default (0): overwrite run if exists.");
-		}
-		new PlinkImport().importToMongo(args[0], args[1], args[2], args[3], new File(args[4]).toURI().toURL(), new File(args[5]), mode);
-	}
+        File mapFile = new File(args[4]);
+        if (!mapFile.exists() || mapFile.length() == 0)
+            throw new Exception("File " + args[4] + " is missing or empty!");
+        
+        File pedFile = new File(args[5]);
+        if (!pedFile.exists() || pedFile.length() == 0)
+            throw new Exception("File " + args[5] + " is missing or empty!");
 
-	/**
-	 * Import to mongo.
-	 *
-	 * @param sModule the module
-	 * @param sProject the project
-	 * @param sRun the run
-	 * @param sTechnology the technology
-	 * @param mapFileURL the map file URL
-	 * @param pedFile the ped file
-	 * @param importMode the import mode
-	 * @return a project ID if it was created by this method, otherwise null
-	 * @throws Exception the exception
-	 */
-	public Integer importToMongo(String sModule, String sProject, String sRun, String sTechnology, URL mapFileURL, File pedFile, int importMode) throws Exception
+        int mode = 0;
+        try
+        {
+            mode = Integer.parseInt(args[7]);
+        }
+        catch (Exception e)
+        {
+            LOG.warn("Unable to parse input mode. Using default (0): overwrite run if exists.");
+        }
+        new PlinkImport().importToMongo(args[0], args[1], args[2], args[3], new File(args[4]).toURI().toURL(), new File(args[5]), args[6], mode);
+    }
+
+    /**
+     * Import to mongo.
+     *
+     * @param sModule the module
+     * @param sProject the project
+     * @param sRun the run
+     * @param sTechnology the technology
+     * @param mapFileURL the map file URL
+     * @param pedFile the ped file
+     * @param assemblyName the assembly name
+     * @param importMode the import mode
+     * @return a project ID if it was created by this method, otherwise null
+     * @throws Exception the exception
+     */
+    public Integer importToMongo(String sModule, String sProject, String sRun, String sTechnology, URL mapFileURL, File pedFile, String assemblyName, int importMode) throws Exception
 	{
 		long before = System.currentTimeMillis();
         ProgressIndicator progress = ProgressIndicator.get(m_processID) != null ? ProgressIndicator.get(m_processID) : new ProgressIndicator(m_processID, new String[]{"Initializing import"});	// better to add it straight-away so the JSP doesn't get null in return when it checks for it (otherwise it will assume the process has ended)
@@ -208,7 +223,20 @@ public class PlinkImport extends AbstractGenotypeImport {
 			}
 			project.setPloidyLevel(2);
 
-			HashMap<String, String> existingVariantIDs = buildSynonymToIdMapForExistingVariants(mongoTemplate, false);			
+            HashMap<String, String> existingVariantIDs;
+            Assembly assembly = mongoTemplate.findOne(new Query(Criteria.where(Assembly.FIELDNAME_NAME).is(assemblyName)), Assembly.class);
+            if (assembly == null) {
+                if ("".equals(assemblyName) || m_fAllowNewAssembly) {
+                    assembly = new Assembly("".equals(assemblyName) ? 0 : AutoIncrementCounter.getNextSequence(mongoTemplate, MongoTemplateManager.getMongoCollectionName(Assembly.class)));
+                    assembly.setName(assemblyName);
+                    mongoTemplate.save(assembly);
+                    existingVariantIDs = new HashMap<>();
+                }
+                else
+                    throw new Exception("Assembly \"" + assemblyName + "\" not found in database. Supported assemblies are " + StringUtils.join(mongoTemplate.findDistinct(Assembly.FIELDNAME_NAME, Assembly.class, String.class), ", "));
+            }
+            else
+                existingVariantIDs = buildSynonymToIdMapForExistingVariants(mongoTemplate, false, assembly.getId());
 			
 			String info = "Loading variant list from MAP file";
 			LOG.info(info);
@@ -243,7 +271,7 @@ public class PlinkImport extends AbstractGenotypeImport {
 			
 			int nNConcurrentThreads = Math.max(1, Runtime.getRuntime().availableProcessors());
             LOG.debug("Importing project '" + sProject + "' into " + sModule + " using " + nNConcurrentThreads + " threads");
-			long count = importTempFileContents(progress, nNConcurrentThreads, mongoTemplate, tempFiles, variantsAndPositions, existingVariantIDs, project, sRun, inconsistencies, userIndividualToPopulationMapToFill);
+			long count = importTempFileContents(progress, nNConcurrentThreads, mongoTemplate, assembly.getId(), tempFiles, variantsAndPositions, existingVariantIDs, project, sRun, inconsistencies, userIndividualToPopulationMapToFill);
 
 			progress.addStep("Preparing database for searches");
 			progress.moveToNextStep();
@@ -255,12 +283,12 @@ public class PlinkImport extends AbstractGenotypeImport {
 		}
 		finally
 		{
-			if (m_fCloseContextOpenAfterImport && ctx != null)
+			if (m_fCloseContextAfterImport && ctx != null)
 				ctx.close();
 		}
 	}
 
-	public long importTempFileContents(ProgressIndicator progress, int nNConcurrentThreads, MongoTemplate mongoTemplate, File[] tempFiles, LinkedHashMap<String, String> variantsAndPositions, HashMap<String, String> existingVariantIDs, GenotypingProject project, String sRun, HashMap<String, ArrayList<String>> inconsistencies, Map<String, String> userIndividualToPopulationMap) throws Exception			
+	public long importTempFileContents(ProgressIndicator progress, int nNConcurrentThreads, MongoTemplate mongoTemplate, Integer nAssemblyId, File[] tempFiles, LinkedHashMap<String, String> variantsAndPositions, HashMap<String, String> existingVariantIDs, GenotypingProject project, String sRun, HashMap<String, ArrayList<String>> inconsistencies, Map<String, String> userIndividualToPopulationMap) throws Exception			
 	{
 		String[] individuals = userIndividualToPopulationMap.keySet().toArray(new String[userIndividualToPopulationMap.size()]);
 		HashSet<VariantData> unsavedVariants = new HashSet<VariantData>();	// HashSet allows no duplicates
@@ -344,10 +372,10 @@ public class PlinkImport extends AbstractGenotypeImport {
 							alleles[1][nIndividualIndex++] = fInconsistentData ? "0" : genotype.substring(1, 2);
 						}
 
-						VariantRunData runToSave = addPlinkDataToVariant(mongoTemplate, variant, sequence, bpPosition, userIndividualToPopulationMap, alleles, project, sRun, previouslyCreatedSamples, fImportUnknownVariants);
+						VariantRunData runToSave = addPlinkDataToVariant(mongoTemplate, variant, nAssemblyId, sequence, bpPosition, userIndividualToPopulationMap, alleles, project, sRun, previouslyCreatedSamples, fImportUnknownVariants);
 						
-						if (variant.getReferencePosition() != null && !project.getSequences().contains(variant.getReferencePosition().getSequence()))
-							project.getSequences().add(variant.getReferencePosition().getSequence());
+                        if (variant.getReferencePosition(nAssemblyId) != null && !project.getSequences(nAssemblyId).contains(variant.getReferencePosition(nAssemblyId).getSequence()))
+                            project.getSequences(nAssemblyId).add(variant.getReferencePosition(nAssemblyId).getSequence());
 
 						project.getAlleleCounts().add(variant.getKnownAlleleList().size());	// it's a TreeSet so it will only be added if it's not already present
 						if (variant.getKnownAlleleList().size() > 2)
@@ -465,7 +493,7 @@ public class PlinkImport extends AbstractGenotypeImport {
 	 * Adds the PLINK data to variant.
 	 * @param fImportUnknownVariants 
 	 */
-	static private VariantRunData addPlinkDataToVariant(MongoTemplate mongoTemplate, VariantData variantToFeed, String sequence, Long bpPos, Map<String, String> userIndividualToPopulationMap, String[][] alleles, GenotypingProject project, String runName, Map<String /*individual*/, GenotypingSample> usedSamples, boolean fImportUnknownVariants) throws Exception
+	static private VariantRunData addPlinkDataToVariant(MongoTemplate mongoTemplate, VariantData variantToFeed, Integer nAssemblyId, String sequence, Long bpPos, Map<String, String> userIndividualToPopulationMap, String[][] alleles, GenotypingProject project, String runName, Map<String /*individual*/, GenotypingSample> usedSamples, boolean fImportUnknownVariants) throws Exception
 	{
 		// mandatory fields
 		if (variantToFeed.getType() == null)
@@ -473,8 +501,8 @@ public class PlinkImport extends AbstractGenotypeImport {
 		else if (!variantToFeed.getType().equals(Type.SNP.toString()))
 			throw new Exception("Variant type mismatch between existing data and data to import: " + variantToFeed.getId());
 
-		if (fImportUnknownVariants && variantToFeed.getReferencePosition() == null && sequence != null)	// otherwise we leave it as it is (had some trouble with overridden end-sites)
-			variantToFeed.setReferencePosition(new ReferencePosition(sequence, bpPos, bpPos));
+        if (fImportUnknownVariants && variantToFeed.getReferencePosition(nAssemblyId) == null && sequence != null)  // otherwise we leave it as it is (had some trouble with overridden end-sites)
+            variantToFeed.setReferencePosition(nAssemblyId, new ReferencePosition(sequence, bpPos, bpPos));
 
 		VariantRunData vrd = new VariantRunData(new VariantRunData.VariantRunDataId(project.getId(), runName, variantToFeed.getId()));
 				
@@ -548,7 +576,7 @@ public class PlinkImport extends AbstractGenotypeImport {
 		}
 		
         vrd.setKnownAlleleList(variantToFeed.getKnownAlleleList());
-        vrd.setReferencePosition(variantToFeed.getReferencePosition());
+        vrd.setReferencePositions(variantToFeed.getReferencePositions());
         vrd.setType(variantToFeed.getType());
         vrd.setSynonyms(variantToFeed.getSynonyms());
 		return vrd;

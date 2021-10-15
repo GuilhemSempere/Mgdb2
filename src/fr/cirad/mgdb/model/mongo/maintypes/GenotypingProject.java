@@ -21,6 +21,7 @@ import java.util.Date;
 import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.TreeSet;
 
 import org.springframework.data.annotation.Id;
@@ -164,8 +165,8 @@ public class GenotypingProject {
     /**
      * The sequences.
      */
-    @Field(FIELDNAME_SEQUENCES)
-    private TreeSet<String> sequences = new TreeSet<String>(new AlphaNumericComparator());
+    @Field(FIELDNAME_SEQUENCES) /*TODO: not backwards compatible*/
+    private Map<Integer, TreeSet<String>> sequences = new HashMap<>();
 
     /**
      * The allele counts.
@@ -361,12 +362,26 @@ public class GenotypingProject {
     }
 
     /**
-     * Gets the sequences.
+     * Gets the sequences by assembly ID.
      *
-     * @return the sequences
+     * @return the sequences by assembly ID
      */
-    public TreeSet<String> getSequences() {
+    public Map<Integer, TreeSet<String>> getSequencesByAssembly() {
         return sequences;
+    }
+
+    /**
+     * Gets the sequences for a given assembly ID.
+     *
+     * @return the sequences for a given assembly ID
+     */
+    public TreeSet<String> getSequences(int nAssemblyId) {
+        TreeSet<String> seqs = sequences.get(nAssemblyId);
+        if (seqs == null) {
+            seqs = new TreeSet<String>(new AlphaNumericComparator());
+            sequences.put(nAssemblyId, seqs);
+        }
+        return seqs;
     }
 
     /**
@@ -411,7 +426,7 @@ public class GenotypingProject {
 		getAlleleCounts().clear();
 		getEffectAnnotations().clear();
 		getVariantTypes().clear();
-		getSequences().clear();
+		getSequencesByAssembly().clear();
 		setPloidyLevel(0);
 		getAdditionalInfo().clear();
     }

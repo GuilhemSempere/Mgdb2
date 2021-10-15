@@ -279,17 +279,17 @@ public class Helper {
         return o == null || (o instanceof String && ((String) o).trim().isEmpty());
     }
 
-
     /**
      * Read possibly nested field.
      *
      * @param doc the record
      * @param fieldPath the field path
      * @param listFieldSeparator separator to use for list fields
+     * @param objectToReturnInsteadOfNull to be returned if targeted field contains a null value or doesn't exist
      * @return the object
      */
-    public static Object readPossiblyNestedField(Document doc, String fieldPath, String listFieldSeparator) {
-    	Document slidingRecord = doc;
+    public static Object readPossiblyNestedField(Document doc, String fieldPath, String listFieldSeparator, Object objectToReturnInsteadOfNull) {
+        Document slidingRecord = doc;
         String[] splitFieldName = fieldPath.split("\\.");
         Object o = null, result;
         for (String s : splitFieldName) {
@@ -312,9 +312,8 @@ public class Helper {
             result = o;
         }
 
-        if (result == null) {
-            result = "";
-        }
+        if (result == null)
+            return objectToReturnInsteadOfNull;
 
         return result;
     }

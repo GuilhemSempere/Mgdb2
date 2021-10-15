@@ -41,10 +41,8 @@ import com.mongodb.client.MongoCursor;
 import com.mongodb.client.model.Collation;
 
 import fr.cirad.mgdb.model.mongo.maintypes.Individual;
-import fr.cirad.mgdb.model.mongo.maintypes.VariantData;
 import fr.cirad.mgdb.model.mongo.maintypes.VariantRunData;
 import fr.cirad.mgdb.model.mongo.subtypes.AbstractVariantData;
-import fr.cirad.mgdb.model.mongo.subtypes.ReferencePosition;
 import fr.cirad.mgdb.model.mongodao.MgdbDao;
 import fr.cirad.tools.Helper;
 
@@ -57,8 +55,8 @@ public interface IExportHandler
 	/** The Constant LOG. */
 	static final Logger LOG = Logger.getLogger(IExportHandler.class);
 	
-	static final Document projectionDoc = new Document(VariantData.FIELDNAME_REFERENCE_POSITION + "." + ReferencePosition.FIELDNAME_SEQUENCE, 1).append(VariantData.FIELDNAME_REFERENCE_POSITION + "." + ReferencePosition.FIELDNAME_START_SITE, 1);	
-	static final Document sortDoc = new Document(AbstractVariantData.FIELDNAME_REFERENCE_POSITION + "." + ReferencePosition.FIELDNAME_SEQUENCE, 1).append(AbstractVariantData.FIELDNAME_REFERENCE_POSITION + "." + ReferencePosition.FIELDNAME_START_SITE, 1);
+//	static final Document projectionDoc = new Document(VariantData.FIELDNAME_REFERENCE_POSITION + "." + assemblyPrefix + ReferencePosition.FIELDNAME_SEQUENCE, 1).append(VariantData.FIELDNAME_REFERENCE_POSITION + "." + assemblyPrefix + ReferencePosition.FIELDNAME_START_SITE, 1);	
+//	static final Document sortDoc = new Document(AbstractVariantData.FIELDNAME_REFERENCE_POSITION + "." + assemblyPrefix + ReferencePosition.FIELDNAME_SEQUENCE, 1).append(AbstractVariantData.FIELDNAME_REFERENCE_POSITION + "." + assemblyPrefix + ReferencePosition.FIELDNAME_START_SITE, 1);
 	static final Collation collationObj = Collation.builder().numericOrdering(true).locale("en_US").build();
 	
 	/** The Constant nMaxChunkSizeInMb. */
@@ -116,8 +114,9 @@ public interface IExportHandler
 	 */
 	public List<String> getSupportedVariantTypes();
 	
-	public static MongoCursor<Document> getMarkerCursorWithCorrectCollation(MongoCollection<Document> varColl, Document varQuery, int nQueryChunkSize) {
-		return varColl.find(varQuery).projection(projectionDoc).sort(sortDoc).noCursorTimeout(true).collation(collationObj).batchSize(nQueryChunkSize).iterator();
+	public static MongoCursor<Document> getMarkerCursorWithCorrectCollation(MongoCollection<Document> varColl, Document varQuery, Integer nAssemblyId, int nQueryChunkSize) {
+	    Document projectionAndSortDoc = AbstractVariantData.projectionAndSortDoc(nAssemblyId == null ? "" : (nAssemblyId + "."));
+		return varColl.find(varQuery).projection(projectionAndSortDoc).sort(projectionAndSortDoc).noCursorTimeout(true).collation(collationObj).batchSize(nQueryChunkSize).iterator();
 	}
 
 	public static ZipOutputStream createArchiveOutputStream(OutputStream outputStream, Map<String, InputStream> readyToExportFiles) throws IOException {

@@ -57,27 +57,30 @@ public class AbstractGenotypeImport {
 	protected static final int nMaxChunkSize = 10000;
 
 	private boolean m_fAllowDbDropIfNoGenotypingData = true;
+    public boolean m_fCloseContextAfterImport = false;
+    public boolean m_fAllowNewAssembly = true;
 
 	/** String representing nucleotides considered as valid */
 	protected static HashSet<String> validNucleotides = new HashSet<>(Arrays.asList(new String[] {"a", "A", "t", "T", "g", "G", "c", "C"}));
 	
 	protected static HashMap<String /*module*/, String /*project*/> currentlyImportedProjects = new HashMap<>();
 	
-	public static ArrayList<String> getIdentificationStrings(String sType, String sSeq, Long nStartPos, Collection<String> idAndSynonyms) throws Exception
-	{
-		ArrayList<String> result = new ArrayList<String>();
-		
-		if (idAndSynonyms != null)
-			result.addAll(idAndSynonyms.stream().map(s -> s.toUpperCase()).collect(Collectors.toList()));
+    public static ArrayList<String> getIdentificationStrings(String sType, String sSeq, Long nStartPos, Collection<String> idAndSynonyms) throws Exception
+    {
+        ArrayList<String> result = new ArrayList<String>();
+        
+        if (idAndSynonyms != null)
+            for (String name : idAndSynonyms)
+                result.add(name.toUpperCase());
 
-		if (sSeq != null && nStartPos != null)
-			result.add(sType + "¤" + sSeq + "¤" + nStartPos);
+        if (sSeq != null && nStartPos != null)
+            result.add(sType + "¤" + sSeq + "¤" + nStartPos);
 
-		if (result.size() == 0)
-			throw new Exception("Not enough info provided to build identification strings");
-		
-		return result;
-	}
+//      if (result.size() == 0)
+//          throw new Exception("Not enough info provided to build identification strings");
+        
+        return result;
+    }
 	
 	public static String getCurrentlyImportedProjectForModule(String sModule)
 	{
@@ -108,7 +111,7 @@ public class AbstractGenotypeImport {
 //					for (Object syn : (BasicDBList) synonymsByType.get(synonymType))
 //						idAndSynonyms.add((String) syn.toString());
 //
-//				for (String variantDescForPos : getIdentificationStrings((String) vd.get(VariantData.FIELDNAME_TYPE), !fGotChrPos ? null : (String) Helper.readPossiblyNestedField(vd, VariantData.FIELDNAME_REFERENCE_POSITION + "." + ReferencePosition.FIELDNAME_SEQUENCE), !fGotChrPos ? null : (long) Helper.readPossiblyNestedField(vd, VariantData.FIELDNAME_REFERENCE_POSITION + "." + ReferencePosition.FIELDNAME_START_SITE), idAndSynonyms))
+//				for (String variantDescForPos : getIdentificationStrings((String) vd.get(VariantData.FIELDNAME_TYPE), !fGotChrPos ? null : (String) Helper.readPossiblyNestedField(vd, VariantData.FIELDNAME_REFERENCE_POSITION + "." + assemblyPrefix + ReferencePosition.FIELDNAME_SEQUENCE), !fGotChrPos ? null : (long) Helper.readPossiblyNestedField(vd, VariantData.FIELDNAME_REFERENCE_POSITION + "." + assemblyPrefix + ReferencePosition.FIELDNAME_START_SITE), idAndSynonyms))
 //				{
 //					BasicDBObject synonymMapping = new BasicDBObject("_id", variantDescForPos);
 //					synonymMapping.put("id", vd.get("_id"));
@@ -133,42 +136,41 @@ public class AbstractGenotypeImport {
 //        }
 //	}
 	
-	protected static HashMap<String, String> buildSynonymToIdMapForExistingVariants(MongoTemplate mongoTemplate, boolean fIncludeRandomObjectIDs) throws Exception
-	{
+    protected static HashMap<String, String> buildSynonymToIdMapForExistingVariants(MongoTemplate mongoTemplate, boolean fIncludeRandomObjectIDs, int assemblyId) throws Exception
+    {
         HashMap<String, String> existingVariantIDs = new HashMap<>();
-		long variantCount = Helper.estimDocCount(mongoTemplate,VariantData.class);
+        long variantCount = Helper.estimDocCount(mongoTemplate,VariantData.class);
         if (variantCount > 0)
-        {	// there are already variants in the database: build a list of all existing variants, finding them by ID is by far most efficient
+        {   // there are already variants in the database: build a list of all existing variants, finding them by ID is by far most efficient
             long beforeReadingAllVariants = System.currentTimeMillis();
             Query query = new Query();
             query.fields().include("_id").include(VariantData.FIELDNAME_REFERENCE_POSITION).include(VariantData.FIELDNAME_TYPE).include(VariantData.FIELDNAME_SYNONYMS);
             MongoCursor<Document> variantIterator = mongoTemplate.getCollection(mongoTemplate.getCollectionName(VariantData.class)).find(query.getQueryObject()).projection(query.getFieldsObject()).iterator();
-			while (variantIterator.hasNext())
-			{
-				Document vd = variantIterator.next();
-				String variantIdAsString = vd.get("_id").toString();
-				boolean fGotChrPos = vd.get(VariantData.FIELDNAME_REFERENCE_POSITION) != null;
-				ArrayList<String> idAndSynonyms = new ArrayList<>();
-				if (fIncludeRandomObjectIDs || !MgdbDao.idLooksGenerated(variantIdAsString))	// most of the time we avoid taking into account randomly generated IDs
-					idAndSynonyms.add(variantIdAsString);
-				Document synonymsByType = (Document) vd.get(VariantData.FIELDNAME_SYNONYMS);
-				if (synonymsByType != null)
-					for (String synonymType : synonymsByType.keySet())
-						for (Object syn : (List) synonymsByType.get(synonymType))
-							idAndSynonyms.add((String) syn.toString());
+            while (variantIterator.hasNext())
+            {
+                Document vd = variantIterator.next();
+                String variantIdAsString = vd.get("_id").toString();
+//              boolean fGotChrPos = ((Document) vd.get(VariantData.FIELDNAME_REFERENCE_POSITION)).get("" + assemblyId) != null;
+                ArrayList<String> idAndSynonyms = new ArrayList<>();
+                if (fIncludeRandomObjectIDs || !MgdbDao.idLooksGenerated(variantIdAsString))    // most of the time we avoid taking into account randomly generated IDs
+                    idAndSynonyms.add(variantIdAsString);
+                Document synonymsByType = (Document) vd.get(VariantData.FIELDNAME_SYNONYMS);
+                if (synonymsByType != null)
+                    for (String synonymType : synonymsByType.keySet())
+                        for (Object syn : (List) synonymsByType.get(synonymType))
+                            idAndSynonyms.add((String) syn.toString());
 
-				for (String variantDescForPos : getIdentificationStrings((String) vd.get(VariantData.FIELDNAME_TYPE), !fGotChrPos ? null : (String) Helper.readPossiblyNestedField(vd, VariantData.FIELDNAME_REFERENCE_POSITION + "." + ReferencePosition.FIELDNAME_SEQUENCE, ";"), !fGotChrPos ? null : (long) Helper.readPossiblyNestedField(vd, VariantData.FIELDNAME_REFERENCE_POSITION + "." + ReferencePosition.FIELDNAME_START_SITE, ";"), idAndSynonyms))
-				{
-					if (existingVariantIDs.containsKey(variantDescForPos) && !variantIdAsString.startsWith("*"))
-			        	throw new Exception("This database seems to contain duplicate variants (check " + variantDescForPos.replaceAll("¤", ":") + "). Importing additional data will not be supported until this problem is fixed.");
+                for (String variantDescForPos : getIdentificationStrings((String) vd.get(VariantData.FIELDNAME_TYPE), /*!fGotChrPos ? null : */(String) Helper.readPossiblyNestedField(vd, VariantData.FIELDNAME_REFERENCE_POSITION + "." + assemblyId + "." + ReferencePosition.FIELDNAME_SEQUENCE, ";", null), /*!fGotChrPos ? null :*/ (Long) Helper.readPossiblyNestedField(vd, VariantData.FIELDNAME_REFERENCE_POSITION + "." + assemblyId + "." + ReferencePosition.FIELDNAME_START_SITE, ";", null), idAndSynonyms)) {
+                    if (existingVariantIDs.containsKey(variantDescForPos) && !variantIdAsString.startsWith("*"))
+                        throw new Exception("This database seems to contain duplicate variants (check " + variantDescForPos.replaceAll("¤", ":") + "). Importing additional data will not be supported until this problem is fixed.");
 
-					existingVariantIDs.put(variantDescForPos, vd.get("_id").toString());
-				}
-			}
+                    existingVariantIDs.put(variantDescForPos, vd.get("_id").toString());
+                }
+            }
             LOG.info(Helper.estimDocCount(mongoTemplate,VariantData.class) + " VariantData record IDs were scanned in " + (System.currentTimeMillis() - beforeReadingAllVariants) / 1000 + "s");
         }
         return existingVariantIDs;
-	}
+    }
 	
 	static public boolean doesDatabaseSupportImportingUnknownVariants(String sModule)
 	{

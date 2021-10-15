@@ -39,6 +39,7 @@ import java.util.TreeMap;
 import java.util.TreeSet;
 import java.util.stream.Collectors;
 
+import org.bson.Document;
 import org.bson.codecs.pojo.annotations.BsonProperty;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.mapping.Field;
@@ -124,10 +125,10 @@ abstract public class AbstractVariantData
 	@Field(FIELDNAME_TYPE)
 	private String type;
 
-	/** The reference position. */
-	@BsonProperty(FIELDNAME_REFERENCE_POSITION)
-	@Field(FIELDNAME_REFERENCE_POSITION)
-	ReferencePosition referencePosition = null;
+	/** The reference positions. */
+    @BsonProperty(FIELDNAME_REFERENCE_POSITION)
+    @Field(FIELDNAME_REFERENCE_POSITION)
+    protected Map<Integer, ReferencePosition> referencePositions = new HashMap<>();
 	
 	/** The synonyms. */
 	@BsonProperty(FIELDNAME_SYNONYMS)
@@ -150,7 +151,15 @@ abstract public class AbstractVariantData
 	private HashMap<String, Object> additionalInfo = null;
 
 	static private HashSet<String> specificallyTreatedAdditionalInfoFields = new HashSet<String> () {{ add(FIELD_SOURCE); add(FIELD_FULLYDECODED); add(FIELD_FILTERS); add(FIELD_PHREDSCALEDQUAL); }};
-	  
+
+    public static Document projectionAndSortDoc(String assemblyPrefix) {
+        return new Document(AbstractVariantData.FIELDNAME_REFERENCE_POSITION + "." + assemblyPrefix + ReferencePosition.FIELDNAME_SEQUENCE, 1).append(AbstractVariantData.FIELDNAME_REFERENCE_POSITION + "." + assemblyPrefix + ReferencePosition.FIELDNAME_START_SITE, 1);   
+    }
+
+//    public static Document sortDoc(String assemblyPrefix) {
+//        return new Document(AbstractVariantData.FIELDNAME_REFERENCE_POSITION + "." + assemblyPrefix + ReferencePosition.FIELDNAME_SEQUENCE, 1).append(AbstractVariantData.FIELDNAME_REFERENCE_POSITION + "." + assemblyPrefix + ReferencePosition.FIELDNAME_START_SITE, 1);
+//    }
+
 	/**
 	 * Fixes AD array in the case where provided alleles are different from the order in which we have them in the DB
 	 * @param importedAD
@@ -359,7 +368,9 @@ abstract public class AbstractVariantData
 	 * @return the synonyms
 	 */
 	public TreeMap<String, TreeSet<String>> getSynonyms() {
-		return synonyms;
+        if (synonyms == null)
+            synonyms = new TreeMap<>();
+        return synonyms;
 	}
 
 	/**
@@ -409,23 +420,41 @@ abstract public class AbstractVariantData
 		this.type = type.intern();
 	}
 
-	/**
-	 * Gets the reference position.
-	 *
-	 * @return the reference position
-	 */
-	public ReferencePosition getReferencePosition() {
-		return referencePosition;
-	}
+    /**
+     * Gets the reference positions by assembly ID.
+     *
+     * @return the reference positions
+     */
+    public Map<Integer, ReferencePosition> getReferencePositions() {
+        return referencePositions;
+    }
+    
+    /**
+     * Gets the reference position for a given assembly ID.
+     *
+     * @return the reference position
+     */
+    public ReferencePosition getReferencePosition(int nAssemblyId) {
+        return referencePositions.get(nAssemblyId);
+    }
 
-	/**
-	 * Sets the reference position.
-	 *
-	 * @param referencePosition the new reference position
-	 */
-	public void setReferencePosition(ReferencePosition referencePosition) {
-		this.referencePosition = referencePosition;
-	}
+    /**
+     * Sets the reference positions.
+     *
+     * @param referencePositions the new reference position
+     */
+    public void setReferencePositions(Map<Integer, ReferencePosition> referencePositions) {
+        this.referencePositions = referencePositions;
+    }    
+
+    /**
+     * Sets the reference position for a given assembly ID.
+     *
+     * @param referencePosition the new reference position
+     */
+    public void setReferencePosition(int nAssemblyId, ReferencePosition referencePosition) {
+        referencePositions.put(nAssemblyId, referencePosition);
+    }
 	
 	/**
 	 * Gets the known allele list.
@@ -577,6 +606,7 @@ abstract public class AbstractVariantData
 	 *
 	 * @param MongoTemplate the mongoTemplate
 	 * @param runs the runs
+     * @param nAssemblyId ID of the assembly to work with
 	 * @param exportVariantIDs the export variant ids
 	 * @param samplesToExport overall list of samples involved in the export
 	 * @param individualPositions map providing the index at which each individual must appear in the export file
@@ -590,7 +620,7 @@ abstract public class AbstractVariantData
 	 * @return the variant context
 	 * @throws Exception the exception
 	 */
-	public VariantContext toVariantContext(MongoTemplate mongoTemplate, Collection<VariantRunData> runs, boolean exportVariantIDs, List<GenotypingSample> samplesToExport, Map<String, Integer> individualPositions, Collection<String> individuals1, Collection<String> individuals2, HashMap<Integer, Object> previousPhasingIds, HashMap<String, Float> annotationFieldThresholds1, HashMap<String, Float> annotationFieldThresholds2, FileWriter warningFileWriter, Comparable synonym) throws Exception
+	public VariantContext toVariantContext(MongoTemplate mongoTemplate, Collection<VariantRunData> runs, Integer nAssemblyId, boolean exportVariantIDs, List<GenotypingSample> samplesToExport, Map<String, Integer> individualPositions, Collection<String> individuals1, Collection<String> individuals2, HashMap<Integer, Object> previousPhasingIds, HashMap<String, Float> annotationFieldThresholds1, HashMap<String, Float> annotationFieldThresholds2, FileWriter warningFileWriter, Comparable synonym) throws Exception
 	{
 		ArrayList<Genotype> genotypes = new ArrayList<Genotype>();
 		String sRefAllele = knownAlleleList.isEmpty() ? null : knownAlleleList.get(0);
@@ -744,6 +774,7 @@ abstract public class AbstractVariantData
 		VariantRunData run = runsWhereDataWasFound.size() == 1 ? runsWhereDataWasFound.iterator().next() : null;	// if there is not exactly one run involved then we do not export meta-data
 		String source = run == null ? null : (String) run.getAdditionalInfo().get(FIELD_SOURCE);
 
+		ReferencePosition referencePosition = referencePositions.get(nAssemblyId);
 		Long start = referencePosition == null ? null : referencePosition.getStartSite();
 		Long stop = null;
 		if (referencePosition != null) {

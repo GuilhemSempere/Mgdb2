@@ -48,26 +48,27 @@ public abstract class AbstractMarkerOrientedExportHandler implements IExportHand
 	/** The marker oriented export handlers. */
 	static private TreeMap<String, AbstractMarkerOrientedExportHandler> markerOrientedExportHandlers = null;
 
-	/**
-	 * Export data.
-	 *
-	 * @param outputStream the output stream
-	 * @param sModule the module
-	 * @param individuals1 the individuals in group 1
-	 * @param individuals2 the individuals in group 2
-	 * @param progress the progress
-	 * @param tmpVarCollName the variant collection name (null if not temporary)
-	 * @param varQuery query to apply on varColl
-	 * @param markerCount number of variants to export
-	 * @param markerSynonyms the marker synonyms
-	 * @param annotationFieldThresholds the annotation field thresholds for group 1
-	 * @param annotationFieldThresholds2 the annotation field thresholds for group 2
-	 * @param samplesToExport the samples to export genotyping data for
-	 * @param individualMetadataFieldsToExport metadata fields to export for individuals
-	 * @param readyToExportFiles files to export along with the genotyping data
-	 * @throws Exception the exception
-	 */
-	abstract public void exportData(OutputStream outputStream, String sModule, Collection<String> individuals1, Collection<String> individuals2, ProgressIndicator progress, String tmpVarCollName, Document varQuery, long markerCount, Map<String, String> markerSynonyms, HashMap<String, Float> annotationFieldThresholds, HashMap<String, Float> annotationFieldThresholds2, List<GenotypingSample> samplesToExport, Collection<String> individualMetadataFieldsToExport, Map<String, InputStream> readyToExportFiles) throws Exception;
+    /**
+     * Export data.
+     *
+     * @param outputStream the output stream
+     * @param sModule the module
+     * @param nAssemblyId ID of the assembly to work with
+     * @param individuals1 the individuals in group 1
+     * @param individuals2 the individuals in group 2
+     * @param progress the progress
+     * @param tmpVarCollName the variant collection name (null if not temporary)
+     * @param varQuery query to apply on varColl
+     * @param markerCount number of variants to export
+     * @param markerSynonyms the marker synonyms
+     * @param annotationFieldThresholds the annotation field thresholds for group 1
+     * @param annotationFieldThresholds2 the annotation field thresholds for group 2
+     * @param samplesToExport the samples to export genotyping data for
+     * @param individualMetadataFieldsToExport metadata fields to export for individuals
+     * @param readyToExportFiles files to export along with the genotyping data
+     * @throws Exception the exception
+     */
+    abstract public void exportData(OutputStream outputStream, String sModule, Integer nAssemblyId, Collection<String> individuals1, Collection<String> individuals2, ProgressIndicator progress, String tmpVarCollName, Document varQuery, long markerCount, Map<String, String> markerSynonyms, HashMap<String, Float> annotationFieldThresholds, HashMap<String, Float> annotationFieldThresholds2, List<GenotypingSample> samplesToExport, Collection<String> individualMetadataFieldsToExport, Map<String, InputStream> readyToExportFiles) throws Exception;
 
 //	/**
 //	 * Gets the individuals from samples.
@@ -162,4 +163,5 @@ public abstract class AbstractMarkerOrientedExportHandler implements IExportHand
 	public String getExportContentType() {
 		return "application/zip";
 	}
+
 }

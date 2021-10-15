@@ -70,6 +70,7 @@ public abstract class AbstractIndividualOrientedExportHandler implements IExport
 	 *
 	 * @param outputStream the output stream
 	 * @param sModule the module
+     * @param nAssemblyId ID of the assembly to work with
 	 * @param individualExportFiles the individual export files
 	 * @param fDeleteSampleExportFilesOnExit whether or not to delete sample export files on exit
 	 * @param progress the progress
@@ -81,7 +82,7 @@ public abstract class AbstractIndividualOrientedExportHandler implements IExport
 	 * @param readyToExportFiles the ready to export files
 	 * @throws Exception the exception
 	 */
-	abstract public void exportData(OutputStream outputStream, String sModule, File[] individualExportFiles, boolean fDeleteSampleExportFilesOnExit, ProgressIndicator progress, String tmpVarCollName, Document varQuery, long markerCount, Map<String, String> markerSynonyms, Collection<String> individualMetadataFieldsToExport, Map<String, InputStream> readyToExportFiles) throws Exception;
+	abstract public void exportData(OutputStream outputStream, String sModule, Integer nAssemblyId, File[] individualExportFiles, boolean fDeleteSampleExportFilesOnExit, ProgressIndicator progress, String tmpVarCollName, Document varQuery, long markerCount, Map<String, String> markerSynonyms, Collection<String> individualMetadataFieldsToExport, Map<String, InputStream> readyToExportFiles) throws Exception;
 
 	/**
 	 * Creates the export files.
@@ -200,7 +201,7 @@ public abstract class AbstractIndividualOrientedExportHandler implements IExport
 			}
 		};
 		
-		ExportManager exportManager = new ExportManager(mongoTemplate, collWithPojoCodec, VariantRunData.class, varQuery, samplesToExport, true, nQueryChunkSize, writingThread, markerCount, null, progress);
+		ExportManager exportManager = new ExportManager(mongoTemplate, nAssemblyId, collWithPojoCodec, VariantRunData.class, varQuery, samplesToExport, true, nQueryChunkSize, writingThread, markerCount, null, progress);
 		exportManager.readAndWrite();
 		
 	 	if (!progress.isAborted())

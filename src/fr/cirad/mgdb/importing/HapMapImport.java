@@ -25,6 +25,7 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 
+import org.apache.commons.lang.StringUtils;
 import org.apache.log4j.Logger;
 import org.broadinstitute.gatk.utils.codecs.hapmap.RawHapMapCodec;
 import org.broadinstitute.gatk.utils.codecs.hapmap.RawHapMapFeature;
@@ -36,7 +37,7 @@ import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
 
 import fr.cirad.mgdb.importing.base.AbstractGenotypeImport;
-import fr.cirad.mgdb.model.mongo.maintypes.AutoIncrementCounter;
+import fr.cirad.mgdb.model.mongo.maintypes.Assembly;
 import fr.cirad.mgdb.model.mongo.maintypes.GenotypingProject;
 import fr.cirad.mgdb.model.mongo.maintypes.GenotypingSample;
 import fr.cirad.mgdb.model.mongo.maintypes.Individual;
@@ -46,6 +47,7 @@ import fr.cirad.mgdb.model.mongo.subtypes.ReferencePosition;
 import fr.cirad.mgdb.model.mongo.subtypes.SampleGenotype;
 import fr.cirad.mgdb.model.mongodao.MgdbDao;
 import fr.cirad.tools.ProgressIndicator;
+import fr.cirad.tools.mongo.AutoIncrementCounter;
 import fr.cirad.tools.mongo.MongoTemplateManager;
 import htsjdk.tribble.AbstractFeatureReader;
 import htsjdk.tribble.FeatureReader;
@@ -58,8 +60,6 @@ public class HapMapImport extends AbstractGenotypeImport {
 
 	/** The Constant LOG. */
 	private static final Logger LOG = Logger.getLogger(VariantData.class);
-	
-    public boolean m_fCloseContextOpenAfterImport = false;
 
 	/** The m_process id. */
 	private String m_processID;
@@ -99,62 +99,80 @@ public class HapMapImport extends AbstractGenotypeImport {
 		m_processID = processID;
 	}
 	
-	/**
-     * Instantiates a new vcf import.
+    /**
+     * Instantiates a new hapmap import.
      */
-    public HapMapImport(boolean fCloseContextOpenAfterImport) {
+    public HapMapImport(boolean fCloseContextAfterImport) {
         this();
-    	m_fCloseContextOpenAfterImport = fCloseContextOpenAfterImport;
+        m_fCloseContextAfterImport = fCloseContextAfterImport;
+    }
+    
+    /**
+     * Instantiates a new hapmap import.
+     */
+    public HapMapImport(boolean fCloseContextAfterImport, boolean fAllowNewAssembly) {
+        this();
+        m_fCloseContextAfterImport = fCloseContextAfterImport;
+        m_fAllowNewAssembly = fAllowNewAssembly;
     }
 
     /**
-     * Instantiates a new vcf import.
+     * Instantiates a new hapmap import.
      */
-    public HapMapImport(String processID, boolean fCloseContextOpenAfterImport) {
+    public HapMapImport(String processID, boolean fCloseContextAfterImport) {
         this(processID);
-    	m_fCloseContextOpenAfterImport = fCloseContextOpenAfterImport;
+        m_fCloseContextAfterImport = fCloseContextAfterImport;
+    }
+    
+    /**
+     * Instantiates a new hapmap import.
+     */
+    public HapMapImport(String processID, boolean fCloseContextAfterImport, boolean fAllowNewAssembly) {
+        this(processID);
+        m_fCloseContextAfterImport = fCloseContextAfterImport;
+        m_fAllowNewAssembly = fAllowNewAssembly;
     }
 
+    /**
+     * The main method.
+     *
+     * @param args the arguments
+     * @throws Exception the exception
+     */
+    public static void main(String[] args) throws Exception {
+        if (args.length < 6)
+            throw new Exception("You must pass 6 parameters as arguments: DATASOURCE name, PROJECT name, RUN name, TECHNOLOGY string, HapMap file, and assembly name! An optional 7th parameter supports values '1' (empty project data before importing) and '2' (empty all variant data before importing, including marker list).");
 
-	/**
-	 * The main method.
-	 *
-	 * @param args the arguments
-	 * @throws Exception the exception
-	 */
-	public static void main(String[] args) throws Exception {
-		if (args.length < 5)
-			throw new Exception("You must pass 5 parameters as arguments: DATASOURCE name, PROJECT name, RUN name, TECHNOLOGY string, and HapMap file! An optional 6th parameter supports values '1' (empty project data before importing) and '2' (empty all variant data before importing, including marker list).");
+        File mainFile = new File(args[4]);
+        if (!mainFile.exists() || mainFile.length() == 0)
+            throw new Exception("File " + args[4] + " is missing or empty!");
 
-		File mainFile = new File(args[4]);
-		if (!mainFile.exists() || mainFile.length() == 0)
-			throw new Exception("File " + args[4] + " is missing or empty!");
+        int mode = 0;
+        try
+        {
+            mode = Integer.parseInt(args[5]);
+        }
+        catch (Exception e)
+        {
+            LOG.warn("Unable to parse input mode. Using default (0): overwrite run if exists.");
+        }
+        new HapMapImport().importToMongo(args[0], args[1], args[2], args[3], new File(args[4]).toURI().toURL(), args[5], mode);
+    }
 
-		int mode = 0;
-		try
-		{
-			mode = Integer.parseInt(args[5]);
-		}
-		catch (Exception e)
-		{
-			LOG.warn("Unable to parse input mode. Using default (0): overwrite run if exists.");
-		}
-		new HapMapImport().importToMongo(args[0], args[1], args[2], args[3], new File(args[4]).toURI().toURL(), mode);
-	}
-
-	/**
-	 * Import to mongo.
-	 *
-	 * @param sModule the module
-	 * @param sProject the project
-	 * @param sRun the run
-	 * @param sTechnology the technology
-	 * @param mainFileUrl the main file URL
-	 * @param importMode the import mode
-	 * @return a project ID if it was created by this method, otherwise null
-	 * @throws Exception the exception
-	 */
-	public Integer importToMongo(String sModule, String sProject, String sRun, String sTechnology, URL mainFileUrl, int importMode) throws Exception
+    /**
+     * Import to mongo.
+     *
+     * @param sModule the module
+     * @param sProject the project
+     * @param sRun the run
+     * @param sTechnology the technology
+     * @param mainFileUrl the main file URL
+     * @param assemblyName the assembly name
+     * @param importMode the import mode
+     * @return a project ID if it was created by this method, otherwise null
+     * @throws Exception the exception
+     */
+    public Integer importToMongo(String sModule, String sProject, String sRun, String sTechnology, URL mainFileUrl, String assemblyName, int importMode) throws Exception
 	{
 		long before = System.currentTimeMillis();
         ProgressIndicator progress = ProgressIndicator.get(m_processID) != null ? ProgressIndicator.get(m_processID) : new ProgressIndicator(m_processID, new String[]{"Initializing import"});	// better to add it straight-away so the JSP doesn't get null in return when it checks for it (otherwise it will assume the process has ended)
@@ -204,7 +222,21 @@ public class HapMapImport extends AbstractGenotypeImport {
 			}
 			project.setPloidyLevel(2);
 
-			HashMap<String, String> existingVariantIDs = buildSynonymToIdMapForExistingVariants(mongoTemplate, false);		
+            HashMap<String, String> existingVariantIDs;
+            Assembly assembly = mongoTemplate.findOne(new Query(Criteria.where(Assembly.FIELDNAME_NAME).is(assemblyName)), Assembly.class);
+            if (assembly == null) {
+                if ("".equals(assemblyName) || m_fAllowNewAssembly) {
+                    assembly = new Assembly("".equals(assemblyName) ? 0 : AutoIncrementCounter.getNextSequence(mongoTemplate, MongoTemplateManager.getMongoCollectionName(Assembly.class)));
+                    assembly.setName(assemblyName);
+                    mongoTemplate.save(assembly);
+                    existingVariantIDs = new HashMap<>();
+                }
+                else
+                    throw new Exception("Assembly \"" + assemblyName + "\" not found in database. Supported assemblies are " + StringUtils.join(mongoTemplate.findDistinct(Assembly.FIELDNAME_NAME, Assembly.class, String.class), ", "));
+            }
+            else
+                existingVariantIDs = buildSynonymToIdMapForExistingVariants(mongoTemplate, false, assembly.getId());
+
 			if (!project.getVariantTypes().contains(Type.SNP.toString()))
 				project.getVariantTypes().add(Type.SNP.toString());
 
@@ -242,15 +274,15 @@ public class HapMapImport extends AbstractGenotypeImport {
 					if (variant == null)
 						variant = new VariantData(hmFeature.getName() != null && hmFeature.getName().length() > 0 ? ((ObjectId.isValid(hmFeature.getName()) ? "_" : "") + hmFeature.getName()) : (generatedIdBaseString + String.format(String.format("%09x", count))));
 
-					VariantRunData runToSave = addHapMapDataToVariant(mongoTemplate, variant, hmFeature, project, sRun, previouslyCreatedSamples);
+					VariantRunData runToSave = addHapMapDataToVariant(mongoTemplate, variant, assembly.getId(), hmFeature, project, sRun, previouslyCreatedSamples);
 
-					if (!project.getSequences().contains(hmFeature.getChr()))
-						project.getSequences().add(hmFeature.getChr());
+                    if (!project.getSequences(assembly.getId()).contains(hmFeature.getChr()))
+                        project.getSequences(assembly.getId()).add(hmFeature.getChr());
 
 					int alleleCount = hmFeature.getAlleles().length;
 					project.getAlleleCounts().add(variant.getKnownAlleleList().size());	// it's a TreeSet so it will only be added if it's not already present
 					if (alleleCount > 2)
-						LOG.warn("Variant " + variant.getId() + " (" + variant.getReferencePosition().getSequence() + ":" + variant.getReferencePosition().getStartSite() + ") has more than 2 alleles!");
+					    LOG.warn("Variant " + variant.getId() + " (" + variant.getReferencePosition(assembly.getId()).getSequence() + ":" + variant.getReferencePosition(assembly.getId()).getStartSite() + ") has more than 2 alleles!");
 					
 					if (variant.getKnownAlleleList().size() > 0)
 					{	// we only import data related to a variant if we know its alleles
@@ -299,7 +331,7 @@ public class HapMapImport extends AbstractGenotypeImport {
 		}
 		finally
 		{
-			if (m_fCloseContextOpenAfterImport && ctx != null)
+			if (m_fCloseContextAfterImport && ctx != null)
 				ctx.close();
 
 			reader.close();
@@ -311,6 +343,7 @@ public class HapMapImport extends AbstractGenotypeImport {
 	 *
 	 * @param mongoTemplate the mongo template
 	 * @param variantToFeed the variant to feed
+     * @param nAssemblyId the assembly id
 	 * @param hmFeature the hm feature
 	 * @param project the project
 	 * @param runName the run name
@@ -318,7 +351,7 @@ public class HapMapImport extends AbstractGenotypeImport {
 	 * @return the variant run data
 	 * @throws Exception the exception
 	 */
-	static private VariantRunData addHapMapDataToVariant(MongoTemplate mongoTemplate, VariantData variantToFeed, RawHapMapFeature hmFeature, GenotypingProject project, String runName, Map<String /*individual*/, GenotypingSample> usedSamples) throws Exception
+	static private VariantRunData addHapMapDataToVariant(MongoTemplate mongoTemplate, VariantData variantToFeed, Integer nAssemblyId, RawHapMapFeature hmFeature, GenotypingProject project, String runName, Map<String /*individual*/, GenotypingSample> usedSamples) throws Exception
 	{
 		// mandatory fields
 		if (variantToFeed.getType() == null)
@@ -326,8 +359,8 @@ public class HapMapImport extends AbstractGenotypeImport {
 		else if (!variantToFeed.getType().equals(Type.SNP.toString()))
 			throw new Exception("Variant type mismatch between existing data and data to import: " + variantToFeed.getId());
 
-		if (variantToFeed.getReferencePosition() == null)	// otherwise we leave it as it is (had some trouble with overridden end-sites)
-			variantToFeed.setReferencePosition(new ReferencePosition(hmFeature.getChr(), hmFeature.getStart(), (long) hmFeature.getEnd()));
+        if (variantToFeed.getReferencePosition(nAssemblyId) == null)    // otherwise we leave it as it is (had some trouble with overridden end-sites)
+            variantToFeed.setReferencePosition(nAssemblyId, new ReferencePosition(hmFeature.getChr(), hmFeature.getStart(), (long) hmFeature.getEnd()));
 		
 		// take into account ref and alt alleles (if it's not too late)
 		if (variantToFeed.getKnownAlleleList().size() == 0)
@@ -401,7 +434,7 @@ public class HapMapImport extends AbstractGenotypeImport {
 		}
 		
         vrd.setKnownAlleleList(variantToFeed.getKnownAlleleList());
-        vrd.setReferencePosition(variantToFeed.getReferencePosition());
+        vrd.setReferencePositions(variantToFeed.getReferencePositions());
         vrd.setType(variantToFeed.getType());
         vrd.setSynonyms(variantToFeed.getSynonyms());
 		return vrd;

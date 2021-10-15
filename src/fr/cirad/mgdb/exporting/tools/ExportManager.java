@@ -64,28 +64,33 @@ import fr.cirad.tools.mongo.MongoTemplateManager;
  */
 public class ExportManager
 {
-	
 	/** The Constant LOG. */
 	static final Logger LOG = Logger.getLogger(ExportManager.class);
 	
 	static public final AlphaNumericComparator<String> alphaNumericStringComparator = new AlphaNumericComparator<String>();
 	
-	static public final Comparator<VariantRunData> vrdComparator = new Comparator<VariantRunData>() {
+	static public final class VariantRunDataComparator implements Comparator<VariantRunData> {
+	    private int nAssemblyId;
+	    
+	    public VariantRunDataComparator(int nAssemblyId) {
+	        this.nAssemblyId = nAssemblyId;
+	    }
+	    
 		@Override
 		public int compare(VariantRunData vrd1, VariantRunData vrd2) {
-			if (vrd1.getReferencePosition() == null) {
-				if (vrd2.getReferencePosition() == null)
-					return vrd1.getId().getVariantId().compareTo(vrd2.getId().getVariantId()); 	// none is positioned
+			if (vrd1.getReferencePosition(nAssemblyId) == null) {
+				if (vrd2.getReferencePosition(nAssemblyId) == null)
+					return vrd1.getVariantId().compareTo(vrd2.getVariantId()); 	// none is positioned
 				return -1;	// only vrd2 is positioned
 			}
-			if (vrd2.getReferencePosition() == null)
+			if (vrd2.getReferencePosition(nAssemblyId) == null)
 				return 1;	// only vrd1 is positioned
 			
 			// both are positioned
-			int chrComparison = alphaNumericStringComparator.compare(vrd1.getReferencePosition().getSequence(), vrd2.getReferencePosition().getSequence());
-			return chrComparison != 0 ? chrComparison : (int) (vrd1.getReferencePosition().getStartSite() - vrd2.getReferencePosition().getStartSite());
+			int chrComparison = alphaNumericStringComparator.compare(vrd1.getReferencePosition(nAssemblyId).getSequence(), vrd2.getReferencePosition(nAssemblyId).getSequence());
+			return chrComparison != 0 ? chrComparison : (int) (vrd1.getReferencePosition(nAssemblyId).getStartSite() - vrd2.getReferencePosition(nAssemblyId).getStartSite());
 		}
-	};
+	}
 	
 	@SuppressWarnings("rawtypes")
 	private MongoCursor markerCursor;
@@ -109,14 +114,17 @@ public class ExportManager
 	private Collection<Integer> sampleIDsToExport;
 	
 	private ArrayList<Document> projectFilterList = new ArrayList<>();
+	
+	private int nAssemblyId;
 
 	public static final CodecRegistry pojoCodecRegistry = CodecRegistries.fromRegistries(MongoClientSettings.getDefaultCodecRegistry(), CodecRegistries.fromProviders(PojoCodecProvider.builder().register(new IntKeyMapPropertyCodecProvider()).automatic(true).build()));
 	
-	public ExportManager(MongoTemplate mongoTemplate, MongoCollection<Document> varColl, Class resultType, Document varQuery, Collection<GenotypingSample> samplesToExport, boolean fIncludeMetadata, int nQueryChunkSize, AbstractExportWritingThread writingThread, Long markerCount, FileWriter warningFileWriter, ProgressIndicator progress) {
+	public ExportManager(MongoTemplate mongoTemplate, int nAssemblyId, MongoCollection<Document> varColl, Class resultType, Document varQuery, Collection<GenotypingSample> samplesToExport, boolean fIncludeMetadata, int nQueryChunkSize, AbstractExportWritingThread writingThread, Long markerCount, FileWriter warningFileWriter, ProgressIndicator progress) {
 		this.progress = progress;
 		this.nQueryChunkSize = nQueryChunkSize;
 		this.warningFileWriter = warningFileWriter;
 		this.mongoTemplate = mongoTemplate;
+		this.nAssemblyId = nAssemblyId;
 		this.writingThread = writingThread;
 		this.markerCount = markerCount;
 
@@ -185,25 +193,28 @@ public class ExportManager
 
     public void readAndWrite() throws IOException, InterruptedException, ExecutionException {		
 		if (fWorkingOnTempColl)
-			exportFromTempColl();
+			exportFromTempColl(nAssemblyId);
 		else
-			exportDirectlyFromRuns();
+			exportDirectlyFromRuns(nAssemblyId);
     }
     
     /**
      * Exports by $match-ing successive chunks of variant IDs in VariantRunData. Would have thought using $lookup with a single cursor would be faster, but it's much slower
      * 
+     * @param nAssemblyId the assembly id
      * @throws IOException
      * @throws InterruptedException
      * @throws ExecutionException
      */
-	private void exportFromTempColl() throws IOException, InterruptedException, ExecutionException {
+	private void exportFromTempColl(int nAssemblyId) throws IOException, InterruptedException, ExecutionException {
 		CompletableFuture<Void> future = null;
 		List<List<VariantRunData>> tempMarkerRunsToWrite = new ArrayList<>(nQueryChunkSize);
 		List<VariantRunData> currentMarkerRuns = new ArrayList<>();
 		List<String> currentMarkerIDs = new ArrayList<>();
 		String varId = null, previousVarId = null;
 		int nWrittenmarkerCount = 0;
+		
+		VariantRunDataComparator vrdComparator = new VariantRunDataComparator(nAssemblyId);
 		
 		MongoCollection<VariantRunData> runColl = mongoTemplate.getDb().withCodecRegistry(ExportManager.pojoCodecRegistry).getCollection(mongoTemplate.getCollectionName(VariantRunData.class), VariantRunData.class);
 		while (markerCursor.hasNext()) {
@@ -267,8 +278,15 @@ public class ExportManager
 			progress.setCurrentStepProgress(nWrittenmarkerCount * 100l / markerCount);
 	}
 
-
-	private void exportDirectlyFromRuns() throws IOException, InterruptedException, ExecutionException {
+    /**
+     * Exports by looping on existing cursor
+     * 
+     * @param nAssemblyId the assembly id
+     * @throws IOException
+     * @throws InterruptedException
+     * @throws ExecutionException
+     */
+	private void exportDirectlyFromRuns(int nAssemblyId) throws IOException, InterruptedException, ExecutionException {
 		CompletableFuture<Void> future = null;
 		List<List<VariantRunData>> tempMarkerRunsToWrite = new ArrayList<>(nQueryChunkSize);
 		List<VariantRunData> currentMarkerRuns = new ArrayList<>();
