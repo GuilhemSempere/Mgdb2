@@ -96,7 +96,8 @@ public interface IExportHandler
 	/**
 	 * Gets the export files' extensions.
 	 *
-	 * @return the export files' extensions.
+	 * @return the exp@Override
+    ort files' extensions.
 	 */
 	public String[] getExportDataFileExtensions();
 	
