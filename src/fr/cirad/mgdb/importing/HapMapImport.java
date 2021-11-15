@@ -371,6 +371,8 @@ public class HapMapImport extends AbstractGenotypeImport {
 			
 		// genotype fields
 		HashMap<String, Integer> alleleIndexMap = new HashMap<>();	// should be more efficient not to call indexOf too often...
+        for (String aKnownAllele : variantToFeed.getKnownAlleleList())
+            alleleIndexMap.put(aKnownAllele, alleleIndexMap.size());
 		for (int i=0; i<hmFeature.getGenotypes().length; i++)
 		{
 			String genotype = hmFeature.getGenotypes()[i].toUpperCase(), gtCode = null;

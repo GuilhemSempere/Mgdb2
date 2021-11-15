@@ -49,6 +49,8 @@ import fr.cirad.mgdb.model.mongodao.MgdbDao;
 import fr.cirad.tools.Helper;
 import fr.cirad.tools.ProgressIndicator;
 import fr.cirad.tools.mongo.MongoTemplateManager;
+import htsjdk.variant.variantcontext.Allele;
+import htsjdk.variant.variantcontext.VariantContext.Type;
 
 public class AbstractGenotypeImport {
 	
@@ -330,4 +332,81 @@ public class AbstractGenotypeImport {
 	public void allowDbDropIfNoGenotypingData(boolean fAllowDbDropIfNoGenotypingData) {
 		this.m_fAllowDbDropIfNoGenotypingData = fAllowDbDropIfNoGenotypingData;
 	}
+	
+    /**
+     * Code copied from htsjdk.variant.variantcontext.VariantContext (Copyright The Broad Institute) and adapted for convenience, 
+     */
+    public static Type determineType(Collection<Allele> alleles) {
+        switch ( alleles.size() ) {
+            case 0:
+                throw new IllegalStateException("Unexpected error: requested type of VariantContext with no alleles!");
+            case 1:
+                // note that this doesn't require a reference allele.  You can be monomorphic independent of having a reference allele
+                return Type.NO_VARIATION;
+            default:
+                return determinePolymorphicType(alleles);
+        }
+    }
+
+    /**
+     * Code copied from htsjdk.variant.variantcontext.VariantContext (Copyright The Broad Institute) and adapted for convenience, 
+     */
+    public static Type determinePolymorphicType(Collection<Allele> alleles) {
+        Type type = null;
+        Allele refAllele = alleles.iterator().next();
+
+        // do a pairwise comparison of all alleles against the reference allele
+        for ( Allele allele : alleles ) {
+            if ( allele == refAllele )
+                continue;
+
+            // find the type of this allele relative to the reference
+            Type biallelicType = typeOfBiallelicVariant(refAllele, allele);
+
+            // for the first alternate allele, set the type to be that one
+            if ( type == null ) {
+                type = biallelicType;
+            }
+            // if the type of this allele is different from that of a previous one, assign it the MIXED type and quit
+            else if ( biallelicType != type ) {
+                return Type.MIXED;
+            }
+        }
+        return type;
+    }
+
+    /**
+     * Code copied from htsjdk.variant.variantcontext.VariantContext (Copyright The Broad Institute) and adapted for convenience, 
+     */
+    public static Type typeOfBiallelicVariant(Allele ref, Allele allele) {
+        if ( ref.isSymbolic() )
+            throw new IllegalStateException("Unexpected error: encountered a record with a symbolic reference allele");
+
+        if ( allele.isSymbolic() )
+            return Type.SYMBOLIC;
+
+        if ( ref.length() == allele.length() ) {
+            if ( allele.length() == 1 )
+                return Type.SNP;
+            else
+                return Type.MNP;
+        }
+
+        // Important note: previously we were checking that one allele is the prefix of the other.  However, that's not an
+        // appropriate check as can be seen from the following example:
+        // REF = CTTA and ALT = C,CT,CA
+        // This should be assigned the INDEL type but was being marked as a MIXED type because of the prefix check.
+        // In truth, it should be absolutely impossible to return a MIXED type from this method because it simply
+        // performs a pairwise comparison of a single alternate allele against the reference allele (whereas the MIXED type
+        // is reserved for cases of multiple alternate alleles of different types).  Therefore, if we've reached this point
+        // in the code (so we're not a SNP, MNP, or symbolic allele), we absolutely must be an INDEL.
+
+        return Type.INDEL;
+
+        // old incorrect logic:
+        // if (oneIsPrefixOfOther(ref, allele))
+        //     return Type.INDEL;
+        // else
+        //     return Type.MIXED;
+    }
 }
