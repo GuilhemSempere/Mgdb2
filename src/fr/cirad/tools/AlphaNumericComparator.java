@@ -16,6 +16,7 @@
  *******************************************************************************/
 package fr.cirad.tools;
 
+import java.nio.Buffer;
 import java.nio.CharBuffer;
 import java.text.Collator;
 import java.util.Comparator;
@@ -89,8 +90,7 @@ public class AlphaNumericComparator<T> implements Comparator<T> {
             }
         }
 
-        buffer.position(start)
-              .limit(end);
+        ((Buffer) buffer).position(start).limit(end);
     }
 
     private int compare(final CharBuffer b1, final CharBuffer b2) {
@@ -128,8 +128,7 @@ public class AlphaNumericComparator<T> implements Comparator<T> {
     }
 
     private void prepareForNextIteration(final CharBuffer buffer) {
-        buffer.position(buffer.limit())
-              .limit(buffer.capacity());
+        ((Buffer) buffer).position(buffer.limit()).limit(buffer.capacity());
     }
 
     private int compareAsStrings(final CharBuffer b1, final CharBuffer b2) {

@@ -170,7 +170,6 @@ public class InitialVariantImport {
                 long count = 0;
                 int nNumberOfVariantsToSaveAtOnce = 50000;
                 ArrayList<VariantData> unsavedVariants = new ArrayList<VariantData>();
-//              List<String> fieldsExceptSynonyms = Arrays.asList(new String[] {"id", "type", "pos", "chip"}); 
                 do
                 {
                     if (sLine.length() > 0)

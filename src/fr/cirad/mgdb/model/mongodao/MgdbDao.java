@@ -391,7 +391,7 @@ public class MgdbDao {
      */
     public static LinkedHashMap<VariantData, Collection<VariantRunData>> getSampleGenotypes(MongoTemplate mongoTemplate, Collection<GenotypingSample> samples, List<Object> variantIdListToRestrictTo, boolean fReturnVariantTypes, Sort sort) throws Exception {
         ArrayList<String> variantFieldsToReturn = new ArrayList<String>();
-        variantFieldsToReturn.add(VariantData.FIELDNAME_KNOWN_ALLELE_LIST);
+        variantFieldsToReturn.add(VariantData.FIELDNAME_KNOWN_ALLELES);
         variantFieldsToReturn.add(VariantData.FIELDNAME_REFERENCE_POSITION);
         if (fReturnVariantTypes) {
             variantFieldsToReturn.add(VariantData.FIELDNAME_TYPE);

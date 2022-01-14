@@ -66,6 +66,13 @@ public interface IExportHandler
 	static final String LINE_SEPARATOR = "\n";
 	
 	/**
+     * Gets the supported ploidy levels
+     *
+     * @return the export format name
+     */
+    public int[] getSupportedPloidyLevels();
+	
+	/**
 	 * Gets the export format name.
 	 *
 	 * @return the export format name

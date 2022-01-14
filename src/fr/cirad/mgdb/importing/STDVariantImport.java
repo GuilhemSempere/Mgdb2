@@ -132,10 +132,24 @@ public class STDVariantImport extends AbstractGenotypeImport {
 					throw new Exception("DATASOURCE '" + sModule + "' is not supported!");
 			}
 			
+            HashMap<String, String> existingVariantIDs;
             Assembly assembly = mongoTemplate.findOne(new Query(Criteria.where(Assembly.FIELDNAME_NAME).is(assemblyName)), Assembly.class);
-                if (assembly == null)
+            if (assembly == null) {
+                if ("".equals(assemblyName) || m_fAllowNewAssembly) {
+                    assembly = new Assembly("".equals(assemblyName) ? 0 : AutoIncrementCounter.getNextSequence(mongoTemplate, MongoTemplateManager.getMongoCollectionName(Assembly.class)));
+                    assembly.setName(assemblyName);
+                    mongoTemplate.save(assembly);
+                    existingVariantIDs = new HashMap<>();
+                }
+                else
                     throw new Exception("Assembly \"" + assemblyName + "\" not found in database. Supported assemblies are " + StringUtils.join(mongoTemplate.findDistinct(Assembly.FIELDNAME_NAME, Assembly.class, String.class), ", "));
-
+            }
+            else {
+                progress.addStep("Reading marker IDs");
+                progress.moveToNextStep();
+                existingVariantIDs = buildSynonymToIdMapForExistingVariants(mongoTemplate, false, assembly.getId());
+            }
+            
 			mongoTemplate.getDb().runCommand(new BasicDBObject("profile", 0));	// disable profiling
 			GenotypingProject project = mongoTemplate.findOne(new Query(Criteria.where(GenotypingProject.FIELDNAME_NAME).is(sProject)), GenotypingProject.class);
             if (importMode == 0 && project != null && project.getPloidyLevel() > 0 && project.getPloidyLevel() != m_ploidy)
@@ -144,13 +158,8 @@ public class STDVariantImport extends AbstractGenotypeImport {
 			fImportUnknownVariants = doesDatabaseSupportImportingUnknownVariants(sModule);
 			
 			cleanupBeforeImport(mongoTemplate, sModule, project, importMode, sRun);
-			
-			progress.addStep("Reading marker IDs");
-			progress.moveToNextStep();
-			
+						
 			File genotypeFile = new File(mainFilePath);
-	
-			HashMap<String, String> existingVariantIDs = buildSynonymToIdMapForExistingVariants(mongoTemplate, m_fTryAndMatchRandomObjectIDs, assembly.getId());
 						
 			progress.addStep("Checking genotype consistency");
 			progress.moveToNextStep();
@@ -307,7 +316,7 @@ public class STDVariantImport extends AbstractGenotypeImport {
 		for (int j=0; j<Math.max(1, nNumberOfRetries); j++)
 		{			
 			Query query = new Query(Criteria.where("_id").is(mgdbVariantId));
-			query.fields().include(VariantData.FIELDNAME_REFERENCE_POSITION).include(VariantData.FIELDNAME_KNOWN_ALLELE_LIST).include(VariantData.FIELDNAME_PROJECT_DATA + "." + project.getId()).include(VariantData.FIELDNAME_VERSION);
+			query.fields().include(VariantData.FIELDNAME_REFERENCE_POSITION).include(VariantData.FIELDNAME_KNOWN_ALLELES).include(VariantData.FIELDNAME_PROJECT_DATA + "." + project.getId()).include(VariantData.FIELDNAME_VERSION);
 			
 			VariantData variant = mongoTemplate.findOne(query, VariantData.class);
 			Update update = variant == null ? null : new Update();
@@ -375,9 +384,9 @@ public class STDVariantImport extends AbstractGenotypeImport {
 					for (int i=3; i<3 + m_ploidy; i++)
 					{
 						int indexToUse = cells.length == 3 + m_ploidy ? i : 3;	// support for collapsed homozygous genotypes
-						if (!variant.getKnownAlleleList().contains(cells[indexToUse]))
+						if (!variant.getKnownAlleles().contains(cells[indexToUse]))
 						{
-							variant.getKnownAlleleList().add(cells[indexToUse]);	// it's the first time we encounter this alternate allele for this variant
+							variant.getKnownAlleles().add(cells[indexToUse]);	// it's the first time we encounter this alternate allele for this variant
 							fAddedSomeAlleles = true;
 						}
 						
@@ -385,11 +394,14 @@ public class STDVariantImport extends AbstractGenotypeImport {
 					}
 					
 					if (fAddedSomeAlleles && update != null)
-						update.set(VariantData.FIELDNAME_KNOWN_ALLELE_LIST, variant.getKnownAlleleList());
-					
+						update.set(VariantData.FIELDNAME_KNOWN_ALLELES, variant.getKnownAlleles());
+
 					Collections.sort(alleleIndexList);
 					gtCode = StringUtils.join(alleleIndexList, "/");
 				}
+				
+				if (gtCode != null && (gtCode.contains("-1") || gtCode.contains("2")))
+	                System.err.println(vrd.getVariantId() + " - " + sIndividual);
 
 				if (gtCode == null)
 					continue;	// we don't add missing genotypes
@@ -397,7 +409,7 @@ public class STDVariantImport extends AbstractGenotypeImport {
 				SampleGenotype genotype = new SampleGenotype(gtCode);
 				vrd.getSampleGenotypes().put(usedSamples.get(sIndividual).getId(), genotype);
 			}
-            project.getAlleleCounts().add(variant.getKnownAlleleList().size());	// it's a TreeSet so it will only be added if it's not already present
+            project.getAlleleCounts().add(variant.getKnownAlleles().size());	// it's a TreeSet so it will only be added if it's not already present
 			
 			try
 			{
@@ -412,7 +424,8 @@ public class STDVariantImport extends AbstractGenotypeImport {
 					mongoTemplate.upsert(new Query(Criteria.where("_id").is(mgdbVariantId)).addCriteria(Criteria.where(VariantData.FIELDNAME_VERSION).is(variant.getVersion())), update, VariantData.class);
 //					System.out.println("updated: " + variant.getId());
 				}
-		        vrd.setKnownAlleleList(variant.getKnownAlleleList());
+
+		        vrd.setKnownAlleles(variant.getKnownAlleles());
 		        vrd.setReferencePositions(variant.getReferencePositions());
 		        vrd.setType(Type.SNP.toString());
 		        vrd.setSynonyms(variant.getSynonyms());

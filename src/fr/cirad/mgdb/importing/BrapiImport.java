@@ -337,7 +337,7 @@ public class BrapiImport extends AbstractGenotypeImport {
 							if (fGotKnownAllelesWhenImportingVariants == null)
 								fGotKnownAllelesWhenImportingVariants = marker.getRefAlt() != null && marker.getRefAlt().size() > 0;
 							if (fGotKnownAllelesWhenImportingVariants)
-								variant.setKnownAlleleList(marker.getRefAlt());
+								variant.setKnownAlleles(new LinkedHashSet(marker.getRefAlt()));
 							
 							// update list of existing variants (FIXME: this should be a separate method in AbstractGenotypeImport) 
 							ArrayList<String> idAndSynonyms = new ArrayList<>();
@@ -580,10 +580,10 @@ public class BrapiImport extends AbstractGenotypeImport {
 								List<String> variants = variantsByKnownAlleles.get(knownAlleleCsv);
 								Query q = new Query(Criteria.where("_id").in(variants));
 								if (existingVariantIDs.isEmpty())
-									mongoTemplate.updateMulti(q, new Update().set(VariantData.FIELDNAME_KNOWN_ALLELE_LIST, Helper.split(knownAlleleCsv, ",")), VariantData.class);
+									mongoTemplate.updateMulti(q, new Update().set(VariantData.FIELDNAME_KNOWN_ALLELES, Helper.split(knownAlleleCsv, ",")), VariantData.class);
 								else	// we need to be more careful and avoid to delete existing known alleles
 									for (String allele : Helper.split(knownAlleleCsv, ","))
-										mongoTemplate.updateMulti(q, new Update().addToSet(VariantData.FIELDNAME_KNOWN_ALLELE_LIST, allele), VariantData.class);
+										mongoTemplate.updateMulti(q, new Update().addToSet(VariantData.FIELDNAME_KNOWN_ALLELES, allele), VariantData.class);
 							}
 						}
 						
@@ -603,7 +603,7 @@ public class BrapiImport extends AbstractGenotypeImport {
 			}
 			
 	        // last, remove any variants that have no associated alleles
-	        DeleteResult dr = mongoTemplate.remove(new Query(Criteria.where(VariantData.FIELDNAME_KNOWN_ALLELE_LIST + ".0").exists(false)), VariantData.class);
+	        DeleteResult dr = mongoTemplate.remove(new Query(Criteria.where(VariantData.FIELDNAME_KNOWN_ALLELES + ".0").exists(false)), VariantData.class);
 	        if (dr.getDeletedCount() > 0)
 	        {
 	        	LOG.debug("Removed " + dr.getDeletedCount() + " variants without known alleles");
@@ -767,7 +767,7 @@ public class BrapiImport extends AbstractGenotypeImport {
 		for (int j=0; j<Math.max(1, nNumberOfRetries); j++)
 		{			
 			Query query = new Query(Criteria.where("_id").is(mgdbVariantId));
-			query.fields().include(VariantData.FIELDNAME_TYPE).include(VariantData.FIELDNAME_REFERENCE_POSITION).include(VariantData.FIELDNAME_KNOWN_ALLELE_LIST).include(VariantData.FIELDNAME_PROJECT_DATA + "." + project.getId()).include(VariantData.FIELDNAME_VERSION);
+			query.fields().include(VariantData.FIELDNAME_TYPE).include(VariantData.FIELDNAME_REFERENCE_POSITION).include(VariantData.FIELDNAME_KNOWN_ALLELES).include(VariantData.FIELDNAME_PROJECT_DATA + "." + project.getId()).include(VariantData.FIELDNAME_VERSION);
 			
 			VariantData variant = mongoTemplate.findOne(query, VariantData.class);
 			Update update = variant == null ? null : new Update();
@@ -830,9 +830,9 @@ public class BrapiImport extends AbstractGenotypeImport {
 							for (int i=0; i<project.getPloidyLevel(); i++)
 							{
 								int indexToUse = alleles.length == project.getPloidyLevel() ? i : 0;	// support for collapsed homozygous genotypes
-								if (!variant.getKnownAlleleList().contains(alleles[indexToUse]))
+								if (!variant.getKnownAlleles().contains(alleles[indexToUse]))
 								{
-									variant.getKnownAlleleList().add(alleles[indexToUse]);	// it's the first time we encounter this alternate allele for this variant
+									variant.getKnownAlleles().add(alleles[indexToUse]);	// it's the first time we encounter this alternate allele for this variant
 									fNewAllelesEncountered = true;
 								}
 								alleleIndexList.add(variant.getKnownAlleleList().indexOf(alleles[indexToUse]));
@@ -852,14 +852,14 @@ public class BrapiImport extends AbstractGenotypeImport {
 				}
 			}
 			if (fNewAllelesEncountered && update != null)
-				update.set(VariantData.FIELDNAME_KNOWN_ALLELE_LIST, variant.getKnownAlleleList());
+				update.set(VariantData.FIELDNAME_KNOWN_ALLELES, variant.getKnownAlleles());
 			if (variant.getType() == null && update != null)
 			{	// no variant type was explicitly specified, so try and determine it
 				variant.setType(VariantData.determinePolymorphicType(variant.getKnownAlleleList()).toString());
 				update.set(VariantData.FIELDNAME_TYPE, variant.getType());
 				project.getVariantTypes().add(variant.getType());
 			}
-			project.getAlleleCounts().add(variant.getKnownAlleleList().size());	// it's a TreeSet so it will only be added if it's not already present
+			project.getAlleleCounts().add(variant.getKnownAlleles().size());	// it's a TreeSet so it will only be added if it's not already present
 
 			try
 			{
@@ -867,7 +867,7 @@ public class BrapiImport extends AbstractGenotypeImport {
 				{
 					mongoTemplate.upsert(new Query(Criteria.where("_id").is(mgdbVariantId)).addCriteria(Criteria.where(VariantData.FIELDNAME_VERSION).is(variant.getVersion())), update, VariantData.class);
 				}
-		        vrd.setKnownAlleleList(variant.getKnownAlleleList());
+		        vrd.setKnownAlleles(variant.getKnownAlleles());
 		        vrd.setReferencePositions(variant.getReferencePositions());
 		        vrd.setType(variant.getType());
 		        vrd.setSynonyms(variant.getSynonyms());

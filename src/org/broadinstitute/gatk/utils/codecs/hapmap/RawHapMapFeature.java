@@ -29,6 +29,7 @@ import htsjdk.tribble.Feature;
 import htsjdk.tribble.annotation.Strand;
 import htsjdk.variant.variantcontext.Allele;
 
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -196,9 +197,7 @@ public class RawHapMapFeature implements Feature {
      */
     public String[] getSampleIDs() {
 		String[] header = headerLine.split("\\s+");
-		String[] sample_ids = new String[header.length-11];
-		for (int i = 11; i < header.length; i++)
-			sample_ids[i-11] = header[i];
+		String[] sample_ids = Arrays.copyOfRange(header, 11, header.length);
 		return sample_ids;
 	}
 }

@@ -30,6 +30,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
 import org.apache.commons.lang.StringUtils;
@@ -122,25 +123,20 @@ public abstract class AbstractIndividualOrientedExportHandler implements IExport
 			os.close();
 		}
 
-
 		final MongoTemplate mongoTemplate = MongoTemplateManager.get(sModule);
 
-		final Map<Integer, String> sampleIdToIndividualMap = new HashMap<>();
-		for (GenotypingSample gs : samplesToExport)
-			sampleIdToIndividualMap.put(gs.getId(), gs.getIndividual());
+		final Map<Integer, String> sampleIdToIndividualMap = samplesToExport.stream().collect(Collectors.toMap(GenotypingSample::getId, sp -> sp.getIndividual()));
+		final AtomicInteger initialStringBuilderCapacity = new AtomicInteger();
 
 		int nQueryChunkSize = IExportHandler.computeQueryChunkSize(mongoTemplate, markerCount);
 		MongoCollection collWithPojoCodec = mongoTemplate.getDb().withCodecRegistry(ExportManager.pojoCodecRegistry).getCollection(tmpVarCollName != null ? tmpVarCollName : mongoTemplate.getCollectionName(VariantRunData.class));
 
 		AbstractExportWritingThread writingThread = new AbstractExportWritingThread() {
 			public void run() {
-				StringBuffer[] individualGenotypeBuffers = new StringBuffer[individualPositions.size()];	// keeping all files open leads to failure (see ulimit command), keeping them closed and reopening them each time we need to write a genotype is too time consuming: so our compromise is to reopen them only once per chunk
+				StringBuilder[] individualGenotypeBuffers = new StringBuilder[individualPositions.size()];	// keeping all files open leads to failure (see ulimit command), keeping them closed and reopening them each time we need to write a genotype is too time consuming: so our compromise is to reopen them only once per chunk
 				try
 				{
 					for (List<VariantRunData> runsToWrite : markerRunsToWrite) {
-//						if (runsToWrite.isEmpty())
-//							continue;
-
 						if (progress.isAborted())
 							break;
 
@@ -150,8 +146,12 @@ public abstract class AbstractIndividualOrientedExportHandler implements IExport
 		                	for (Object vrd : runsToWrite) {
 		                    	VariantRunData run = (VariantRunData) vrd;
 								for (Integer sampleId : run.getSampleGenotypes().keySet()) {
+	                                String individualId = sampleIdToIndividualMap.get(sampleId);
+	                                Integer individualIndex = individualPositions.get(individualId);
+	                                if (individualIndex == null)
+	                                    continue;   // unwanted sample
+
 									SampleGenotype sampleGenotype = run.getSampleGenotypes().get(sampleId);
-									String individualId = sampleIdToIndividualMap.get(sampleId);
 									if (!VariantData.gtPassesVcfAnnotationFilters(individualId, sampleGenotype, individuals1, annotationFieldThresholds, individuals2, annotationFieldThresholds2))
 										continue;	// skip genotype
 
@@ -161,7 +161,6 @@ public abstract class AbstractIndividualOrientedExportHandler implements IExport
 				                    	genotypeStringCache.put(sampleGenotype.getCode(), exportedGT);
 				                    }
 									
-									int individualIndex = individualPositions.get(individualId);
 									if (individualGenotypes[individualIndex] == null)
 										individualGenotypes[individualIndex] = new LinkedHashSet<String>();
 									individualGenotypes[individualIndex].add(exportedGT);
@@ -171,15 +170,17 @@ public abstract class AbstractIndividualOrientedExportHandler implements IExport
 						for (String individual : individualPositions.keySet()) {
 							int individualIndex = individualPositions.get(individual);
 							if (individualGenotypeBuffers[individualIndex] == null)
-								individualGenotypeBuffers[individualIndex] = new StringBuffer();	// we are about to write individual's first genotype for this chunk
+								individualGenotypeBuffers[individualIndex] = new StringBuilder(initialStringBuilderCapacity.get() == 0 ? (int) (3 * markerCount) : initialStringBuilderCapacity.get());	// we are about to write individual's first genotype for this chunk
 
 							if (individualGenotypes[individualIndex] == null)
 								individualGenotypeBuffers[individualIndex].append(LINE_SEPARATOR);	// missing data
 							else {
 								int j = 0;
 								for (String storedIndividualGenotype : individualGenotypes[individualIndex])
-									individualGenotypeBuffers[individualIndex].append(storedIndividualGenotype + (j++ == individualGenotypes[individualIndex].size() - 1 ? LINE_SEPARATOR : "|"));
+									individualGenotypeBuffers[individualIndex].append(storedIndividualGenotype).append((j++ == individualGenotypes[individualIndex].size() - 1 ? LINE_SEPARATOR : "|"));
 							}
+							if (initialStringBuilderCapacity.get() == 0)
+							    initialStringBuilderCapacity.set(individualGenotypeBuffers[individualIndex].length());
 						}
 					}
 

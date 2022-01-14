@@ -39,7 +39,11 @@ import org.bson.Document;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.mapping.Field;
 
+import com.mongodb.BasicDBList;
+import com.mongodb.BasicDBObject;
+
 import fr.cirad.mgdb.model.mongo.maintypes.GenotypingSample;
+import fr.cirad.mgdb.model.mongo.maintypes.VariantRunData.VariantRunDataId;
 import fr.cirad.tools.mongo.MongoTemplateManager;
 
 /**
@@ -381,4 +385,11 @@ public class Helper {
 			projectRuns.add(separateIDs[1]);
 		}
 		return runsByProject;
-    }}
+    }
+    
+    static public void convertIdFiltersToRunFormat(BasicDBList filters) {
+        for (Object filter : filters)
+            if (((BasicDBObject) filter).containsField("_id"))
+                ((BasicDBObject) filter).append("_id." + VariantRunDataId.FIELDNAME_VARIANT_ID, ((BasicDBObject) filter).remove("_id"));
+    }
+}
