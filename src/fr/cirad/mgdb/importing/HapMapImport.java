@@ -217,9 +217,9 @@ public class HapMapImport extends AbstractGenotypeImport {
 
 			HashMap<String, String> existingVariantIDs = buildSynonymToIdMapForExistingVariants(mongoTemplate, false);		
 
-            AtomicInteger count = new AtomicInteger(0);
 			String generatedIdBaseString = Long.toHexString(System.currentTimeMillis());
-			AtomicInteger nNumberOfVariantsToSaveAtOnce = new AtomicInteger(1), totalProcessedVariantCount = new AtomicInteger(0);
+			AtomicInteger nNumberOfVariantsToSaveAtOnce = new AtomicInteger(1);
+			AtomicInteger totalProcessedVariantCount = new AtomicInteger(0);
 			HashMap<String /*individual*/, GenotypingSample> previouslyCreatedSamples = new HashMap<>();
 			final ArrayList<String> sampleIds = new ArrayList<>();
 			progress.addStep("Processing variant lines");
@@ -244,6 +244,7 @@ public class HapMapImport extends AbstractGenotypeImport {
                     @Override
                     public void run() {
                         try {
+                        	int processedVariants = 0;
                             int localNumberOfVariantsToSaveAtOnce = -1;  // Minor optimization, copy this locally to avoid having to use the AtomicInteger every time
                             HashSet<VariantData> unsavedVariants = new HashSet<VariantData>();  // HashSet allows no duplicates
                             HashSet<VariantRunData> unsavedRuns = new HashSet<VariantRunData>();
@@ -258,7 +259,7 @@ public class HapMapImport extends AbstractGenotypeImport {
                                     break;
                                 
                                 // We can only retrieve the sample IDs from a feature but need to set them up synchronously
-                                if (count.get() == 0) {
+                                if (processedVariants == 0) {
                                 	synchronized (sampleIds) {
 	                                	// The first thread to reach this will create the samples, the next ones will skip
                                 		// So this will be executed once before everything else, everything after this block of code can assume the samples have been set up
@@ -302,10 +303,9 @@ public class HapMapImport extends AbstractGenotypeImport {
                                     if (variant == null) {
                                         if (fFileProvidesValidVariantId) {
                                             variant = new VariantData((ObjectId.isValid(sFeatureName) ? "_" : "") + sFeatureName);
-                                            count.getAndIncrement();
                                         }
                                         else
-                                            variant = new VariantData(generatedIdBaseString + String.format(String.format("%09x", count.getAndIncrement())));
+                                            variant = new VariantData(generatedIdBaseString + String.format(String.format("%09x", totalProcessedVariantCount.get())));
                                     }
 
                                     AtomicInteger allIdx = new AtomicInteger(0);
@@ -334,12 +334,13 @@ public class HapMapImport extends AbstractGenotypeImport {
                 							unsavedRuns.add(runToSave);
                 					}
                 
-                					if (count.incrementAndGet() % localNumberOfVariantsToSaveAtOnce == 0) {
+                					if (processedVariants % localNumberOfVariantsToSaveAtOnce == 0) {
                 						saveChunk(unsavedVariants, unsavedRuns, existingVariantIDs, finalMongoTemplate, progress, saveService);
                 				        unsavedVariants = new HashSet<>();
                 				        unsavedRuns = new HashSet<>();
                 					}
                 					
+                					processedVariants += 1;
                 					int currentProcessedVariants = totalProcessedVariantCount.incrementAndGet();
                 					progress.setCurrentStepProgress(currentProcessedVariants);
             				        if (currentProcessedVariants % (localNumberOfVariantsToSaveAtOnce * 50) == 0)
@@ -347,13 +348,11 @@ public class HapMapImport extends AbstractGenotypeImport {
                 				}
                 				catch (Exception e)
                 				{
-                					throw new Exception("Error occured importing variant number " + (count.get() + 1) + " (" + Type.SNP.toString() + ":" + hmFeature.getChr() + ":" + hmFeature.getStart() + ")", e);
+                					throw new Exception("Error occured importing variant number " + (totalProcessedVariantCount.get() + 1) + " (" + Type.SNP.toString() + ":" + hmFeature.getChr() + ":" + hmFeature.getStart() + ")", e);
                 				}
                             }
-                            if (unsavedVariants.size() > 0) {
+                            if (unsavedVariants.size() > 0)
                                 persistVariantsAndGenotypes(!existingVariantIDs.isEmpty(), finalMongoTemplate, unsavedVariants, unsavedRuns);
-                                progress.setCurrentStepProgress(totalProcessedVariantCount.get());
-                            }
                         } catch (Throwable t) {
                             progress.setError("Genotypes import failed with error: " + t.getMessage());
                             LOG.error(progress.getError(), t);
