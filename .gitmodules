@@ -1,0 +1,6 @@
+[submodule "GenotypeFileManipulation"]
+	path = GenotypeFileManipulation
+	url = https://github.com/SouthGreenPlatform/GenotypeFileManipulation
+[submodule "Mgdb2BrapiModel"]
+	path = Mgdb2BrapiModel
+	url = https://github.com/SouthGreenPlatform/Mgdb2BrapiModel
