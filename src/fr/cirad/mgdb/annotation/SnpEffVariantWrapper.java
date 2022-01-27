@@ -3,6 +3,7 @@ package fr.cirad.mgdb.annotation;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
+import java.util.stream.Collectors;
 
 import org.snpeff.interval.Marker;
 import org.snpeff.interval.Variant;
@@ -52,11 +53,8 @@ public class SnpEffVariantWrapper extends Variant {
 		for (VariantEffect effect : effects) {
 			VcfEffect vcfEffect = new VcfEffect(effect, EffFormatVersion.FORMAT_ANN_1);
 			annotation.append(vcfEffect.toString()).append(",");
-			effectNames.add(effect.getEffectTypeString(true));
-			if (effect.getGene() == null)
-				effectGenes.add("");
-			else
-				effectGenes.add(effect.getGene().getGeneName());
+			effectNames.add(vcfEffect.getEffectsStr());
+			effectGenes.add(vcfEffect.getGeneId());
 		}
 		annotation.setLength(annotation.length() - 1);  // Trim the last comma
 

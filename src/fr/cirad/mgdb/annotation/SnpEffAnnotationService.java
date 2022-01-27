@@ -1,7 +1,10 @@
 package fr.cirad.mgdb.annotation;
 
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Map;
+import java.util.Set;
+import java.util.TreeSet;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -24,6 +27,7 @@ import com.mongodb.client.FindIterable;
 import fr.cirad.mgdb.importing.VcfImport;
 import fr.cirad.mgdb.model.mongo.maintypes.DBVCFHeader;
 import fr.cirad.mgdb.model.mongo.maintypes.DBVCFHeader.VcfHeaderId;
+import fr.cirad.mgdb.model.mongo.maintypes.GenotypingProject;
 import fr.cirad.mgdb.model.mongo.maintypes.VariantRunData;
 import fr.cirad.tools.mongo.MongoTemplateManager;
 import htsjdk.variant.vcf.VCFHeaderLineCount;
@@ -34,7 +38,7 @@ import htsjdk.variant.vcf.VCFInfoHeaderLine;
 public class SnpEffAnnotationService {
     protected static final Logger LOG = Logger.getLogger(SnpEffAnnotationService.class);
 
-	public static String annotateRun(String module, int project, String run, String snpEffDatabase) {
+	public static String annotateRun(String module, int projectId, String run, String snpEffDatabase) {
 		MongoTemplate template = MongoTemplateManager.get(module);
 
 		LOG.info("Loading config");
@@ -44,8 +48,11 @@ public class SnpEffAnnotationService {
 		predictor.buildForest();
 		LOG.info("Loaded genome " + genome.getGenomeId());
 
+		GenotypingProject project = template.findById(projectId, GenotypingProject.class);
+		TreeSet<String> projectEffects = project.getEffectAnnotations();
+
 		BasicDBObject vrdQuery = new BasicDBObject();
-		vrdQuery.put("_id." + VariantRunData.VariantRunDataId.FIELDNAME_PROJECT_ID, project);
+		vrdQuery.put("_id." + VariantRunData.VariantRunDataId.FIELDNAME_PROJECT_ID, projectId);
 		vrdQuery.put("_id." + VariantRunData.VariantRunDataId.FIELDNAME_RUNNAME, run);
 		FindIterable<Document> variantRunData = template.getCollection(MongoTemplateManager.getMongoCollectionName(VariantRunData.class)).find(vrdQuery).batchSize(100);
 
@@ -55,7 +62,7 @@ public class SnpEffAnnotationService {
 			Chromosome chromosome = getParentChromosome(vrd, genome);
 			SnpEffVariantWrapper variant = new SnpEffVariantWrapper(chromosome, vrd, null);
 
-			VariantRunData result = annotateVariant(variant, predictor);
+			VariantRunData result = annotateVariant(variant, predictor, projectEffects);
 			if (result != null)
 				template.save(result);
 		}
@@ -63,13 +70,13 @@ public class SnpEffAnnotationService {
 		LOG.info("Updating header");
 
 		BasicDBObject queryVarAnn = new BasicDBObject();
-        queryVarAnn.put("_id." + DBVCFHeader.VcfHeaderId.FIELDNAME_PROJECT, project);
+        queryVarAnn.put("_id." + DBVCFHeader.VcfHeaderId.FIELDNAME_PROJECT, projectId);
         queryVarAnn.put("_id." + DBVCFHeader.VcfHeaderId.FIELDNAME_RUN, run);
 
         DBVCFHeader header = null;
         Document headerDoc = template.getCollection(MongoTemplateManager.getMongoCollectionName(DBVCFHeader.class)).find(queryVarAnn).first();
         if (headerDoc == null) {
-        	header = new DBVCFHeader(new VcfHeaderId(project, run), false, false, new HashMap<>(), new HashMap<>(), new HashMap<>(), new HashMap<>(), new HashMap<>());
+        	header = new DBVCFHeader(new VcfHeaderId(projectId, run), false, false, new HashMap<>(), new HashMap<>(), new HashMap<>(), new HashMap<>(), new HashMap<>());
         } else {
         	header = DBVCFHeader.fromDocument(headerDoc);
         }
@@ -81,10 +88,16 @@ public class SnpEffAnnotationService {
 
         template.save(header);
 
+        LOG.info("Updating project metadata");
+
+        template.save(project);
+
+        LOG.info("Done");
+
 		return null;
 	}
 
-	private static VariantRunData annotateVariant(SnpEffVariantWrapper variant, SnpEffectPredictor predictor) {
+	private static VariantRunData annotateVariant(SnpEffVariantWrapper variant, SnpEffectPredictor predictor, Set<String> effectAnnotations) {
 		// Calculate effects: By default do not annotate non-variant sites
 		if (!variant.isVariant()) return null;
 
@@ -102,6 +115,7 @@ public class SnpEffAnnotationService {
 			impactLowOrHigher |= (variantEffect.getEffectImpact() != EffectImpact.MODIFIER);
 			impactModerateOrHigh |= (variantEffect.getEffectImpact() == EffectImpact.MODERATE) || (variantEffect.getEffectImpact() == EffectImpact.HIGH);*/
 			variant.addEffect(variantEffect);
+			effectAnnotations.add(variantEffect.getEffectTypeString(true, false, EffFormatVersion.FORMAT_ANN_1));
 		}
 		return variant.buildANN();
 	}
