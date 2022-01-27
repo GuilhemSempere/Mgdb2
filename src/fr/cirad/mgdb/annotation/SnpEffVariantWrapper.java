@@ -50,7 +50,7 @@ public class SnpEffVariantWrapper extends Variant {
 
 		// FIXME : Some parts are missing or incomplete, check VcfEffect
 		for (VariantEffect effect : effects) {
-			VcfEffect vcfEffect = new VcfEffect(effect, EffFormatVersion.FORMAT_ANN);
+			VcfEffect vcfEffect = new VcfEffect(effect, EffFormatVersion.FORMAT_ANN_1);
 			annotation.append(vcfEffect.toString()).append(",");
 			effectNames.add(effect.getEffectTypeString(true));
 			if (effect.getGene() == null)

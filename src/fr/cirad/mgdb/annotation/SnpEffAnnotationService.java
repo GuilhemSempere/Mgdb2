@@ -13,6 +13,7 @@ import org.snpeff.snpEffect.Config;
 import org.snpeff.snpEffect.SnpEffectPredictor;
 import org.snpeff.snpEffect.VariantEffect;
 import org.snpeff.snpEffect.VariantEffects;
+import org.snpeff.vcf.EffFormatVersion;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
@@ -73,7 +74,9 @@ public class SnpEffAnnotationService {
         	header = DBVCFHeader.fromDocument(headerDoc);
         }
 
-        VCFInfoHeaderLine headerLine = new VCFInfoHeaderLine(VcfImport.ANNOTATION_FIELDNAME_ANN, VCFHeaderLineCount.UNBOUNDED, VCFHeaderLineType.String, "Predicted effects for this variant");
+        // FIXME : Retrieve this from EffFormatVersion.FORMAT_ANN_1.vcfHeader()
+        String description = "Functional annotations: 'Allele | Annotation | Annotation_Impact | Gene_Name | Gene_ID | Feature_Type | Feature_ID | Transcript_BioType | Rank | HGVS.c | HGVS.p | cDNA.pos / cDNA.length | CDS.pos / CDS.length | AA.pos / AA.length | Distance | ERRORS / WARNINGS / INFO'";
+        VCFInfoHeaderLine headerLine = new VCFInfoHeaderLine(VcfImport.ANNOTATION_FIELDNAME_ANN, VCFHeaderLineCount.UNBOUNDED, VCFHeaderLineType.String, description);
         header.getmInfoMetaData().put(VcfImport.ANNOTATION_FIELDNAME_ANN, headerLine);
 
         template.save(header);
