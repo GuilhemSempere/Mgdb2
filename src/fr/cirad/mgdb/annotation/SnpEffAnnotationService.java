@@ -12,6 +12,7 @@ import org.apache.log4j.Logger;
 import org.bson.Document;
 import org.snpeff.interval.Chromosome;
 import org.snpeff.interval.Genome;
+import org.snpeff.interval.Variant;
 import org.snpeff.snpEffect.Config;
 import org.snpeff.snpEffect.SnpEffectPredictor;
 import org.snpeff.snpEffect.VariantEffect;
@@ -60,9 +61,9 @@ public class SnpEffAnnotationService {
 		for (Document doc : variantRunData) {
 			VariantRunData vrd = template.getConverter().read(VariantRunData.class, doc);
 			Chromosome chromosome = getParentChromosome(vrd, genome);
-			SnpEffVariantWrapper variant = new SnpEffVariantWrapper(chromosome, vrd, null);
+			SnpEffEntryWrapper entry = new SnpEffEntryWrapper(chromosome, vrd);
 
-			VariantRunData result = annotateVariant(variant, predictor, projectEffects);
+			VariantRunData result = annotateVariant(entry, predictor, projectEffects);
 			if (result != null)
 				template.save(result);
 		}
@@ -97,27 +98,21 @@ public class SnpEffAnnotationService {
 		return null;
 	}
 
-	private static VariantRunData annotateVariant(SnpEffVariantWrapper variant, SnpEffectPredictor predictor, Set<String> effectAnnotations) {
-		// Calculate effects: By default do not annotate non-variant sites
-		if (!variant.isVariant()) return null;
+	private static VariantRunData annotateVariant(SnpEffEntryWrapper entry, SnpEffectPredictor predictor, Set<String> effectAnnotations) {
+		for (Variant variant : entry.variants()) {
+			// Calculate effects: By default do not annotate non-variant sites
+			if (!variant.isVariant()) return null;
 
-		/*boolean impactModerateOrHigh = false; // Does this entry have a 'MODERATE' or 'HIGH' impact?
-		boolean impactLowOrHigher = false; // Does this entry have an impact (other than MODIFIER)?*/
+			VariantEffects variantEffects = predictor.variantEffect(variant);
 
-		VariantEffects variantEffects = predictor.variantEffect(variant);
-
-		// Show results
-		for (VariantEffect variantEffect : variantEffects) {
-			/*if (variantEffect.hasError()) errByType.inc(variantEffect.getError());
-			if (variantEffect.hasWarning()) warnByType.inc(variantEffect.getWarning());*/
-
-			/*// Does this entry have an impact (other than MODIFIER)?
-			impactLowOrHigher |= (variantEffect.getEffectImpact() != EffectImpact.MODIFIER);
-			impactModerateOrHigh |= (variantEffect.getEffectImpact() == EffectImpact.MODERATE) || (variantEffect.getEffectImpact() == EffectImpact.HIGH);*/
-			variant.addEffect(variantEffect);
-			effectAnnotations.add(variantEffect.getEffectTypeString(true, false, EffFormatVersion.FORMAT_ANN_1));
+			// Show results
+			for (VariantEffect variantEffect : variantEffects) {
+				entry.addEffect(variantEffect);
+				effectAnnotations.add(variantEffect.getEffectTypeString(true, false, EffFormatVersion.FORMAT_ANN_1));
+			}
 		}
-		return variant.buildANN();
+
+		return entry.buildANN();
 	}
 
 	public static Chromosome getParentChromosome(VariantRunData vrd, Genome genome) {
