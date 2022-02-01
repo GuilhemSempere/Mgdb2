@@ -30,7 +30,9 @@ import fr.cirad.mgdb.model.mongo.maintypes.DBVCFHeader;
 import fr.cirad.mgdb.model.mongo.maintypes.DBVCFHeader.VcfHeaderId;
 import fr.cirad.mgdb.model.mongo.maintypes.GenotypingProject;
 import fr.cirad.mgdb.model.mongo.maintypes.VariantRunData;
+import fr.cirad.tools.ProgressIndicator;
 import fr.cirad.tools.mongo.MongoTemplateManager;
+import htsjdk.variant.vcf.VCFFilterHeaderLine;
 import htsjdk.variant.vcf.VCFHeaderLineCount;
 import htsjdk.variant.vcf.VCFHeaderLineType;
 import htsjdk.variant.vcf.VCFInfoHeaderLine;
@@ -39,10 +41,11 @@ import htsjdk.variant.vcf.VCFInfoHeaderLine;
 public class SnpEffAnnotationService {
     protected static final Logger LOG = Logger.getLogger(SnpEffAnnotationService.class);
 
-	public static String annotateRun(String module, int projectId, String run, String snpEffDatabase) {
+	public static String annotateRun(String module, int projectId, String run, String snpEffDatabase, ProgressIndicator progress) {
 		MongoTemplate template = MongoTemplateManager.get(module);
 
-		LOG.info("Loading config");
+		progress.addStep("Loading config");
+		progress.moveToNextStep();
 		Config config = new Config(snpEffDatabase, "/home/u017-h433/Documents/deps/snpEff/snpEff.config", "/home/u017-h433/Documents/deps/snpEff/data", null);
 		Genome genome = config.getGenome();
 		SnpEffectPredictor predictor = config.loadSnpEffectPredictor();
@@ -57,18 +60,26 @@ public class SnpEffAnnotationService {
 		vrdQuery.put("_id." + VariantRunData.VariantRunDataId.FIELDNAME_RUNNAME, run);
 		FindIterable<Document> variantRunData = template.getCollection(MongoTemplateManager.getMongoCollectionName(VariantRunData.class)).find(vrdQuery).batchSize(100);
 
-		LOG.info("Processing variants");
+		progress.addStep("Processing variants");
+		progress.moveToNextStep();
+		int processedVariants = 0;
 		for (Document doc : variantRunData) {
 			VariantRunData vrd = template.getConverter().read(VariantRunData.class, doc);
 			Chromosome chromosome = getParentChromosome(vrd, genome);
 			SnpEffEntryWrapper entry = new SnpEffEntryWrapper(chromosome, vrd);
 
 			VariantRunData result = annotateVariant(entry, predictor, projectEffects);
-			if (result != null)
+			if (result != null) {
 				template.save(result);
+				processedVariants += 1;
+				progress.setCurrentStepProgress(processedVariants);
+			} else {
+				LOG.warn("Failed to annotate variant " + vrd.getId());
+			}
 		}
 
-		LOG.info("Updating header");
+		progress.addStep("Updating project metadata");
+		progress.moveToNextStep();
 
 		BasicDBObject queryVarAnn = new BasicDBObject();
         queryVarAnn.put("_id." + DBVCFHeader.VcfHeaderId.FIELDNAME_PROJECT, projectId);
@@ -86,14 +97,9 @@ public class SnpEffAnnotationService {
         String description = "Functional annotations: 'Allele | Annotation | Annotation_Impact | Gene_Name | Gene_ID | Feature_Type | Feature_ID | Transcript_BioType | Rank | HGVS.c | HGVS.p | cDNA.pos / cDNA.length | CDS.pos / CDS.length | AA.pos / AA.length | Distance | ERRORS / WARNINGS / INFO'";
         VCFInfoHeaderLine headerLine = new VCFInfoHeaderLine(VcfImport.ANNOTATION_FIELDNAME_ANN, VCFHeaderLineCount.UNBOUNDED, VCFHeaderLineType.String, description);
         header.getmInfoMetaData().put(VcfImport.ANNOTATION_FIELDNAME_ANN, headerLine);
-
         template.save(header);
 
-        LOG.info("Updating project metadata");
-
         template.save(project);
-
-        LOG.info("Done");
 
 		return null;
 	}
