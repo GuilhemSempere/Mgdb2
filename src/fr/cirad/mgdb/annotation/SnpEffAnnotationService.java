@@ -41,12 +41,12 @@ import htsjdk.variant.vcf.VCFInfoHeaderLine;
 public class SnpEffAnnotationService {
     protected static final Logger LOG = Logger.getLogger(SnpEffAnnotationService.class);
 
-	public static String annotateRun(String module, int projectId, String run, String snpEffDatabase, ProgressIndicator progress) {
+	public static String annotateRun(String configFile, String dataPath, String module, int projectId, String run, String snpEffDatabase, ProgressIndicator progress) {
 		MongoTemplate template = MongoTemplateManager.get(module);
 
 		progress.addStep("Loading config");
 		progress.moveToNextStep();
-		Config config = new Config(snpEffDatabase, "/home/u017-h433/Documents/deps/snpEff/snpEff.config", "/home/u017-h433/Documents/deps/snpEff/data", null);
+		Config config = new Config(snpEffDatabase, configFile, dataPath, null);
 		Genome genome = config.getGenome();
 		SnpEffectPredictor predictor = config.loadSnpEffectPredictor();
 		predictor.buildForest();
