@@ -13,6 +13,11 @@ import org.snpeff.vcf.VcfEffect;
 import fr.cirad.mgdb.importing.VcfImport;
 import fr.cirad.mgdb.model.mongo.maintypes.VariantRunData;
 
+/**
+ * Wrapper around a VariantRunData entry to act like a SnpEff's VcfEntry,
+ * that can be split into multiple variants, one for each alternative allele
+ * @author Grégori MIGNEROT
+ */
 public class SnpEffEntryWrapper {
 	private Chromosome parent;
 	private VariantRunData entry;

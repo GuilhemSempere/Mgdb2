@@ -1,12 +1,17 @@
 package fr.cirad.mgdb.annotation;
 
+import java.io.File;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 import org.apache.log4j.Logger;
 import org.bson.Document;
@@ -17,6 +22,7 @@ import org.snpeff.snpEffect.Config;
 import org.snpeff.snpEffect.SnpEffectPredictor;
 import org.snpeff.snpEffect.VariantEffect;
 import org.snpeff.snpEffect.VariantEffects;
+import org.snpeff.snpEffect.commandLine.SnpEffCmdDownload;
 import org.snpeff.vcf.EffFormatVersion;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.query.Criteria;
@@ -38,6 +44,10 @@ import htsjdk.variant.vcf.VCFHeaderLineType;
 import htsjdk.variant.vcf.VCFInfoHeaderLine;
 
 
+/**
+ * Service that interfaces Mgdb2 and SnpEff to annotate variants directly from an Mgdb2 database
+ * @author Grégori MIGNEROT
+ */
 public class SnpEffAnnotationService {
     protected static final Logger LOG = Logger.getLogger(SnpEffAnnotationService.class);
 
@@ -121,7 +131,7 @@ public class SnpEffAnnotationService {
 		return entry.buildANN();
 	}
 
-	public static Chromosome getParentChromosome(VariantRunData vrd, Genome genome) {
+	private static Chromosome getParentChromosome(VariantRunData vrd, Genome genome) {
 		String sequence = vrd.getReferencePosition().getSequence();
 		Chromosome chromosome = genome.getChromosome(sequence);
 		if (chromosome != null) return chromosome;
@@ -136,5 +146,35 @@ public class SnpEffAnnotationService {
 		}
 
 		throw new RuntimeException("Chromosome name " + sequence + " is not compatible with the SnpEff database");
+	}
+
+	public static List<String> getAvailableGenomes(String configFile, String dataPath) {
+    	File repository = new File(dataPath);
+    	File[] databases = repository.listFiles(File::isDirectory);
+    	List<String> availableGenomes = Arrays.stream(databases).map(file -> file.getName()).collect(Collectors.toList());
+    	return availableGenomes;
+	}
+
+	public static List<String> getDownloadableGenomes(String configFile, String dataPath) {
+		Config config = new Config("", configFile, dataPath, null);
+		List<String> downloadableGenomes = new ArrayList<>();
+		for (String genome : config)
+			downloadableGenomes.add(genome);
+		return downloadableGenomes;
+	}
+
+	public static void downloadGenome(String configFile, String dataPath, String genomeVersion) throws Exception {
+		if (genomeVersion == "snpEff")
+			throw new IllegalArgumentException("This command is not allowed");
+
+		Config config = new Config("", configFile, dataPath, null);
+		SnpEffCmdDownload command = new SnpEffCmdDownload();
+		command.parseArgs(new String[]{genomeVersion});
+		try {
+			command.run();
+		} catch (Throwable t) {
+			LOG.error(t);
+			throw new Exception("Failed to download genome " + genomeVersion + " : " + t.getMessage());
+		}
 	}
 }

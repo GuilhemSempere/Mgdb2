@@ -99,7 +99,10 @@ public class DBVCFHeader
 	/** The m format meta data. */
 	private Map<String, VCFFormatHeaderLine> mFormatMetaData = new LinkedHashMap<>();
 
-	/** The m filter meta data. */
+	/** The m filter meta data.
+	 * NOTE : VCFFilterHeaderLine does not allow loading FILTER lines' genericFields properly,
+	 *        we need to use a constructor only available in its superclass VCFSimpleHeaderLine
+	 *        to be able to reload and save those lines properly */
 	private Map<String, VCFSimpleHeaderLine> mFilterMetaData = new LinkedHashMap<>();
 
 	/** The m other meta data. */
