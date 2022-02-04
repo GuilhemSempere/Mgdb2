@@ -181,7 +181,6 @@ public class IntertekImport extends AbstractGenotypeImport {
 
             mongoTemplate.getDb().runCommand(new BasicDBObject("profile", 0));	// disable profiling
 
-
             final String[] snpHeader = {"SNPID","SNPNum","AlleleY","AlleleX","Sequence"};
             int snpColIndex = Arrays.asList(snpHeader).indexOf("SNPID");
             int yColIndex = Arrays.asList(snpHeader).indexOf("AlleleY");
@@ -202,7 +201,7 @@ public class IntertekImport extends AbstractGenotypeImport {
             HashMap<String /*individual ID*/, GenotypingSample> samples = new HashMap<>();
 
             GenotypingProject project = mongoTemplate.findOne(new Query(Criteria.where(GenotypingProject.FIELDNAME_NAME).is(sProject)), GenotypingProject.class);
-
+            lockProjectForWriting(sModule, sProject);
             cleanupBeforeImport(mongoTemplate, sModule, project, importMode, sRun);
 
             Integer createdProject = null;
@@ -341,11 +340,9 @@ public class IntertekImport extends AbstractGenotypeImport {
             int nNConcurrentThreads = Math.max(1, Runtime.getRuntime().availableProcessors());
             LOG.debug("Importing project '" + sProject + "' into " + sModule + " using " + nNConcurrentThreads + " threads");
             
-            
             /*FIXME : we should parallelize the import file parsing, similarly to what is done in other formats (although this one is not meant to contain much data...)*/
             BlockingQueue<Runnable> saveServiceQueue = new LinkedBlockingQueue<Runnable>(saveServiceQueueLength(nNConcurrentThreads));
             ExecutorService saveService = new ThreadPoolExecutor(1, saveServiceThreads(nNConcurrentThreads), 30, TimeUnit.SECONDS, saveServiceQueue, new ThreadPoolExecutor.CallerRunsPolicy());
-            
 
             HashSet<VariantData> variantsChunk = new HashSet<>();
             HashSet<VariantRunData> variantRunsChunk = new HashSet<>();
@@ -399,7 +396,8 @@ public class IntertekImport extends AbstractGenotypeImport {
             return createdProject;
         } finally {
             if (m_fCloseContextOpenAfterImport && ctx != null)
-                    ctx.close();
+                ctx.close();
+            unlockProjectForWriting(sModule, sProject);
         }
     }
 }

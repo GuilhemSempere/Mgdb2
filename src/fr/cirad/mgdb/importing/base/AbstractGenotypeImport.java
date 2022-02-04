@@ -19,8 +19,11 @@ package fr.cirad.mgdb.importing.base;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.stream.Collectors;
 
@@ -53,19 +56,22 @@ import htsjdk.variant.variantcontext.Allele;
 import htsjdk.variant.variantcontext.VariantContext.Type;
 
 public class AbstractGenotypeImport {
-	
+
 	private static final Logger LOG = Logger.getLogger(AbstractGenotypeImport.class);
-	
+
 	protected static final int nMaxChunkSize = 20000;
 
 	private boolean m_fAllowDbDropIfNoGenotypingData = true;
 
-	protected static HashMap<String /*module*/, String /*project*/> currentlyImportedProjects = new HashMap<>();
-	
+	/** Map that associates modules to projects currently undergoing a write operation, thus rendering them unavailable for other write operations
+	 * A null value in the set indicates the whole module is locked
+	 */
+	private static HashMap<String /*module*/, Set<String> /*projects*/> currentlyImportedProjects = new HashMap<String, Set<String>>();
+
 	public static ArrayList<String> getIdentificationStrings(String sType, String sSeq, Long nStartPos, Collection<String> idAndSynonyms) throws Exception
 	{
 		ArrayList<String> result = new ArrayList<String>();
-		
+
 		if (idAndSynonyms != null)
 			result.addAll(idAndSynonyms.stream().map(s -> s.toUpperCase()).collect(Collectors.toList()));
 
@@ -74,13 +80,88 @@ public class AbstractGenotypeImport {
 
 		if (result.size() == 0)
 			throw new Exception("Not enough info provided to build identification strings");
-		
+
 		return result;
 	}
-	
-	public static String getCurrentlyImportedProjectForModule(String sModule)
+
+	// Manage unavailable projects
+	// FIXME : Potential race condition ?
+
+	/**
+	 * Get the set of projects in the given module that are unavailable to write into
+	 * Better use isProjectAvailableForWriting or isModuleAvailableForWriting when possible
+	 * @param sModule Module to check
+	 * @return The set of unavailable projects
+	 */
+	public static Set<String> getModuleProjectsUnavailableForWriting(String sModule)
 	{
-		return currentlyImportedProjects.get(sModule);
+		Set<String> projects = currentlyImportedProjects.get(sModule);
+		if (projects == null) {
+			return new HashSet<String>();
+		} else if (projects.contains(null)) {
+			projects = new HashSet<String>();
+
+			Query query = new Query();
+			query.fields().include(GenotypingProject.FIELDNAME_NAME);
+			List<GenotypingProject> result = MongoTemplateManager.get(sModule).find(query, GenotypingProject.class);
+			return result.stream()
+					.map(project -> project.getName())
+					.collect(Collectors.toSet());
+		} else {
+			return Collections.unmodifiableSet(projects);
+		}
+	}
+
+	public static boolean isProjectAvailableForWriting(String sModule, String sProject) {
+		Set<String> projects = currentlyImportedProjects.get(sModule);
+		if (projects != null) {
+			// Project locked individually or whole module locked
+			return !(projects.contains(sProject) || projects.contains(null));
+		} else {
+			return true;
+		}
+	}
+
+	public static boolean isModuleAvailableForWriting(String sModule) {
+		Set<String> projects = currentlyImportedProjects.get(sModule);
+		if (projects != null) {
+			return projects.size() == 0;
+		} else {
+			return true;
+		}
+	}
+
+	public static void lockProjectForWriting(String sModule, String sProject) {
+		Set<String> projects = currentlyImportedProjects.get(sModule);
+		if (projects != null) {
+			projects.add(sProject);
+		} else {
+			projects = new HashSet<String>();
+			projects.add(sProject);
+			currentlyImportedProjects.put(sModule, projects);
+		}
+	}
+
+	public static void unlockProjectForWriting(String sModule, String sProject) {
+		currentlyImportedProjects.get(sModule).remove(sProject);
+	}
+
+	public static void lockModuleForWriting(String sModule) {
+		Set<String> projects = currentlyImportedProjects.get(sModule);
+		if (projects != null) {
+			projects.add(null);
+		} else {
+			projects = new HashSet<String>();
+			projects.add(null);
+			currentlyImportedProjects.put(sModule, projects);
+		}
+	}
+
+	public static void unlockModuleForWriting(String sModule) {
+		Set<String> projects = currentlyImportedProjects.get(sModule);
+		if (projects != null) {
+			projects.clear();
+		}
 	}
 
 //	public static void buildSynonymMappings(MongoTemplate mongoTemplate) throws Exception
@@ -121,7 +202,7 @@ public class AbstractGenotypeImport {
 //						LOG.error(dke.getMessage());
 //					}
 //				}
-//				
+//
 //				float nProgressPercentage = ++i * 100f / variantCount;
 //				if (nProgressPercentage % 10 == 0)
 //					LOG.debug("buildSynonymMappings: " + nProgressPercentage + "%");
@@ -131,7 +212,7 @@ public class AbstractGenotypeImport {
 //            	LOG.warn(nDups + " duplicates found in database " + mongoTemplate.getDb().getName());
 //        }
 //	}
-	
+
 	protected static HashMap<String, String> buildSynonymToIdMapForExistingVariants(MongoTemplate mongoTemplate, boolean fIncludeRandomObjectIDs) throws Exception
 	{
         HashMap<String, String> existingVariantIDs = new HashMap<>();
@@ -168,7 +249,7 @@ public class AbstractGenotypeImport {
         }
         return existingVariantIDs;
 	}
-	
+
 	static public boolean doesDatabaseSupportImportingUnknownVariants(String sModule)
 	{
 		MongoTemplate mongoTemplate = MongoTemplateManager.get(sModule);
@@ -187,8 +268,8 @@ public class AbstractGenotypeImport {
 		boolean fLooksLikePreprocessedVariantList = firstId != null && firstId.endsWith("001") && mongoTemplate.count(new Query(Criteria.where("_id").not().regex("^\\*?" + StringUtils.getCommonPrefix(new String[] {firstId, lastId}) + ".*")), VariantData.class) == 0;
 //		LOG.debug("Database " + sModule + " does " + (fLooksLikePreprocessedVariantList ? "not " : "") + "support importing unknown variants");
 		return !fLooksLikePreprocessedVariantList;
-	}	
-	
+	}
+
 	protected void saveChunk(final Collection<VariantData> unsavedVariants, final Collection<VariantRunData> unsavedRuns, HashMap<String, String> existingVariantIDs, MongoTemplate finalMongoTemplate, ProgressIndicator progress, ExecutorService saveService) throws InterruptedException {
         Thread insertionThread = new Thread() {
             @Override
@@ -201,14 +282,14 @@ public class AbstractGenotypeImport {
 				}
             }
         };
-        
+
         saveService.execute(insertionThread);
 	}
-	
+
 	protected int saveServiceQueueLength(int nConcurrentThreads) {
 		return nConcurrentThreads * 6;
 	}
-	
+
 	protected int saveServiceThreads(int nConcurrentThreads) {
 		return nConcurrentThreads * 3;
 	}
@@ -216,7 +297,7 @@ public class AbstractGenotypeImport {
     public void persistVariantsAndGenotypes(boolean fDBAlreadyContainsVariants, MongoTemplate mongoTemplate, Collection<VariantData> unsavedVariants, Collection<VariantRunData> unsavedRuns) throws InterruptedException
     {
 //    	long b4 = System.currentTimeMillis();
-		Thread vdAsyncThread = new Thread() {	// using 2 threads is faster when calling save, but slower when calling insert 
+		Thread vdAsyncThread = new Thread() {	// using 2 threads is faster when calling save, but slower when calling insert
 			public void run() {
 				if (!fDBAlreadyContainsVariants) {	// we benefit from the fact that it's the first variant import into this database to use bulk insert which is much faster
 					mongoTemplate.insert(unsavedVariants, VariantData.class);
@@ -233,15 +314,15 @@ public class AbstractGenotypeImport {
 			}
 		};
 		vdAsyncThread.start();
-    	
+
 //		long t1 = System.currentTimeMillis() - b4;
 //		b4 = System.currentTimeMillis();
-		
+
 		List<VariantRunData> syncList = new ArrayList<>(), asyncList = new ArrayList<>();
 		int i = 0;
 		for (VariantRunData vrd : unsavedRuns)
 			(i++ < unsavedRuns.size() / 2 ? syncList : asyncList).add(vrd);
-	    		
+
 		try {
 			Thread vrdAsyncThread = new Thread() {
 				public void run() {
@@ -255,7 +336,7 @@ public class AbstractGenotypeImport {
 		catch (DuplicateKeyException dke)
 		{
 			LOG.info("Persisting runs using save() because of synonym variants: " + dke.getMessage());
-			Thread vrdAsyncThread = new Thread() {	// using 2 threads is faster when calling save, but slower when calling insert 
+			Thread vrdAsyncThread = new Thread() {	// using 2 threads is faster when calling save, but slower when calling insert
 				public void run() {
 			    	asyncList.stream().forEach(vrd -> mongoTemplate.save(vrd));
 				}
@@ -268,7 +349,7 @@ public class AbstractGenotypeImport {
 		vdAsyncThread.join();
 //		System.err.println("VD: " + t1 + " / VRD: " + (System.currentTimeMillis() - b4));
     }
-    
+
     protected void cleanupBeforeImport(MongoTemplate mongoTemplate, String sModule, GenotypingProject project, int importMode, String sRun) {
         if (importMode == 2)
             mongoTemplate.getDb().drop(); // drop database before importing
@@ -312,7 +393,7 @@ public class AbstractGenotypeImport {
                 mongoTemplate.getDb().drop();	// if there is no genotyping data left and we are not working on a fixed list of variants then any other data is irrelevant
         }
 	}
-    
+
 	public boolean isAllowedToDropDbIfNoGenotypingData() {
 		return m_fAllowDbDropIfNoGenotypingData;
 	}
@@ -320,9 +401,9 @@ public class AbstractGenotypeImport {
 	public void allowDbDropIfNoGenotypingData(boolean fAllowDbDropIfNoGenotypingData) {
 		this.m_fAllowDbDropIfNoGenotypingData = fAllowDbDropIfNoGenotypingData;
 	}
-	
+
 	/**
-	 * Code copied from htsjdk.variant.variantcontext.VariantContext (Copyright The Broad Institute) and adapted for convenience, 
+	 * Code copied from htsjdk.variant.variantcontext.VariantContext (Copyright The Broad Institute) and adapted for convenience,
 	 */
     public static Type determineType(Collection<Allele> alleles) {
         switch ( alleles.size() ) {
@@ -337,7 +418,7 @@ public class AbstractGenotypeImport {
     }
 
     /**
-     * Code copied from htsjdk.variant.variantcontext.VariantContext (Copyright The Broad Institute) and adapted for convenience, 
+     * Code copied from htsjdk.variant.variantcontext.VariantContext (Copyright The Broad Institute) and adapted for convenience,
      */
     public static Type determinePolymorphicType(Collection<Allele> alleles) {
         Type type = null;
@@ -364,7 +445,7 @@ public class AbstractGenotypeImport {
     }
 
     /**
-     * Code copied from htsjdk.variant.variantcontext.VariantContext (Copyright The Broad Institute) and adapted for convenience, 
+     * Code copied from htsjdk.variant.variantcontext.VariantContext (Copyright The Broad Institute) and adapted for convenience,
      */
     public static Type typeOfBiallelicVariant(Allele ref, Allele allele) {
         if ( ref.isSymbolic() )

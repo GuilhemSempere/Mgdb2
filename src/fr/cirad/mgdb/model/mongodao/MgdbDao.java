@@ -194,10 +194,14 @@ public class MgdbDao {
         };
         t.start();
 
-        LOG.debug("Creating index on field " + VariantRunData.SECTION_ADDITIONAL_INFO + "." + VariantRunData.FIELDNAME_ADDITIONAL_INFO_EFFECT_GENE + " of collection " + runColl.getNamespace());
-        runColl.createIndex(new BasicDBObject(VariantRunData.SECTION_ADDITIONAL_INFO + "." + VariantRunData.FIELDNAME_ADDITIONAL_INFO_EFFECT_GENE, 1));
-        LOG.debug("Creating index on field " + VariantRunData.SECTION_ADDITIONAL_INFO + "." + VariantRunData.FIELDNAME_ADDITIONAL_INFO_EFFECT_NAME + " of collection " + runColl.getNamespace());
-        runColl.createIndex(new BasicDBObject(VariantRunData.SECTION_ADDITIONAL_INFO + "." + VariantRunData.FIELDNAME_ADDITIONAL_INFO_EFFECT_NAME, 1));
+        if (mongoTemplate.findOne(new Query(Criteria.where(GenotypingProject.FIELDNAME_EFFECT_ANNOTATIONS + ".0").exists(true)) {{ fields().include("_id"); }}, GenotypingProject.class) == null)
+            LOG.debug("Skipping index creation for effect name & gene since database contains no such information");
+        else {
+            LOG.debug("Creating index on field " + VariantRunData.SECTION_ADDITIONAL_INFO + "." + VariantRunData.FIELDNAME_ADDITIONAL_INFO_EFFECT_GENE + " of collection " + runColl.getNamespace());
+            runColl.createIndex(new BasicDBObject(VariantRunData.SECTION_ADDITIONAL_INFO + "." + VariantRunData.FIELDNAME_ADDITIONAL_INFO_EFFECT_GENE, 1));
+            LOG.debug("Creating index on field " + VariantRunData.SECTION_ADDITIONAL_INFO + "." + VariantRunData.FIELDNAME_ADDITIONAL_INFO_EFFECT_NAME + " of collection " + runColl.getNamespace());
+            runColl.createIndex(new BasicDBObject(VariantRunData.SECTION_ADDITIONAL_INFO + "." + VariantRunData.FIELDNAME_ADDITIONAL_INFO_EFFECT_NAME, 1));
+        }
         LOG.debug("Creating index on field _id." + VariantRunDataId.FIELDNAME_VARIANT_ID + " of collection " + runColl.getNamespace());
         runColl.createIndex(new BasicDBObject("_id." + VariantRunDataId.FIELDNAME_VARIANT_ID, 1));
         LOG.debug("Creating index on field _id." + VariantRunDataId.FIELDNAME_PROJECT_ID + " of collection " + runColl.getNamespace());
@@ -474,15 +478,16 @@ public class MgdbDao {
     }
 
     /**
-     * Gets the individual population.
+     * Gets individuals' populations.
      *
      * @param sModule the module
-     * @param individual the individual
-     * @return the individual population
+     * @param individuals the individual IDs
+     * @return the individual ID to population map
      */
-    public static String getIndividualPopulation(final String sModule, final String individual) {
-        MongoTemplate mongoTemplate = MongoTemplateManager.get(sModule);
-        return mongoTemplate.findById(individual, Individual.class).getPopulation();
+    public static Map<String, String> getIndividualPopulations(final String sModule, final Collection<String> individuals) {
+        Query query = new Query(new Criteria().andOperator(Criteria.where("_id").in(individuals), Criteria.where(Individual.FIELDNAME_POPULATION).ne(null)));
+        query.fields().include(Individual.FIELDNAME_POPULATION);
+        return MongoTemplateManager.get(sModule).find(query, Individual.class).stream().collect(Collectors.toMap(ind -> ind.getId(), ind -> ind.getPopulation()));
     }
 
     public static TreeSet<String> getAnnotationFields(MongoTemplate mongoTemplate, int projId, boolean fOnlySearchableFields) {

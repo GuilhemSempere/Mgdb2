@@ -425,7 +425,7 @@ public class HapMapImport extends AbstractGenotypeImport {
 			throw new Exception("Variant type mismatch between existing data and data to import: " + variantToFeed.getId());
 
 		if (variantToFeed.getReferencePosition() == null)	// otherwise we leave it as it is (had some trouble with overridden end-sites)
-			variantToFeed.setReferencePosition(new ReferencePosition(hmFeature.getChr(), hmFeature.getStart(), (long) hmFeature.getEnd()));
+		    variantToFeed.setReferencePosition(new ReferencePosition(hmFeature.getChr(), hmFeature.getStart(), (long) hmFeature.getStart() + hmFeature.getAlleles()[0].length() - 1));
 		
 		// take into account ref and alt alleles (if it's not too late)
 		if (variantToFeed.getKnownAlleles().size() == 0)

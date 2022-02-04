@@ -153,7 +153,7 @@ public class ExportManager
 
         // optimization 2: build the $project stage by excluding fields when over 50% of overall samples are selected; even remove that stage when exporting all (or almost all) samples (makes it much faster)
         long nTotalNumberOfSamplesInDB = Helper.estimDocCount(mongoTemplate, GenotypingSample.class);
-        long percentageOfExportedSamples = 100 * samplesToExport.size() / nTotalNumberOfSamplesInDB;
+        long percentageOfExportedSamples = nTotalNumberOfSamplesInDB == 0 ? 100 : 100 * samplesToExport.size() / nTotalNumberOfSamplesInDB;
         sampleIDsToExport = samplesToExport == null ? new ArrayList<>() : samplesToExport.stream().map(sp -> sp.getId()).collect(Collectors.toList());
         Collection<Integer> sampleIDsNotToExport = percentageOfExportedSamples >= 98 ? new ArrayList<>() /* if almost all individuals are being exported we directly omit the $project stage */ : (percentageOfExportedSamples > 50 ? mongoTemplate.findDistinct(new Query(Criteria.where("_id").not().in(sampleIDsToExport)), "_id", GenotypingSample.class, Integer.class) : null);
 
@@ -307,7 +307,7 @@ public class ExportManager
                 if (markerCount != null)
                     progress.setCurrentStepProgress(nWrittenmarkerCount * 100l / markerCount);
                 future = writingThread.writeRuns(tempMarkerRunsToWrite);
-                tempMarkerRunsToWrite.clear();
+                tempMarkerRunsToWrite = new ArrayDeque<>(nQueryChunkSize); 
             }
         }
 

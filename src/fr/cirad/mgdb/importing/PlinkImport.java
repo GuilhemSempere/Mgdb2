@@ -81,16 +81,16 @@ public class PlinkImport extends AbstractGenotypeImport {
 
     /** The Constant LOG. */
     private static final Logger LOG = Logger.getLogger(VariantData.class);
-    
+
     /** The m_process id. */
     private String m_processID;
-    
+
     private boolean fImportUnknownVariants = false;
-    
+
     public boolean m_fCloseContextOpenAfterImport = false;
-    
+
     private static int m_nCurrentlyTransposingMatrixCount = 0;
-        
+
     /**
      * Instantiates a new PLINK import.
      */
@@ -138,7 +138,7 @@ public class PlinkImport extends AbstractGenotypeImport {
         File mapFile = new File(args[4]);
         if (!mapFile.exists() || mapFile.length() == 0)
             throw new Exception("File " + args[4] + " is missing or empty!");
-        
+
         File pedFile = new File(args[5]);
         if (!pedFile.exists() || pedFile.length() == 0)
             throw new Exception("File " + args[5] + " is missing or empty!");
@@ -174,11 +174,11 @@ public class PlinkImport extends AbstractGenotypeImport {
     {
         if (m_nCurrentlyTransposingMatrixCount > 3) // we allow up to 4 simultaneous matrix rotations
             throw new Exception("The system is already busy rotating other PLINK datasets, please try again later");
-        
+
         long before = System.currentTimeMillis();
-        ProgressIndicator progress = ProgressIndicator.get(m_processID) != null ? ProgressIndicator.get(m_processID) : new ProgressIndicator(m_processID, new String[]{"Initializing import"}); // better to add it straight-away so the JSP doesn't get null in return when it checks for it (otherwise it will assume the process has ended)     
+        ProgressIndicator progress = ProgressIndicator.get(m_processID) != null ? ProgressIndicator.get(m_processID) : new ProgressIndicator(m_processID, new String[]{"Initializing import"}); // better to add it straight-away so the JSP doesn't get null in return when it checks for it (otherwise it will assume the process has ended)
         LinkedHashSet<Integer> redundantVariantIndexes = new LinkedHashSet<>();
-        
+
         GenericXmlApplicationContext ctx = null;
         try
         {
@@ -201,7 +201,7 @@ public class PlinkImport extends AbstractGenotypeImport {
                     throw new Exception("DATASOURCE '" + sModule + "' is not supported!");
             }
 
-            fImportUnknownVariants = doesDatabaseSupportImportingUnknownVariants(sModule);          
+            fImportUnknownVariants = doesDatabaseSupportImportingUnknownVariants(sModule);
 
             if (m_processID == null)
                 m_processID = "IMPORT__" + sModule + "__" + sProject + "__" + sRun + "__" + System.currentTimeMillis();
@@ -210,7 +210,9 @@ public class PlinkImport extends AbstractGenotypeImport {
             GenotypingProject project = mongoTemplate.findOne(new Query(Criteria.where(GenotypingProject.FIELDNAME_NAME).is(sProject)), GenotypingProject.class);
             if (importMode == 0 && project != null && project.getPloidyLevel() != 2)
                 throw new Exception("Ploidy levels differ between existing (" + project.getPloidyLevel() + ") and provided (" + 2 + ") data!");
-            
+
+            lockProjectForWriting(sModule, sProject);
+
             cleanupBeforeImport(mongoTemplate, sModule, project, importMode, sRun);
 
             Integer createdProject = null;
@@ -225,28 +227,28 @@ public class PlinkImport extends AbstractGenotypeImport {
             }
             project.setPloidyLevel(2);
 
-            HashMap<String, String> existingVariantIDs = buildSynonymToIdMapForExistingVariants(mongoTemplate, false);          
-            
+            HashMap<String, String> existingVariantIDs = buildSynonymToIdMapForExistingVariants(mongoTemplate, false);
+
             String info = "Loading variant list from MAP file";
             LOG.info(info);
             progress.addStep(info);
             progress.moveToNextStep();
             LinkedHashMap<String, String> variantsAndPositions = PlinkEigenstratTool.getVariantsAndPositionsFromPlinkMapFile(mapFileURL, redundantVariantIndexes, "\t");
             String[] variants = variantsAndPositions.keySet().toArray(new String[variantsAndPositions.size()]);
-            
+
             info = "Checking genotype consistency";
 //          LOG.info(info);
             progress.addStep(info);
             progress.moveToNextStep();
-            
+
             // rotate matrix using temporary files
             info = "Reading and reorganizing genotypes";
             LOG.info(info);
             progress.addStep(info);
-            progress.moveToNextStep();          
+            progress.moveToNextStep();
             Map<String, String> userIndividualToPopulationMap = new LinkedHashMap<>();
             Map<String, Type> nonSnpVariantTypeMap = new HashMap<>();
-            
+
             File rotatedFile = null;
             try {
                 m_nCurrentlyTransposingMatrixCount++;
@@ -255,14 +257,14 @@ public class PlinkImport extends AbstractGenotypeImport {
             finally {
                 m_nCurrentlyTransposingMatrixCount--;
             }
-             
+
             progress.addStep("Checking genotype consistency between synonyms");
             progress.moveToNextStep();
 
             HashMap<String, ArrayList<String>> inconsistencies = !fCheckConsistencyBetweenSynonyms ? null : checkSynonymGenotypeConsistency(rotatedFile, existingVariantIDs, userIndividualToPopulationMap.keySet(), pedFile.getParentFile() + File.separator + sModule + "_" + sProject + "_" + sRun);
             if (progress.getError() != null)
                 return 0;
-            
+
             int nConcurrentThreads = Math.max(1, Runtime.getRuntime().availableProcessors());
             LOG.debug("Importing project '" + sProject + "' into " + sModule + " using " + nConcurrentThreads + " threads");
             long count = importTempFileContents(progress, nConcurrentThreads, mongoTemplate, rotatedFile, variantsAndPositions, existingVariantIDs, project, sRun, inconsistencies, userIndividualToPopulationMap, nonSnpVariantTypeMap, fSkipMonomorphic);
@@ -279,14 +281,15 @@ public class PlinkImport extends AbstractGenotypeImport {
         {
             if (m_fCloseContextOpenAfterImport && ctx != null)
                 ctx.close();
+            unlockProjectForWriting(sModule, sProject);
         }
     }
 
-    public long importTempFileContents(ProgressIndicator progress, int nNConcurrentThreads, MongoTemplate mongoTemplate, File tempFile, LinkedHashMap<String, String> variantsAndPositions, HashMap<String, String> existingVariantIDs, GenotypingProject project, String sRun, HashMap<String, ArrayList<String>> inconsistencies, Map<String, String> userIndividualToPopulationMap, Map<String, Type> nonSnpVariantTypeMap, boolean fSkipMonomorphic) throws Exception            
+    public long importTempFileContents(ProgressIndicator progress, int nNConcurrentThreads, MongoTemplate mongoTemplate, File tempFile, LinkedHashMap<String, String> variantsAndPositions, HashMap<String, String> existingVariantIDs, GenotypingProject project, String sRun, HashMap<String, ArrayList<String>> inconsistencies, Map<String, String> userIndividualToPopulationMap, Map<String, Type> nonSnpVariantTypeMap, boolean fSkipMonomorphic) throws Exception
     {
         String[] individuals = userIndividualToPopulationMap.keySet().toArray(new String[userIndividualToPopulationMap.size()]);
         final AtomicInteger count = new AtomicInteger(0);
-        
+
         // loop over each variation and write to DB
         BufferedReader reader = null;
         try
@@ -296,10 +299,10 @@ public class PlinkImport extends AbstractGenotypeImport {
             progress.addStep(info);
             progress.moveToNextStep();
             progress.setPercentageEnabled(true);
-            
+
             final int nNumberOfVariantsToSaveAtOnce = Math.max(1, nMaxChunkSize / individuals.length);
             LOG.info("Importing by chunks of size " + nNumberOfVariantsToSaveAtOnce);
-            
+
             // Create the necessary samples
             HashMap<String /*individual*/, GenotypingSample> samples = new HashMap<>();
             LinkedHashSet<String> individualsWithoutPopulation = new LinkedHashSet<>();
@@ -319,27 +322,27 @@ public class PlinkImport extends AbstractGenotypeImport {
                     if (fAlreadyExists)
                         fNeedToSave = false;
                 }
-                
+
                 if (fNeedToSave)
                     mongoTemplate.save(ind);
 
                 int sampleId = AutoIncrementCounter.getNextSequence(mongoTemplate, MongoTemplateManager.getMongoCollectionName(GenotypingSample.class));
                 samples.put(sIndividual, new GenotypingSample(sampleId, project.getId(), sRun, sIndividual));   // add a sample for this individual to the project
             }
-            
+
             if (!individualsWithoutPopulation.isEmpty())
                 LOG.warn("Unable to find 3-letter population code for individuals: " + StringUtils.join(individualsWithoutPopulation, ", "));
-            
+
             reader = new BufferedReader(new FileReader(tempFile));
-            
+
             final BufferedReader finalReader = reader;
-            
+
             // Leave one thread dedicated to the saveChunk service, it looks empirically faster that way
             int nImportThreads = Math.max(1, nNConcurrentThreads - 1);
             Thread[] importThreads = new Thread[nImportThreads];
             BlockingQueue<Runnable> saveServiceQueue = new LinkedBlockingQueue<Runnable>(saveServiceQueueLength(nNConcurrentThreads));
             ExecutorService saveService = new ThreadPoolExecutor(1, saveServiceThreads(nNConcurrentThreads), 30, TimeUnit.SECONDS, saveServiceQueue, new ThreadPoolExecutor.CallerRunsPolicy());
-            
+
             for (int threadIndex = 0; threadIndex < nImportThreads; threadIndex++) {
                 importThreads[threadIndex] = new Thread() {
                     @Override
@@ -356,10 +359,10 @@ public class PlinkImport extends AbstractGenotypeImport {
                                 if (line == null)
                                     break;
                                 String[] splitLine = line.split("\t");
-                                
+
                                 if (fSkipMonomorphic && Arrays.stream(splitLine, 1, splitLine.length).filter(gt -> !"0/0".equals(gt)).distinct().count() < 2)
                                     continue; // skip non-variant positions
-                                
+
                                 String providedVariantId = splitLine[0];
 
                                 String[] seqAndPos = variantsAndPositions.get(providedVariantId).split("\t");
@@ -398,7 +401,7 @@ public class PlinkImport extends AbstractGenotypeImport {
                                 }
                                 else
                                 {
-                                    VariantData variant = mongoTemplate.findById(variantId == null ? providedVariantId : variantId, VariantData.class);                         
+                                    VariantData variant = mongoTemplate.findById(variantId == null ? providedVariantId : variantId, VariantData.class);
                                     if (variant == null)
                                         variant = new VariantData((ObjectId.isValid(providedVariantId) ? "_" : "") + providedVariantId);
 
@@ -423,7 +426,7 @@ public class PlinkImport extends AbstractGenotypeImport {
                                     }
 
                                     VariantRunData runToSave = addPlinkDataToVariant(mongoTemplate, variant, sequence, bpPosition, userIndividualToPopulationMap, nonSnpVariantTypeMap, alleles, project, sRun, samples, fImportUnknownVariants);
-                                    
+
                                     if (variant.getReferencePosition() != null)
                                         project.getSequences().add(variant.getReferencePosition().getSequence());
 
@@ -443,8 +446,8 @@ public class PlinkImport extends AbstractGenotypeImport {
                                         saveChunk(unsavedVariants, unsavedRuns, existingVariantIDs, mongoTemplate, progress, saveService);
                                         unsavedVariants = new HashSet<VariantData>();
                                         unsavedRuns = new HashSet<VariantRunData>();
-                                        
-                                        progress.setCurrentStepProgress(count.get() * 100 / variantsAndPositions.size());   
+
+                                        progress.setCurrentStepProgress(count.get() * 100 / variantsAndPositions.size());
                                     }
                                 }
                                 int newCount = count.incrementAndGet();
@@ -452,25 +455,25 @@ public class PlinkImport extends AbstractGenotypeImport {
                                     LOG.debug(newCount + " lines processed");
                                 processedVariants += 1;
                             }
-                            
+
                             persistVariantsAndGenotypes(!existingVariantIDs.isEmpty(), mongoTemplate, unsavedVariants, unsavedRuns);
                         } catch (Throwable t) {
                             progress.setError("Genotypes import failed with error: " + t.getMessage());
                             LOG.error(progress.getError(), t);
                             return;
                         }
-                            
+
                     }
                 };
-                
+
                 importThreads[threadIndex].start();
             }
-            
+
             for (int i = 0; i < nImportThreads; i++)
                 importThreads[i].join();
             saveService.shutdown();
             saveService.awaitTermination(Integer.MAX_VALUE, TimeUnit.DAYS);
-            
+
             if (progress.getError() != null || progress.isAborted())
                 return 0;
 
@@ -489,33 +492,33 @@ public class PlinkImport extends AbstractGenotypeImport {
         }
         return count.get();
     }
-    
+
     private long getAllocatableMemory(boolean fCalledFromCommandLine) {
         Runtime rt = Runtime.getRuntime();
         long allocatableMemory = (long) ((fCalledFromCommandLine ? .8 : .5) * (rt.maxMemory() - rt.totalMemory() + rt.freeMemory()));
         return allocatableMemory;
     }
-    
+
     private File transposePlinkPedFile(String[] variants, File pedFile, Map<String, String> userIndividualToPopulationMapToFill, Map<String, Type> nonSnpVariantTypeMapToFill, boolean fSkipMonomorphic, ProgressIndicator progress) throws Exception {
         long before = System.currentTimeMillis();
-        
+
         StackTraceElement[] stacktrace = Thread.currentThread().getStackTrace();
         boolean fCalledFromCommandLine = stacktrace[stacktrace.length-1].getClassName().equals(getClass().getName()) && "main".equals(stacktrace[stacktrace.length-1].getMethodName());
-        
+
         int nConcurrentThreads = Math.max(1, Runtime.getRuntime().availableProcessors());
-        
+
         File outputFile = File.createTempFile("plinkImport-" + pedFile.getName() + "-", ".tsv");
         FileWriter outputWriter = new FileWriter(outputFile);
-                
+
         Pattern allelePattern = Pattern.compile("\\S+");
         Pattern outputFileSeparatorPattern = Pattern.compile("(/|\\t)");
-        
+
         ArrayList<Integer> blockStartMarkers = new ArrayList<Integer>();  // blockStartMarkers[i] = first marker of block i
         ArrayList<ArrayList<Integer>> blockLinePositions = new ArrayList<ArrayList<Integer>>();  // blockLinePositions[line][block] = first character of `block` in `line`
         ArrayList<Integer> lineLengths = new ArrayList<Integer>();
         int maxLineLength = 0, maxPayloadLength = 0;
         blockStartMarkers.add(0);
-        
+
         // Read the line headers, fill the individual map and creates the block positions arrays
         BufferedReader reader = new BufferedReader(new FileReader(pedFile));
         String initLine;
@@ -527,23 +530,23 @@ public class PlinkImport extends AbstractGenotypeImport {
             initMatcher.find();
             String sIndividual = initMatcher.group();
             userIndividualToPopulationMapToFill.put(sIndividual, sPopulation);
-            
+
             // Skip the remaining header fields
             for (int i = 0; i < 4; i++)
                 initMatcher.find();
-            
+
             ArrayList<Integer> positions = new ArrayList<Integer>();
-            
+
             // Find the first allele to get the actual beginning of the genotypes, without the first separators
             initMatcher.find();
             int payloadStart = initMatcher.start();
             positions.add(payloadStart);
             blockLinePositions.add(positions);
-            
+
             // Find the length of the line's payload (without header and trailing separators)
             String sPayLoad = initLine.substring(payloadStart).trim();
             lineLengths.add(sPayLoad.length());
-            
+
             if (initLine.length() > maxLineLength)
                 maxLineLength = initLine.length();
             if (sPayLoad.length() > maxPayloadLength)
@@ -552,14 +555,14 @@ public class PlinkImport extends AbstractGenotypeImport {
             nIndividuals += 1;
         }
         reader.close();
-        
+
         // Counted as [allele, sep, allele, sep] : -1 because trailing separators are not accounted for
         final int nTrivialLineSize = 4*variants.length - 1;
         final int initialCapacity = (int)((long)nIndividuals * (long)(2*maxPayloadLength - nTrivialLineSize + 1) / variants.length);  // +1 because of leading tabs
         final int maxBlockSize = (int)Math.ceil((float)variants.length / nConcurrentThreads);
         LOG.debug(nIndividuals + " individuals, " + variants.length + " variants, maxPayloadLength=" + maxPayloadLength + ", nTrivialLineSize=" + nTrivialLineSize + " : " + (nIndividuals * (2*maxPayloadLength - nTrivialLineSize + 1) / variants.length));
         LOG.debug("Max line length : " + maxLineLength + ", initial capacity : " + initialCapacity);
-        
+
         final int cMaxLineLength = maxLineLength;
         final int cIndividuals = nIndividuals;
         final AtomicInteger nFinishedVariantCount = new AtomicInteger(0);
@@ -567,7 +570,7 @@ public class PlinkImport extends AbstractGenotypeImport {
         Thread[] transposeThreads = new Thread[nConcurrentThreads];
         Type[] variantTypes = new Type[variants.length];
         Arrays.fill(variantTypes, null);
-        
+
         for (int threadIndex = 0; threadIndex < nConcurrentThreads; threadIndex++) {
             final int cThreadIndex = threadIndex;
             transposeThreads[threadIndex] = new Thread() {
@@ -578,36 +581,36 @@ public class PlinkImport extends AbstractGenotypeImport {
                         StringBuilder lineBuffer = new StringBuilder(cMaxLineLength);
                         char[] fileBuffer = new char[cMaxLineLength];
                         ArrayList<StringBuilder> transposed = new ArrayList<StringBuilder>();
-                        
-                        while (blockStartMarkers.get(blockStartMarkers.size() - 1) < variants.length && progress.getError() == null) {   
+
+                        while (blockStartMarkers.get(blockStartMarkers.size() - 1) < variants.length && progress.getError() == null) {
                             FileReader reader = new FileReader(pedFile);
                             try {
                                 int blockIndex, blockSize, blockStart;
                                 int bufferPosition = 0, bufferLength = 0;
-                                
+
                                 // Only one import thread can allocate its memory at once
                                 synchronized (AbstractGenotypeImport.class) {
                                     blockIndex = blockStartMarkers.size() - 1;
                                     blockStart = blockStartMarkers.get(blockStartMarkers.size() - 1);
                                     if (blockStart >= variants.length)
                                         return;
-                                    
+
                                     // Take more memory if a significant amount has been released (e.g. when another import finished transposing)
                                     long allocatableMemory = getAllocatableMemory(fCalledFromCommandLine);
                                     if (allocatableMemory > memoryPool.get())
                                         memoryPool.set((allocatableMemory + memoryPool.get()) / 2);
-                                    
+
                                     long blockGenotypesMemory = memoryPool.get() / nConcurrentThreads - cMaxLineLength;
                                     //                   max block size with the given amount of memory   | remaining variants to read
                                     blockSize = Math.min((int)(blockGenotypesMemory / (2*initialCapacity)), variants.length - blockStart);
                                     blockSize = Math.min(blockSize, maxBlockSize);
                                     if (blockSize < 1)
                                         continue;
-                                    
+
                                     blockStartMarkers.add(blockStart + blockSize);
                                     LOG.debug("Thread " + cThreadIndex + " starts block " + blockIndex + " : " + blockSize + " markers starting at marker " + blockStart + " (" + blockGenotypesMemory + " allowed)");
-                                    
-                                    
+
+
                                     if (transposed.size() < blockSize) {  // Allocate more buffers if needed
                                         transposed.ensureCapacity(blockSize);
                                         for (int i = transposed.size(); i < blockSize; i++) {
@@ -615,12 +618,12 @@ public class PlinkImport extends AbstractGenotypeImport {
                                         }
                                     }
                                 }
-                                
+
                                 // Reset the transposed variants buffers
                                 for (int marker = 0; marker < blockSize; marker++) {
                                     transposed.get(marker).setLength(0);
                                 }
-                                
+
                                 bufferLength = reader.read(fileBuffer, 0, cMaxLineLength);
                                 for (int individual = 0; individual < cIndividuals; individual++) {
                                     // Read a line, but implementing the BufferedReader ourselves with our own buffers to avoid producing garbage
@@ -635,7 +638,7 @@ public class PlinkImport extends AbstractGenotypeImport {
                                                 break;
                                             }
                                         }
-                                        
+
                                         if (!reachedEOL) {
                                             lineBuffer.append(fileBuffer, bufferPosition, bufferLength - bufferPosition);
                                             if ((bufferLength = reader.read(fileBuffer, 0, cMaxLineLength)) < 0) {  // End of file
@@ -644,9 +647,9 @@ public class PlinkImport extends AbstractGenotypeImport {
                                             bufferPosition = 0;
                                         }
                                     }
-                                    
+
                                     ArrayList<Integer> individualPositions = blockLinePositions.get(individual);
-            
+
                                     // Trivial case : 1 character per allele, 1 character per separator
                                     if (lineLengths.get(individual) == nTrivialLineSize) {
                                         for (int marker = 0; marker < blockSize; marker++) {
@@ -660,11 +663,11 @@ public class PlinkImport extends AbstractGenotypeImport {
                                     // Non-trivial case : INDELs and/or multi-characters separators
                                     } else {
                                         Matcher matcher = allelePattern.matcher(lineBuffer);
-            
+
                                         // Start at the closest previous block that has already been mapped
                                         int startBlock = Math.min(blockIndex, individualPositions.size() - 1);
                                         int startPosition = individualPositions.get(startBlock);
-            
+
                                         // Advance till the beginning of the actual block, and map the other ones on the way
                                         matcher.find(startPosition);
                                         for (int b = startBlock; b < blockIndex; b++) {
@@ -673,14 +676,14 @@ public class PlinkImport extends AbstractGenotypeImport {
                                                 matcher.find();
                                                 matcher.find();
                                             }
-                                            
+
                                             // Need to synchronize structural changes
                                             synchronized (individualPositions) {
                                                 if (individualPositions.size() <= b + 1)
                                                     individualPositions.add(matcher.start());
                                             }
                                         }
-            
+
                                         for (int marker = 0; marker < blockSize; marker++) {
                                             StringBuilder builder = transposed.get(marker);
                                             builder.append("\t");
@@ -690,7 +693,7 @@ public class PlinkImport extends AbstractGenotypeImport {
                                             builder.append(matcher.group());
                                             matcher.find();
                                         }
-            
+
                                         // Map the current block
                                         synchronized (individualPositions) {
                                             if (individualPositions.size() <= blockIndex + 1 && blockStart + blockSize < variants.length)
@@ -702,22 +705,22 @@ public class PlinkImport extends AbstractGenotypeImport {
                                 for (int marker = 0; marker < blockSize; marker++) {
                                     String variantName = variants[blockStart + marker];
                                     String variantLine = transposed.get(marker).substring(1);  // Skip the leading tab
-                                    
-                                    // if it's not a SNP, let's keep track of its type                                  
-                                    List<Allele> alleleList = 
+
+                                    // if it's not a SNP, let's keep track of its type
+                                    List<Allele> alleleList =
                                             outputFileSeparatorPattern.splitAsStream(variantLine)
                                                 .filter(allele -> !"0".equals(allele))
                                                 .distinct()
                                                 .map(allele -> Allele.create(allele))
                                                 .collect(Collectors.toList());
-                                    
+
                                     if (!alleleList.isEmpty()) {
                                         Type variantType = determineType(alleleList);
                                         if (variantType != Type.SNP) {
                                             variantTypes[blockStart + marker] = variantType;
                                         }
                                     }
-            
+
                                     synchronized (outputWriter) {
                                         outputWriter.write(variantName);
                                         outputWriter.write("\t");
@@ -725,7 +728,7 @@ public class PlinkImport extends AbstractGenotypeImport {
                                         outputWriter.write("\n");
                                     }
                                 }
-            
+
                                 progress.setCurrentStepProgress(nFinishedVariantCount.addAndGet(blockSize) * 100 / variants.length);
                             } finally {
                                 reader.close();
@@ -740,10 +743,10 @@ public class PlinkImport extends AbstractGenotypeImport {
             };
             transposeThreads[threadIndex].start();
         }
-        
+
         for (int i = 0; i < nConcurrentThreads; i++)
             transposeThreads[i].join();
-        
+
         // Fill the variant type map with the variant type array
         for (int i = 0; i < variants.length; i++) {
             if (variantTypes[i] != null)
@@ -752,22 +755,19 @@ public class PlinkImport extends AbstractGenotypeImport {
         outputWriter.close();
         if (progress.getError() == null)
             LOG.info("PED matrix transposition took " + (System.currentTimeMillis() - before) + "ms for " + variants.length + " markers and " + userIndividualToPopulationMapToFill.size() + " individuals");
-        
+
         Runtime.getRuntime().gc();  // Release our (lots of) memory as soon as possible
         return outputFile;
     }
 
     /**
      * Adds the PLINK data to variant.
-     * @param fImportUnknownVariants 
+     * @param fImportUnknownVariants
      */
     static private VariantRunData addPlinkDataToVariant(MongoTemplate mongoTemplate, VariantData variantToFeed, String sequence, Long bpPos, Map<String, String> userIndividualToPopulationMap, Map<String, Type> nonSnpVariantTypeMap, String[][] alleles, GenotypingProject project, String runName, Map<String /*individual*/, GenotypingSample> usedSamples, boolean fImportUnknownVariants) throws Exception
     {
-        if (fImportUnknownVariants && variantToFeed.getReferencePosition() == null && sequence != null) // otherwise we leave it as it is (had some trouble with overridden end-sites)
-            variantToFeed.setReferencePosition(new ReferencePosition(sequence, bpPos, bpPos));
-
         VariantRunData vrd = new VariantRunData(new VariantRunData.VariantRunDataId(project.getId(), runName, variantToFeed.getId()));
-        
+
         // genotype fields
         AtomicInteger allIdx = new AtomicInteger(0);
         Map<String, Integer> alleleIndexMap = variantToFeed.getKnownAlleles().stream().collect(Collectors.toMap(Function.identity(), t -> allIdx.getAndIncrement()));  // should be more efficient not to call indexOf too often...
@@ -775,10 +775,10 @@ public class PlinkImport extends AbstractGenotypeImport {
         for (String sIndividual : userIndividualToPopulationMap.keySet())
         {
             i++;
-            
+
             if ("0".equals(alleles[0][i]) || "0".equals(alleles[1][i]))
                 continue;  // Do not add missing genotypes
-            
+
             for (int j = 0; j < 2; j++) { // 2 alleles per genotype
                 Integer alleleIndex = alleleIndexMap.get(alleles[j][i]);
                 if (alleleIndex == null && alleles[j][i].matches("[AaTtGgCc]+")) { // New allele
@@ -803,6 +803,9 @@ public class PlinkImport extends AbstractGenotypeImport {
             SampleGenotype aGT = new SampleGenotype(gtCode);
             vrd.getSampleGenotypes().put(usedSamples.get(sIndividual).getId(), aGT);
         }
+        
+        if (fImportUnknownVariants && variantToFeed.getReferencePosition() == null && sequence != null) // otherwise we leave it as it is (had some trouble with overridden end-sites)
+            variantToFeed.setReferencePosition(new ReferencePosition(sequence, bpPos, bpPos + variantToFeed.getKnownAlleles().iterator().next().length() - 1));
 
         // mandatory fields
         if (!alleleIndexMap.isEmpty()) {
@@ -812,7 +815,7 @@ public class PlinkImport extends AbstractGenotypeImport {
                 sVariantType = Type.SNP.toString();
             else
                 sVariantType = variantType.toString();
-            
+
             if (variantToFeed.getType() == null || Type.NO_VARIATION == variantType) {
                 variantToFeed.setType(sVariantType);
                 project.getVariantTypes().add(sVariantType);
@@ -820,21 +823,21 @@ public class PlinkImport extends AbstractGenotypeImport {
             else if (!variantToFeed.getType().equals(sVariantType))
                 throw new Exception("Variant type mismatch between existing data and data to import: " + variantToFeed.getId());
         }
-        
+
         vrd.setKnownAlleles(variantToFeed.getKnownAlleles());
         vrd.setReferencePosition(variantToFeed.getReferencePosition());
         vrd.setType(variantToFeed.getType());
         vrd.setSynonyms(variantToFeed.getSynonyms());
         return vrd;
     }
-    
-    /* FIXME: this mechanism could be improved to "fill holes" when genotypes are provided for some synonyms but not others (currently we import them all so the last encountered one "wins") */ 
+
+    /* FIXME: this mechanism could be improved to "fill holes" when genotypes are provided for some synonyms but not others (currently we import them all so the last encountered one "wins") */
     private HashMap<String, ArrayList<String>> checkSynonymGenotypeConsistency(File rotatedFile, HashMap<String, String> existingVariantIDs, Collection<String> individualsInProvidedOrder, String outputPathAndPrefix) throws IOException
     {
         long b4 = System.currentTimeMillis();
         LOG.info("Checking genotype consistency between synonyms...");
         String sLine = null;
-        
+
         FileOutputStream inconsistencyFOS = new FileOutputStream(new File(outputPathAndPrefix + "-INCONSISTENCIES.txt"));
         HashMap<String /*existing variant id*/, ArrayList<String /*individual*/>> result = new HashMap<>();
 
@@ -858,13 +861,13 @@ public class PlinkImport extends AbstractGenotypeImport {
             }
         }
 
-         
+
         // only keep those with at least 2 synonyms
         Map<String /*variant id */, List<Integer> /*corresponding line positions*/> synonymLinePositions = variantLinePositions.entrySet().stream().filter(entry -> variantLinePositions.get(entry.getKey()).size() > 1).collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
         variantLinePositions.clear();   // release memory as this object is not needed anymore
-        
+
         // hold all lines that will need to be compared to any other(s) in a map that makes them accessible by their line number
-        HashMap<Integer, String> linesNeedingComparison = new HashMap<>();      
+        HashMap<Integer, String> linesNeedingComparison = new HashMap<>();
         TreeSet<Integer> linesToReadForComparison = new TreeSet<>();
         synonymLinePositions.values().stream().forEach(varPositions -> linesToReadForComparison.addAll(varPositions));  // incrementally sorted line numbers, simplifies re-reading
         nCurrentLinePos = 0;
@@ -898,7 +901,7 @@ public class PlinkImport extends AbstractGenotypeImport {
                     synonymsWithThisGenotype.add(synAndGenotypes[0]);
                 }
             }
-            
+
             Iterator<String> indIt = individualsInProvidedOrder.iterator();
             int individualIndex = 0;
             while (indIt.hasNext()) {
