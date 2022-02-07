@@ -1,6 +1,7 @@
 package fr.cirad.mgdb.annotation;
 
 import java.io.File;
+import java.net.URL;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
@@ -23,6 +24,7 @@ import org.snpeff.snpEffect.SnpEffectPredictor;
 import org.snpeff.snpEffect.VariantEffect;
 import org.snpeff.snpEffect.VariantEffects;
 import org.snpeff.snpEffect.commandLine.SnpEffCmdDownload;
+import org.snpeff.util.Download;
 import org.snpeff.vcf.EffFormatVersion;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.query.Criteria;
@@ -47,6 +49,7 @@ import htsjdk.variant.vcf.VCFInfoHeaderLine;
 /**
  * Service that interfaces Mgdb2 and SnpEff to annotate variants directly from an Mgdb2 database
  * @author Grégori MIGNEROT
+ * TODO : Parallelize annotation
  */
 public class SnpEffAnnotationService {
     protected static final Logger LOG = Logger.getLogger(SnpEffAnnotationService.class);
@@ -163,18 +166,39 @@ public class SnpEffAnnotationService {
 		return downloadableGenomes;
 	}
 
-	public static void downloadGenome(String configFile, String dataPath, String genomeVersion) throws Exception {
+	public static void downloadGenome(String configFile, String dataPath, String genomeVersion, ProgressIndicator progress) throws Exception {
 		if (genomeVersion == "snpEff")
 			throw new IllegalArgumentException("This command is not allowed");
 
+		progress.addStep("Installing the genome");
+		progress.moveToNextStep();
+
 		Config config = new Config("", configFile, dataPath, null);
-		SnpEffCmdDownload command = new SnpEffCmdDownload();
-		command.parseArgs(new String[]{genomeVersion});
-		try {
-			command.run();
-		} catch (Throwable t) {
-			LOG.error(t);
-			throw new Exception("Failed to download genome " + genomeVersion + " : " + t.getMessage());
-		}
+
+        List<URL> urls = config.downloadUrl(genomeVersion);
+        if (urls.isEmpty()) {
+        	progress.setError("Unknown genome, you must give the URL or base files");
+        	return;
+        }
+
+        var maskExceptions = (urls.size() > 1);
+        for (URL url : urls) {
+            String localFile = System.getProperty("java.io.tmpdir") + "/" + Download.urlBaseName(url.toString());
+
+            Download download = new Download();
+            download.setVerbose(false);
+            download.setDebug(false);
+            download.setUpdate(false);
+            download.setMaskDownloadException(maskExceptions);
+
+            if (download.download(url, localFile)) {
+                if (download.unzip(localFile, config.getDirMain(), config.getDirData())) {
+                    (new File(localFile)).delete();
+                    return;
+                }
+            }
+        }
+
+        progress.setError("Genome download failed");
 	}
 }
