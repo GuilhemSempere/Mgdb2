@@ -183,22 +183,41 @@ public class SnpEffAnnotationService {
 
         var maskExceptions = (urls.size() > 1);
         for (URL url : urls) {
-            String localFile = System.getProperty("java.io.tmpdir") + "/" + Download.urlBaseName(url.toString());
-
-            Download download = new Download();
-            download.setVerbose(false);
-            download.setDebug(false);
-            download.setUpdate(false);
-            download.setMaskDownloadException(maskExceptions);
-
-            if (download.download(url, localFile)) {
-                if (download.unzip(localFile, config.getDirMain(), config.getDirData())) {
-                    (new File(localFile)).delete();
-                    return;
-                }
-            }
+        	if (downloadGenome(config, url, maskExceptions))
+        		return;
         }
 
         progress.setError("Genome download failed");
+	}
+
+	public static void downloadGenome(String configFile, String dataPath, URL genomeURL, ProgressIndicator progress) throws Exception {
+		progress.addStep("Installing the genome");
+		progress.moveToNextStep();
+
+		Config config = new Config("", configFile, dataPath, null);
+
+        if (!downloadGenome(config, genomeURL, false))
+        	progress.setError("Genome download failed");
+	}
+
+	private static boolean downloadGenome(Config config, URL url, boolean maskExceptions) {
+		String localFile = System.getProperty("java.io.tmpdir") + "/" + Download.urlBaseName(url.toString());
+
+        Download download = new Download();
+        download.setVerbose(false);
+        download.setDebug(false);
+        download.setUpdate(false);
+        download.setMaskDownloadException(maskExceptions);
+        LOG.info("Try to download genome from " + url.toString());
+        if (download.download(url, localFile)) {
+        	LOG.debug("Unzipping " + localFile);
+            if (download.unzip(localFile, config.getDirMain(), config.getDirData())) {
+                (new File(localFile)).delete();
+                LOG.info("Installation successful");
+                return true;
+            }
+        }
+
+        return false;
 	}
 }
