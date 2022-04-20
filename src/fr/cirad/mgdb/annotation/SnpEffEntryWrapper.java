@@ -34,8 +34,8 @@ public class SnpEffEntryWrapper {
 	}
 
 	public List<Variant> variants() {
-		return Variant.factory(parent, (int)entry.getReferencePosition().getStartSite(), entry.getKnownAlleleList().get(0),
-				String.join(",", entry.getKnownAlleleList().subList(1, entry.getKnownAlleleList().size())), entry.getVariantId(), true);
+		return Variant.factory(parent, (int)entry.getReferencePosition().getStartSite(), entry.getKnownAlleles().get(0),
+				String.join(",", entry.getKnownAlleles().subList(1, entry.getKnownAlleles().size())), entry.getVariantId(), true);
 	}
 
 	public VariantRunData buildANN() {

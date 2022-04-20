@@ -240,7 +240,7 @@ public class SnpEffAnnotationService {
 		progress.moveToNextStep();
 		String configContent = new String(Files.readAllBytes(Paths.get(configPath)));
 		for (String line : configContent.split("\n")) {
-			if (!line.isBlank() && !line.startsWith("#")) {
+			if (!line.trim().isEmpty() && !line.startsWith("#")) {
 				String property;
 				if (line.contains(":"))
 					property = line.substring(0, line.indexOf(':')).trim();
@@ -300,8 +300,8 @@ public class SnpEffAnnotationService {
 			Files.move(proteinFile.toPath(), genomePath.resolve("protein.fa"));
 
 		ByteArrayOutputStream snpEffOutput = new ByteArrayOutputStream();
-		System.setOut(new PrintStream(snpEffOutput, true, StandardCharsets.UTF_8));
-		System.setErr(new PrintStream(snpEffOutput, true, StandardCharsets.UTF_8));
+		System.setOut(new PrintStream(snpEffOutput, true, "utf-8"));
+		System.setErr(new PrintStream(snpEffOutput, true, "utf-8"));
 		try {
 			List<String> args = new ArrayList<>();
 			args.add("build");
@@ -333,7 +333,7 @@ public class SnpEffAnnotationService {
 			System.setOut(new PrintStream(new FileOutputStream(FileDescriptor.out)));
 			System.setErr(new PrintStream(new FileOutputStream(FileDescriptor.err)));
 		}
-		return snpEffOutput.toString(StandardCharsets.UTF_8);
+		return snpEffOutput.toString("utf-8");
 	}
 
 	private static boolean deleteDirectory(File directoryToBeDeleted) {
