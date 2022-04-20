@@ -151,10 +151,13 @@ public interface IExportHandler
 		return (int) Math.max(1, Math.min(nExportedVariantCount / 20 /* no more than 5% at a time */, (nMaxChunkSizeInMb*1024*1024 / avgObjSize.doubleValue())));
 	}
 	
+	public static String getLoggedUserName() {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        return auth == null || "anonymousUser".equals(auth.getName()) ? "anonymousUser" : auth.getName();	    
+	}
+	
 	public static void writeMetadataFile(String sModule, Collection<String> exportedIndividuals, Collection<String> individualMetadataFieldsToExport, OutputStream os) throws IOException {
-		Authentication auth = SecurityContextHolder.getContext().getAuthentication();
-    	String sCurrentUser = auth == null || "anonymousUser".equals(auth.getName()) ? "anonymousUser" : auth.getName();
-        Collection<Individual> listInd = MgdbDao.getInstance().loadIndividualsWithAllMetadata(sModule, sCurrentUser, null, exportedIndividuals).values();
+        Collection<Individual> listInd = MgdbDao.getInstance().loadIndividualsWithAllMetadata(sModule, getLoggedUserName(), null, exportedIndividuals).values();
         LinkedHashSet<String> mdHeaders = new LinkedHashSet<>();	// definite header collection (avoids empty columns)
         for (Individual ind : listInd)
         	for (String key : individualMetadataFieldsToExport)

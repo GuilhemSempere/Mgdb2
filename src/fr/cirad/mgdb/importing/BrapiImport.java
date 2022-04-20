@@ -39,6 +39,8 @@ import java.util.TreeSet;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
+import javax.servlet.http.HttpServletResponse;
+
 import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.io.FileUtils;
 import org.apache.commons.lang.StringUtils;
@@ -141,7 +143,7 @@ public class BrapiImport extends AbstractGenotypeImport {
 		{
 			LOG.warn("Unable to parse input mode. Using default (0): overwrite run if exists.");
 		}
-		new BrapiImport().importToMongo(args[0], args[1], args[2], args[3], args[4], args[5], args[6], mode);
+		new BrapiImport().importToMongo(args[0], args[1], args[2], args[3], args[4], args[5], args[6], null, mode);
 	}
 
 	/**
@@ -152,11 +154,14 @@ public class BrapiImport extends AbstractGenotypeImport {
 	 * @param sRun the run
 	 * @param sTechnology the technology
 	 * @param endpoint URL
+	 * @param studyDbId BrAPI study id
+	 * @param mapDbId BrAPI map id
+	 * @param brapiToken BrAPI token
 	 * @param importMode the import mode
 	 * @return a project ID if it was created by this method, otherwise null
 	 * @throws Exception the exception
 	 */
-	public Integer importToMongo(String sModule, String sProject, String sRun, String sTechnology, String endpointUrl, String studyDbId, String mapDbId, int importMode) throws Exception
+	public Integer importToMongo(String sModule, String sProject, String sRun, String sTechnology, String endpointUrl, String studyDbId, String mapDbId, String brapiToken, int importMode) throws Exception
 	{
 		long before = System.currentTimeMillis();
 		final ProgressIndicator progress = ProgressIndicator.get(m_processID) != null ? ProgressIndicator.get(m_processID) : new ProgressIndicator(m_processID, new String[]{"Initializing import"});	// better to add it straight-away so the JSP doesn't get null in return when it checks for it (otherwise it will assume the process has ended)
@@ -171,6 +176,8 @@ public class BrapiImport extends AbstractGenotypeImport {
 
 			GenotypingProject project = mongoTemplate.findOne(new Query(Criteria.where(GenotypingProject.FIELDNAME_NAME).is(sProject)), GenotypingProject.class);
 
+			MongoTemplateManager.lockProjectForWriting(sModule, sProject);
+			
 			cleanupBeforeImport(mongoTemplate, sModule, project, importMode, sRun);
 
 			Integer createdProject = null;
@@ -184,7 +191,7 @@ public class BrapiImport extends AbstractGenotypeImport {
 			}
 
 			BrapiClient client = new BrapiClient();	
-			client.initService(endpointUrl, null);
+			client.initService(endpointUrl, brapiToken);
 			client.getCalls();
 			client.ensureGenotypesCanBeImported();
 			final BrapiService service = client.getService();
@@ -255,8 +262,12 @@ public class BrapiImport extends AbstractGenotypeImport {
 						continue;	// we already have this one
 
 					VariantData variant = new VariantData((ObjectId.isValid(bmp.getMarkerDbId()) ? "_" : "") + bmp.getMarkerDbId());	// prevent use of ObjectId class
-					long startSite = (long) Double.parseDouble(bmp.getLocation());
-					variant.setReferencePosition(new ReferencePosition(bmp.getLinkageGroupName(), startSite));
+					try {
+					    variant.setReferencePosition(new ReferencePosition(bmp.getLinkageGroupName(), (long) Double.parseDouble(bmp.getLocation())));
+					}
+					catch (NumberFormatException nfe) {
+					    LOG.info("No location for marker " + bmp.getMarkerDbId());
+					}
 					variantsToCreate.put(bmp.getMarkerDbId(), variant);
 				}
 
@@ -321,7 +332,7 @@ public class BrapiImport extends AbstractGenotypeImport {
 							if (fGotKnownAllelesWhenImportingVariants == null)
 								fGotKnownAllelesWhenImportingVariants = marker.getRefAlt() != null && marker.getRefAlt().size() > 0;
 							if (fGotKnownAllelesWhenImportingVariants)
-								variant.setKnownAlleles(new LinkedHashSet(marker.getRefAlt()));
+								variant.setKnownAlleles(marker.getRefAlt());
 							
 							// update list of existing variants (FIXME: this should be a separate method in AbstractGenotypeImport) 
 							ArrayList<String> idAndSynonyms = new ArrayList<>();
@@ -335,6 +346,7 @@ public class BrapiImport extends AbstractGenotypeImport {
 					}
 					try
 					{
+					    LOG.info("Inserting " + variantsToCreate.size() + " variants from BrAPI source");
 						mongoTemplate.insertAll(variantsToCreate.values());
 					}
 					catch (DuplicateKeyException dke)
@@ -409,11 +421,11 @@ public class BrapiImport extends AbstractGenotypeImport {
 				body.put("sepUnphased", unphasedGenotypeSeparator);
 				body.put("pageSize", Integer.parseInt(genotypePager.getPageSize()));
 				body.put("page", Integer.parseInt(genotypePager.getPage()));
-				Response<BrapiBaseResource<BrapiAlleleMatrix>> response = service.getAlleleMatrix_byPost(body).execute();
-				if (!response.isSuccessful())
-					throw new Exception(new String(response.errorBody().bytes()));
+				Response<BrapiBaseResource<BrapiAlleleMatrix>> alleleMatrixResponse = service.getAlleleMatrix_byPost(body).execute();
+				if (!alleleMatrixResponse.isSuccessful())
+					throw new Exception("Error invoking allelematrix-search (response code " + alleleMatrixResponse.code() + ") " + new String(alleleMatrixResponse.errorBody().bytes()));
 				
-				BrapiBaseResource<BrapiAlleleMatrix> br = response.body();
+				BrapiBaseResource<BrapiAlleleMatrix> br = alleleMatrixResponse.body();
 				List<Status> statusList = br.getMetadata().getStatus();
 				String extractId = statusList != null && statusList.size() > 0 && statusList.get(0).getCode().equals("asynchid") ? statusList.get(0).getMessage() : null;
 				
@@ -422,7 +434,13 @@ public class BrapiImport extends AbstractGenotypeImport {
 					Call<BrapiBaseResource<Object>> statusCall = service.getAlleleMatrixStatus(extractId);
 
 					// Make an initial call to check the status on the resource
-					BrapiBaseResource<Object> statusPoll = statusCall.execute().body();
+					Response<BrapiBaseResource<Object>> statusResponse = statusCall.execute();
+					if (HttpServletResponse.SC_OK != statusResponse.code()) {
+                        progress.setError("Wrong http code checking for allele-matrix status: " + statusResponse.code());
+                        return null;
+					}
+					    
+					BrapiBaseResource<Object> statusPoll = statusResponse.body();
 					Status status = AsyncChecker.checkAsyncStatus(statusPoll.getMetadata().getStatus());
 
 					// Keep checking until the async call returns anything else than "INPROCESS"
@@ -617,6 +635,8 @@ public class BrapiImport extends AbstractGenotypeImport {
 			}
 			if (ctx != null)
 				ctx.close();
+			
+			MongoTemplateManager.unlockProjectForWriting(sModule, sProject);
 		}
 	}
 	
@@ -809,7 +829,7 @@ public class BrapiImport extends AbstractGenotypeImport {
 									variant.getKnownAlleles().add(alleles[indexToUse]);	// it's the first time we encounter this alternate allele for this variant
 									fNewAllelesEncountered = true;
 								}
-								alleleIndexList.add(variant.getKnownAlleleList().indexOf(alleles[indexToUse]));
+								alleleIndexList.add(variant.getKnownAlleles().indexOf(alleles[indexToUse]));
 							}
 					}
 					Collections.sort(alleleIndexList);
@@ -829,7 +849,7 @@ public class BrapiImport extends AbstractGenotypeImport {
 				update.set(VariantData.FIELDNAME_KNOWN_ALLELES, variant.getKnownAlleles());
 			if (variant.getType() == null && update != null)
 			{	// no variant type was explicitly specified, so try and determine it
-				variant.setType(VariantData.determinePolymorphicType(variant.getKnownAlleleList()).toString());
+				variant.setType(VariantData.determinePolymorphicType(variant.getKnownAlleles()).toString());
 				update.set(VariantData.FIELDNAME_TYPE, variant.getType());
 				project.getVariantTypes().add(variant.getType());
 			}

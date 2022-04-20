@@ -128,11 +128,16 @@ public class MgdbDao {
         // make sure positions are indexed with correct collation etc...
         ensurePositionIndexes(mongoTemplate, Arrays.asList(mongoTemplate.getCollection(mongoTemplate.getCollectionName(VariantData.class)), mongoTemplate.getCollection(mongoTemplate.getCollectionName(VariantRunData.class))));
         
+        MongoCollection<Document> variantColl = mongoTemplate.getCollection(mongoTemplate.getCollectionName(VariantData.class));
+        if (!variantColl.find(new BasicDBObject()).projection(new BasicDBObject("_id", 1)).limit(1).cursor().hasNext())
+        	throw new Exception("No variants found in database!");
+        	
+        MongoCollection<Document> taggedVarColl = mongoTemplate.getCollection(MgdbDao.COLLECTION_NAME_TAGGED_VARIANT_IDS);
+
         List<String> result = new ArrayList<>();
         Thread t = new Thread() {
             public void run() {
                 // create indexes
-                MongoCollection<Document> variantColl = mongoTemplate.getCollection(mongoTemplate.getCollectionName(VariantData.class));
                 LOG.debug("Creating index on field " + VariantData.FIELDNAME_SYNONYMS + "." + VariantData.FIELDNAME_SYNONYM_TYPE_ID_ILLUMINA + " of collection " + variantColl.getNamespace());
                 variantColl.createIndex(new BasicDBObject(VariantData.FIELDNAME_SYNONYMS + "." + VariantData.FIELDNAME_SYNONYM_TYPE_ID_ILLUMINA, 1));
                 LOG.debug("Creating index on field " + VariantData.FIELDNAME_SYNONYMS + "." + VariantData.FIELDNAME_SYNONYM_TYPE_ID_INTERNAL + " of collection " + variantColl.getNamespace());
@@ -157,8 +162,7 @@ public class MgdbDao {
                 int nChunkSize = (int) Math.max(1, (int) totalVariantCount / Math.max(1, numberOfTaggedVariants - 1));
                 LOG.debug("Number of variants between 2 tagged ones: " + nChunkSize);
 
-                MongoCollection<Document> collection = mongoTemplate.getCollection(MgdbDao.COLLECTION_NAME_TAGGED_VARIANT_IDS);
-                collection.drop();
+                taggedVarColl.drop();
                 String cursor = null;
                 ArrayList<Document> taggedVariants = new ArrayList<>();
                 for (int nChunkNumber = 0; nChunkNumber < (float) totalVariantCount / nChunkSize; nChunkNumber++) {
@@ -183,7 +187,8 @@ public class MgdbDao {
                     result.add(cursor.toString());
                     LOG.debug("Variant " + cursor + " tagged as position " + nChunkNumber + " (" + (System.currentTimeMillis() - before) + "ms)");
                 }
-                collection.insertMany(taggedVariants);
+                if (!taggedVariants.isEmpty())
+                	taggedVarColl.insertMany(taggedVariants);	// otherwise there is apparently no variant in the DB
             }
             
             /*  This is how it is internally handled when sharding the data:

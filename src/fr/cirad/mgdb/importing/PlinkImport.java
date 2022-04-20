@@ -206,12 +206,11 @@ public class PlinkImport extends AbstractGenotypeImport {
             if (m_processID == null)
                 m_processID = "IMPORT__" + sModule + "__" + sProject + "__" + sRun + "__" + System.currentTimeMillis();
 
-            mongoTemplate.getDb().runCommand(new BasicDBObject("profile", 0));  // disable profiling
             GenotypingProject project = mongoTemplate.findOne(new Query(Criteria.where(GenotypingProject.FIELDNAME_NAME).is(sProject)), GenotypingProject.class);
             if (importMode == 0 && project != null && project.getPloidyLevel() != 2)
                 throw new Exception("Ploidy levels differ between existing (" + project.getPloidyLevel() + ") and provided (" + 2 + ") data!");
 
-            lockProjectForWriting(sModule, sProject);
+            MongoTemplateManager.lockProjectForWriting(sModule, sProject);
 
             cleanupBeforeImport(mongoTemplate, sModule, project, importMode, sRun);
 
@@ -269,6 +268,9 @@ public class PlinkImport extends AbstractGenotypeImport {
             LOG.debug("Importing project '" + sProject + "' into " + sModule + " using " + nConcurrentThreads + " threads");
             long count = importTempFileContents(progress, nConcurrentThreads, mongoTemplate, rotatedFile, variantsAndPositions, existingVariantIDs, project, sRun, inconsistencies, userIndividualToPopulationMap, nonSnpVariantTypeMap, fSkipMonomorphic);
 
+            if (progress.getError() != null)
+                throw new Exception(progress.getError());
+
             progress.addStep("Preparing database for searches");
             progress.moveToNextStep();
             MgdbDao.prepareDatabaseForSearches(mongoTemplate);
@@ -281,7 +283,7 @@ public class PlinkImport extends AbstractGenotypeImport {
         {
             if (m_fCloseContextOpenAfterImport && ctx != null)
                 ctx.close();
-            unlockProjectForWriting(sModule, sProject);
+            MongoTemplateManager.unlockProjectForWriting(sModule, sProject);
         }
     }
 
@@ -434,13 +436,14 @@ public class PlinkImport extends AbstractGenotypeImport {
                                     if (variant.getKnownAlleles().size() > 2)
                                         LOG.warn("Variant " + variant.getId() + " (" + providedVariantId + ") has more than 2 alleles!");
 
-                                    if (variant.getKnownAlleles().size() > 0)
-                                    {   // we only import data related to a variant if we know its alleles
+                                    if (variant.getKnownAlleles().size() > 0) {   // we only import data related to a variant if we know its alleles
                                         if (!unsavedVariants.contains(variant))
                                             unsavedVariants.add(variant);
                                         if (!unsavedRuns.contains(runToSave))
                                             unsavedRuns.add(runToSave);
                                     }
+                                    else
+                                    	LOG.warn("Skipping variant " + variant.getId() + " positioned at " + variant.getReferencePosition().getSequence() + ":" + variant.getReferencePosition().getStartSite() + " because its alleles are not known");
 
                                     if (processedVariants % nNumberOfVariantsToSaveAtOnce == 0) {
                                         saveChunk(unsavedVariants, unsavedRuns, existingVariantIDs, mongoTemplate, progress, saveService);
@@ -458,7 +461,7 @@ public class PlinkImport extends AbstractGenotypeImport {
 
                             persistVariantsAndGenotypes(!existingVariantIDs.isEmpty(), mongoTemplate, unsavedVariants, unsavedRuns);
                         } catch (Throwable t) {
-                            progress.setError("Genotypes import failed with error: " + t.getMessage());
+                            progress.setError("Genotypes import failed with " + t.getClass().getSimpleName() + ": " + t.getMessage());
                             LOG.error(progress.getError(), t);
                             return;
                         }
@@ -805,7 +808,7 @@ public class PlinkImport extends AbstractGenotypeImport {
         }
         
         if (fImportUnknownVariants && variantToFeed.getReferencePosition() == null && sequence != null) // otherwise we leave it as it is (had some trouble with overridden end-sites)
-            variantToFeed.setReferencePosition(new ReferencePosition(sequence, bpPos, bpPos + variantToFeed.getKnownAlleles().iterator().next().length() - 1));
+            variantToFeed.setReferencePosition(new ReferencePosition(sequence, bpPos, !variantToFeed.getKnownAlleles().isEmpty() ? bpPos + variantToFeed.getKnownAlleles().iterator().next().length() - 1 : null));
 
         // mandatory fields
         if (!alleleIndexMap.isEmpty()) {

@@ -19,12 +19,14 @@ package fr.cirad.tools.security.base;
 import java.io.IOException;
 import java.io.UnsupportedEncodingException;
 import java.text.ParseException;
+import java.util.Collection;
 
 import javax.ejb.ObjectNotFoundException;
 import javax.servlet.http.HttpServletRequest;
 
 import org.apache.log4j.Logger;
 import org.springframework.security.core.Authentication;
+import org.springframework.security.core.GrantedAuthority;
 import org.springframework.stereotype.Component;
 
 @Component
@@ -44,10 +46,10 @@ public abstract class AbstractTokenManager {
     abstract public String generateToken(Authentication auth) throws IllegalArgumentException, UnsupportedEncodingException;
 
     abstract public boolean canUserReadProject(String token, String module, int projectId);
-    abstract public boolean canUserReadProject(Authentication authentication, String module, int projectId);
+    abstract public boolean canUserReadProject(Collection<? extends GrantedAuthority> authorities, String module, int projectId);
     
     abstract public boolean canUserReadDB(String token, String module) throws ObjectNotFoundException;    
-    abstract public boolean canUserReadDB(Authentication authentication, String module) throws ObjectNotFoundException;
+    abstract public boolean canUserReadDB(Collection<? extends GrantedAuthority> authorities, String module) throws ObjectNotFoundException;
 
 	abstract public void cleanupTokenMap() throws ParseException;
 	

@@ -150,7 +150,7 @@ public class HapMapImport extends AbstractGenotypeImport {
 		{
 			LOG.warn("Unable to parse input mode. Using default (0): overwrite run if exists.");
 		}
-		new HapMapImport().importToMongo(args[0], args[1], args[2], args[3], new File(args[4]).toURI().toURL(), false, mode);
+		new HapMapImport().importToMongo(args[0], args[1], args[2], args[3], null, new File(args[4]).toURI().toURL(), false, mode);
 	}
 
 	/**
@@ -160,13 +160,14 @@ public class HapMapImport extends AbstractGenotypeImport {
 	 * @param sProject the project
 	 * @param sRun the run
 	 * @param sTechnology the technology
+     * @param nPloidy the ploidy level
 	 * @param mainFileUrl the main file URL
      * @param fSkipMonomorphic whether or not to skip import of variants that have no polymorphism (where all individuals have the same genotype)
 	 * @param importMode the import mode
 	 * @return a project ID if it was created by this method, otherwise null
 	 * @throws Exception the exception
 	 */
-	public Integer importToMongo(String sModule, String sProject, String sRun, String sTechnology, URL mainFileUrl, boolean fSkipMonomorphic, int importMode) throws Exception
+	public Integer importToMongo(String sModule, String sProject, String sRun, String sTechnology, Integer nPloidy, URL mainFileUrl, boolean fSkipMonomorphic, int importMode) throws Exception
 	{
 		long before = System.currentTimeMillis();
         ProgressIndicator progress = ProgressIndicator.get(m_processID) != null ? ProgressIndicator.get(m_processID) : new ProgressIndicator(m_processID, new String[]{"Initializing import"});	// better to add it straight-away so the JSP doesn't get null in return when it checks for it (otherwise it will assume the process has ended)
@@ -199,9 +200,11 @@ public class HapMapImport extends AbstractGenotypeImport {
 				m_processID = "IMPORT__" + sModule + "__" + sProject + "__" + sRun + "__" + System.currentTimeMillis();
 
 			GenotypingProject project = mongoTemplate.findOne(new Query(Criteria.where(GenotypingProject.FIELDNAME_NAME).is(sProject)), GenotypingProject.class);
-            if (importMode == 0 && project != null && project.getPloidyLevel() != 2)
-            	throw new Exception("Ploidy levels differ between existing (" + project.getPloidyLevel() + ") and provided (" + 2 + ") data!");
+            if (importMode == 0 && project != null && nPloidy != null && project.getPloidyLevel() != nPloidy)
+            	throw new Exception("Ploidy levels differ between existing (" + project.getPloidyLevel() + ") and provided (" + nPloidy + ") data!");
 
+            MongoTemplateManager.lockProjectForWriting(sModule, sProject);
+            
             cleanupBeforeImport(mongoTemplate, sModule, project, importMode, sRun);
 
 			Integer createdProject = null;
@@ -212,6 +215,8 @@ public class HapMapImport extends AbstractGenotypeImport {
 				project.setName(sProject);
 				project.setOrigin(2 /* Sequencing */);
 				project.setTechnology(sTechnology);
+				if (nPloidy != null)
+				    project.setPloidyLevel(nPloidy);
 				createdProject = project.getId();
 			}
 
@@ -320,8 +325,6 @@ public class HapMapImport extends AbstractGenotypeImport {
                                             knownAlleles.add(Allele.create(allele, alleleIndexMapSize == 0));
                                         }
                                     }
-                                    if (finalProject.getPloidyLevel() == 0)
-                                        finalProject.setPloidyLevel(findCurrentVariantPloidy(hmFeature, variantType));
                 
                 					VariantRunData runToSave = addHapMapDataToVariant(finalMongoTemplate, variant, variantType, alleleIndexMap, hmFeature, finalProject, sRun, previouslyCreatedSamples, sampleIds);
                 					finalProject.getSequences().add(hmFeature.getChr());
@@ -349,7 +352,7 @@ public class HapMapImport extends AbstractGenotypeImport {
                 				}
                 				catch (Exception e)
                 				{
-                					throw new Exception("Error occured importing variant number " + (totalProcessedVariantCount.get() + 1) + " (" + Type.SNP.toString() + ":" + hmFeature.getChr() + ":" + hmFeature.getStart() + ")", e);
+                					throw new Exception("Error occured importing variant number " + (totalProcessedVariantCount.get() + 1) + " (" + Type.SNP.toString() + ":" + hmFeature.getChr() + ":" + hmFeature.getStart() + ") " + (e.getMessage().endsWith("\"index\" is null") ? "containing an invalid allele code" : e.getMessage()), e);
                 				}
                             }
                             if (unsavedVariants.size() > 0) {
@@ -397,6 +400,8 @@ public class HapMapImport extends AbstractGenotypeImport {
 				ctx.close();
 
 			reader.close();
+			
+			MongoTemplateManager.unlockProjectForWriting(sModule, sProject);
 		}
 	}
 
@@ -429,13 +434,14 @@ public class HapMapImport extends AbstractGenotypeImport {
 		
 		// take into account ref and alt alleles (if it's not too late)
 		if (variantToFeed.getKnownAlleles().size() == 0)
-			variantToFeed.setKnownAlleles(Arrays.stream(hmFeature.getAlleles()).collect(Collectors.toCollection(LinkedHashSet::new)));
+			variantToFeed.setKnownAlleles(Arrays.stream(hmFeature.getAlleles()).collect(Collectors.toList()));
 
 		VariantRunData vrd = new VariantRunData(new VariantRunData.VariantRunDataId(project.getId(), runName, variantToFeed.getId()));
 		
+		HashSet<Integer> ploidiesFound = new HashSet<>();
 		for (int i=0; i<hmFeature.getGenotypes().length; i++) {
             String genotype = hmFeature.getGenotypes()[i].toUpperCase();
-            if ("NA".equals(genotype) || "NN".equals(genotype))
+            if (genotype.startsWith("N"))
                 continue;    // we don't add missing genotypes
 
             if (genotype.length() == 1) {
@@ -445,25 +451,31 @@ public class HapMapImport extends AbstractGenotypeImport {
             }
 
             List<String> alleles = null;
-            if (genotype.contains("/"))
+            if (genotype.contains("/")) {
                 alleles = Helper.split(genotype, "/");
+                ploidiesFound.add(alleles.size());
+            }
             else if (alleleIndexMap.containsKey(genotype))
                 alleles = Collections.nCopies(project.getPloidyLevel(), genotype);    // must be a collapsed homozygous
             else if (fSNP)
             	alleles = Arrays.asList(genotype.split(""));
             
             String invidual = individuals.get(i);
-
             if (alleles == null || alleles.isEmpty()) {
-                LOG.warn("Ignoring invalid genotype \"" + genotype + "\" for variant " + variantToFeed.getId() + " and individual " + individuals.get(i) + (project.getPloidyLevel() == 0 ? ". No ploidy determined at this stage, unable to expand homozygous genotype" : ""));
+                LOG.warn("Ignoring invalid genotype \"" + genotype + "\" for variant " + variantToFeed.getId() + " and individual " + invidual + (project.getPloidyLevel() == 0 ? ". No ploidy determined at this stage, unable to expand homozygous genotype" : ""));
                 continue;    // we don't add invalid genotypes
             }
 
-//            LOG.info(alleles);
-			SampleGenotype aGT = new SampleGenotype(alleles.stream().map(allele -> alleleIndexMap.get(allele)).sorted().map(index -> index.toString()).collect(Collectors.joining("/")));
+            SampleGenotype aGT = new SampleGenotype(alleles.stream().map(allele -> alleleIndexMap.get(allele)).sorted().map(index -> index.toString()).collect(Collectors.joining("/")));
 			GenotypingSample sample = usedSamples.get(invidual);
 			vrd.getSampleGenotypes().put(sample.getId(), aGT);
     	}
+		
+		if (ploidiesFound.size() > 1)
+            throw new Exception("Ambiguous ploidy level, please explicitly specify correct ploidy");
+		
+        if (project.getPloidyLevel() == 0 && !ploidiesFound.isEmpty())
+            project.setPloidyLevel(ploidiesFound.iterator().next());
 
 		project.getVariantTypes().add(variantType.toString());
         vrd.setKnownAlleles(variantToFeed.getKnownAlleles());
@@ -472,14 +484,4 @@ public class HapMapImport extends AbstractGenotypeImport {
         vrd.setSynonyms(variantToFeed.getSynonyms());
 		return vrd;
 	}
-
-    private static int findCurrentVariantPloidy(RawHapMapFeature hmFeature, Type variantType) {
-        for (String genotype : hmFeature.getGenotypes()) {
-            if (genotype.contains("/"))
-                return genotype.split("/").length;
-            if (variantType.equals(Type.SNP))
-                return genotype.length();
-        }
-        return 0;
-    }
 }

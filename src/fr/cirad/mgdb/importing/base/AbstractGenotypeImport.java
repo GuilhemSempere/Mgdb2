@@ -19,11 +19,8 @@ package fr.cirad.mgdb.importing.base;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
-import java.util.Collections;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
-import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.stream.Collectors;
 
@@ -63,11 +60,6 @@ public class AbstractGenotypeImport {
 
 	private boolean m_fAllowDbDropIfNoGenotypingData = true;
 
-	/** Map that associates modules to projects currently undergoing a write operation, thus rendering them unavailable for other write operations
-	 * A null value in the set indicates the whole module is locked
-	 */
-	private static HashMap<String /*module*/, Set<String> /*projects*/> currentlyImportedProjects = new HashMap<String, Set<String>>();
-
 	public static ArrayList<String> getIdentificationStrings(String sType, String sSeq, Long nStartPos, Collection<String> idAndSynonyms) throws Exception
 	{
 		ArrayList<String> result = new ArrayList<String>();
@@ -84,85 +76,6 @@ public class AbstractGenotypeImport {
 		return result;
 	}
 
-	// Manage unavailable projects
-	// FIXME : Potential race condition ?
-
-	/**
-	 * Get the set of projects in the given module that are unavailable to write into
-	 * Better use isProjectAvailableForWriting or isModuleAvailableForWriting when possible
-	 * @param sModule Module to check
-	 * @return The set of unavailable projects
-	 */
-	public static Set<String> getModuleProjectsUnavailableForWriting(String sModule)
-	{
-		Set<String> projects = currentlyImportedProjects.get(sModule);
-		if (projects == null) {
-			return new HashSet<String>();
-		} else if (projects.contains(null)) {
-			projects = new HashSet<String>();
-
-			Query query = new Query();
-			query.fields().include(GenotypingProject.FIELDNAME_NAME);
-			List<GenotypingProject> result = MongoTemplateManager.get(sModule).find(query, GenotypingProject.class);
-			return result.stream()
-					.map(project -> project.getName())
-					.collect(Collectors.toSet());
-		} else {
-			return Collections.unmodifiableSet(projects);
-		}
-	}
-
-	public static boolean isProjectAvailableForWriting(String sModule, String sProject) {
-		Set<String> projects = currentlyImportedProjects.get(sModule);
-		if (projects != null) {
-			// Project locked individually or whole module locked
-			return !(projects.contains(sProject) || projects.contains(null));
-		} else {
-			return true;
-		}
-	}
-
-	public static boolean isModuleAvailableForWriting(String sModule) {
-		Set<String> projects = currentlyImportedProjects.get(sModule);
-		if (projects != null) {
-			return projects.size() == 0;
-		} else {
-			return true;
-		}
-	}
-
-	public static void lockProjectForWriting(String sModule, String sProject) {
-		Set<String> projects = currentlyImportedProjects.get(sModule);
-		if (projects != null) {
-			projects.add(sProject);
-		} else {
-			projects = new HashSet<String>();
-			projects.add(sProject);
-			currentlyImportedProjects.put(sModule, projects);
-		}
-	}
-
-	public static void unlockProjectForWriting(String sModule, String sProject) {
-		currentlyImportedProjects.get(sModule).remove(sProject);
-	}
-
-	public static void lockModuleForWriting(String sModule) {
-		Set<String> projects = currentlyImportedProjects.get(sModule);
-		if (projects != null) {
-			projects.add(null);
-		} else {
-			projects = new HashSet<String>();
-			projects.add(null);
-			currentlyImportedProjects.put(sModule, projects);
-		}
-	}
-
-	public static void unlockModuleForWriting(String sModule) {
-		Set<String> projects = currentlyImportedProjects.get(sModule);
-		if (projects != null) {
-			projects.clear();
-		}
-	}
 
 //	public static void buildSynonymMappings(MongoTemplate mongoTemplate) throws Exception
 //	{

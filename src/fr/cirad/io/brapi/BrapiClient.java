@@ -133,26 +133,26 @@ public class BrapiClient {
                     return chain.proceed(request);
                 }
             })
-                    .addInterceptor(new Interceptor() {//add the authToken to headers
-                        @Override
-                        public Response intercept(Chain chain) throws IOException {
-                            Request originalRequest = chain.request();
-                            Response response = null;
-                            if (authToken != null) {//if authToken is null => do nothing
-                                Request newRequest = originalRequest.newBuilder().addHeader("Authorization", authToken).build();
-                                response = chain.proceed(newRequest);
-                            } else {
-                                response = chain.proceed(originalRequest);
-                            }
-                            if (response.code() == 401) {
-                                throw new IOException("Unauthorized error 401");
-                            }
-                            return response;
-                        }
-                    })
-                    .readTimeout(60, TimeUnit.SECONDS) // Tweak to make the timeout on Retrofit connections last longer
-                    .connectTimeout(60, TimeUnit.SECONDS)
-                    .build();
+            .addInterceptor(new Interceptor() {//add the authToken to headers
+                @Override
+                public Response intercept(Chain chain) throws IOException {
+                    Request originalRequest = chain.request();
+                    Response response = null;
+                    if (authToken != null) {//if authToken is null => do nothing
+                        Request newRequest = originalRequest.newBuilder().addHeader("Authorization", (authToken.startsWith("Bearer ")? "" : "Bearer ") + authToken).build();
+                        response = chain.proceed(newRequest);
+                    } else {
+                        response = chain.proceed(originalRequest);
+                    }
+                    if (response.code() == 401) {
+                        throw new IOException("Unauthorized error 401");
+                    }
+                    return response;
+                }
+            })
+            .readTimeout(60, TimeUnit.SECONDS) // Tweak to make the timeout on Retrofit connections last longer
+            .connectTimeout(60, TimeUnit.SECONDS)
+            .build();
 
             return okHttpClient;
         } catch (Exception e) {

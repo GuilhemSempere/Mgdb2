@@ -179,8 +179,6 @@ public class IntertekImport extends AbstractGenotypeImport {
                 m_processID = "IMPORT__" + sModule + "__" + sProject + "__" + sRun + "__" + System.currentTimeMillis();
             }
 
-            mongoTemplate.getDb().runCommand(new BasicDBObject("profile", 0));	// disable profiling
-
             final String[] snpHeader = {"SNPID","SNPNum","AlleleY","AlleleX","Sequence"};
             int snpColIndex = Arrays.asList(snpHeader).indexOf("SNPID");
             int yColIndex = Arrays.asList(snpHeader).indexOf("AlleleY");
@@ -201,7 +199,7 @@ public class IntertekImport extends AbstractGenotypeImport {
             HashMap<String /*individual ID*/, GenotypingSample> samples = new HashMap<>();
 
             GenotypingProject project = mongoTemplate.findOne(new Query(Criteria.where(GenotypingProject.FIELDNAME_NAME).is(sProject)), GenotypingProject.class);
-            lockProjectForWriting(sModule, sProject);
+            MongoTemplateManager.lockProjectForWriting(sModule, sProject);
             cleanupBeforeImport(mongoTemplate, sModule, project, importMode, sRun);
 
             Integer createdProject = null;
@@ -254,8 +252,8 @@ public class IntertekImport extends AbstractGenotypeImport {
                                 variant.setType(Type.SNP.toString());                                                               
                             }                            
                             variantsToSave.add(variant);
-                            variantAllelesMap.put(variantId, variant.getKnownAlleleList());
-                            project.getAlleleCounts().add(variant.getKnownAlleleList().size());
+                            variantAllelesMap.put(variantId, variant.getKnownAlleles());
+                            project.getAlleleCounts().add(variant.getKnownAlleles().size());
                         }
 
                         if (Arrays.asList(values).containsAll(Arrays.asList(dataHeader))) {
@@ -397,7 +395,7 @@ public class IntertekImport extends AbstractGenotypeImport {
         } finally {
             if (m_fCloseContextOpenAfterImport && ctx != null)
                 ctx.close();
-            unlockProjectForWriting(sModule, sProject);
+            MongoTemplateManager.unlockProjectForWriting(sModule, sProject);
         }
     }
 }

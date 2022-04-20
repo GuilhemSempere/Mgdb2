@@ -145,7 +145,7 @@ public class FlapjackImport extends AbstractGenotypeImport {
         {
             LOG.warn("Unable to parse input mode. Using default (0): overwrite run if exists.");
         }
-        new FlapjackImport().importToMongo(args[0], args[1], args[2], args[3], new File(args[4]).toURI().toURL(), new File(args[5]), false, mode);
+        new FlapjackImport().importToMongo(args[0], args[1], args[2], args[3], null, new File(args[4]).toURI().toURL(), new File(args[5]), false, mode);
     }
 
     /**
@@ -155,6 +155,7 @@ public class FlapjackImport extends AbstractGenotypeImport {
      * @param sProject the project
      * @param sRun the run
      * @param sTechnology the technology
+     * @param nPloidy the ploidy level
      * @param mapFileURL the map file URL
      * @param pedFile the ped file
      * @param fSkipMonomorphic whether or not to skip import of variants that have no polymorphism (where all individuals have the same genotype)
@@ -162,7 +163,7 @@ public class FlapjackImport extends AbstractGenotypeImport {
      * @return a project ID if it was created by this method, otherwise null
      * @throws Exception the exception
      */
-    public Integer importToMongo(String sModule, String sProject, String sRun, String sTechnology, URL mapFileURL, File genotypeFile, boolean fSkipMonomorphic, int importMode) throws Exception
+    public Integer importToMongo(String sModule, String sProject, String sRun, String sTechnology, Integer nPloidy, URL mapFileURL, File genotypeFile, boolean fSkipMonomorphic, int importMode) throws Exception
     {
         if (m_nCurrentlyTransposingMatrixCount > 3) // we allow up to 4 simultaneous matrix rotations
             throw new Exception("The system is already busy rotating other FLAPJACK datasets, please try again later");
@@ -197,10 +198,9 @@ public class FlapjackImport extends AbstractGenotypeImport {
             if (m_processID == null)
                 m_processID = "IMPORT__" + sModule + "__" + sProject + "__" + sRun + "__" + System.currentTimeMillis();
 
-            mongoTemplate.getDb().runCommand(new BasicDBObject("profile", 0));  // disable profiling
             GenotypingProject project = mongoTemplate.findOne(new Query(Criteria.where(GenotypingProject.FIELDNAME_NAME).is(sProject)), GenotypingProject.class);
 
-            lockProjectForWriting(sModule, sProject);
+            MongoTemplateManager.lockProjectForWriting(sModule, sProject);
             cleanupBeforeImport(mongoTemplate, sModule, project, importMode, sRun);
 
             Integer createdProject = null;
@@ -213,6 +213,8 @@ public class FlapjackImport extends AbstractGenotypeImport {
                 project.setTechnology(sTechnology);
                 createdProject = project.getId();
             }
+            else if (nPloidy != null && importMode == 0 && project.getPloidyLevel() != nPloidy)
+                throw new Exception("Ploidy levels differ between existing (" + project.getPloidyLevel() + ") and provided (" + nPloidy + ") data!");
 
             HashMap<String, String> existingVariantIDs = buildSynonymToIdMapForExistingVariants(mongoTemplate, false);
 
@@ -240,7 +242,7 @@ public class FlapjackImport extends AbstractGenotypeImport {
             File rotatedFile = File.createTempFile("fjImport-" + genotypeFile.getName() + "-", ".tsv");
             try {
                 m_nCurrentlyTransposingMatrixCount++;
-                int nPloidy = transposeGenotypeFile(genotypeFile, rotatedFile, nonSnpVariantTypeMap, individualNames, fSkipMonomorphic, progress);
+                nPloidy = transposeGenotypeFile(genotypeFile, rotatedFile, nPloidy, nonSnpVariantTypeMap, individualNames, fSkipMonomorphic, progress);
                 if (importMode == 0 && createdProject == null && project.getPloidyLevel() != nPloidy)
                     throw new Exception("Ploidy levels differ between existing (" + project.getPloidyLevel() + ") and provided (" + nPloidy + ") data!");
                 project.setPloidyLevel(nPloidy);
@@ -255,6 +257,9 @@ public class FlapjackImport extends AbstractGenotypeImport {
             int nConcurrentThreads = Math.max(1, Runtime.getRuntime().availableProcessors());
             LOG.debug("Importing project '" + sProject + "' into " + sModule + " using " + nConcurrentThreads + " threads");
             long count = importTempFileContents(progress, nConcurrentThreads, mongoTemplate, rotatedFile, variantsAndPositions, existingVariantIDs, project, sRun, nonSnpVariantTypeMap, individualNames, fSkipMonomorphic);
+            
+            if (progress.getError() != null)
+                throw new Exception(progress.getError());
 
             progress.addStep("Preparing database for searches");
             progress.moveToNextStep();
@@ -268,7 +273,7 @@ public class FlapjackImport extends AbstractGenotypeImport {
         {
             if (m_fCloseContextOpenAfterImport && ctx != null)
                 ctx.close();
-            unlockProjectForWriting(sModule, sProject);
+            MongoTemplateManager.unlockProjectForWriting(sModule, sProject);
         }
     }
 
@@ -406,13 +411,14 @@ public class FlapjackImport extends AbstractGenotypeImport {
                                     //if (variant.getKnownAlleles().size() > 2)
                                     //    LOG.warn("Variant " + variant.getId() + " (" + providedVariantId + ") has more than 2 alleles!");
 
-                                    if (variant.getKnownAlleles().size() > 0)
-                                    {   // we only import data related to a variant if we know its alleles
+                                    if (variant.getKnownAlleles().size() > 0) {   // we only import data related to a variant if we know its alleles
                                         if (!unsavedVariants.contains(variant))
                                             unsavedVariants.add(variant);
                                         if (!unsavedRuns.contains(runToSave))
                                             unsavedRuns.add(runToSave);
                                     }
+                                    else
+                                    	LOG.warn("Skipping variant " + variant.getId() + " positioned at " + variant.getReferencePosition().getSequence() + ":" + variant.getReferencePosition().getStartSite() + " because its alleles are not known");
 
                                     if (processedVariants % nNumberOfVariantsToSaveAtOnce == 0) {
                                         saveChunk(unsavedVariants, unsavedRuns, existingVariantIDs, mongoTemplate, progress, saveService);
@@ -468,7 +474,19 @@ public class FlapjackImport extends AbstractGenotypeImport {
         return allocatableMemory;
     }
 
-    private int transposeGenotypeFile(File genotypeFile, File outputFile, Map<String, Type> nonSnpVariantTypeMapToFill, ArrayList<String> individualListToFill, boolean fSkipMonomorphic, ProgressIndicator progress) throws Exception {
+    /**
+     * 
+     * @param genotypeFile
+     * @param outputFile
+     * @param nProvidedPloidy 
+     * @param nonSnpVariantTypeMapToFill
+     * @param individualListToFill
+     * @param fSkipMonomorphic
+     * @param progress
+     * @return dataset's ploidy
+     * @throws Exception
+     */
+    private int transposeGenotypeFile(File genotypeFile, File outputFile, Integer nProvidedPloidy, Map<String, Type> nonSnpVariantTypeMapToFill, ArrayList<String> individualListToFill, boolean fSkipMonomorphic, ProgressIndicator progress) throws Exception {
         long before = System.currentTimeMillis();
 
         StackTraceElement[] stacktrace = Thread.currentThread().getStackTrace();
@@ -557,7 +575,7 @@ public class FlapjackImport extends AbstractGenotypeImport {
         final int cMaxLineLength = maxLineLength;
         final int cIndividuals = nIndividuals;
         final int cVariants = variants.size();
-        final AtomicInteger nFinishedVariantCount = new AtomicInteger(0), ploidy = new AtomicInteger(1);
+        final AtomicInteger nFinishedVariantCount = new AtomicInteger(0), ploidy = new AtomicInteger(0);
         final AtomicLong memoryPool = new AtomicLong(0);
         Thread[] transposeThreads = new Thread[nConcurrentThreads];
         Type[] variantTypes = new Type[cVariants];
@@ -691,13 +709,16 @@ public class FlapjackImport extends AbstractGenotypeImport {
                                                 builder.append("0");
                                             }
                                             else {
-                                                if (genotype.contains("/") && ploidy.get() == 1) {
-                                                    ploidy.set(Helper.split(genotype, "\t").stream().filter(gt -> gt.contains("/")).findFirst().map(gt -> gt.split("/").length).get());
-                                                    LOG.info("Found ploidy level of " + ploidy.get() + " from genotype " + genotype);
+                                                if (nProvidedPloidy == null && genotype.contains("/")) {
+                                                    int currentGtPloidy = genotype.split("/").length, currentProjectPloidy = ploidy.get();
+                                                    if (currentProjectPloidy == 0) {
+                                                        ploidy.set(currentGtPloidy);
+                                                        LOG.info("Found ploidy level of " + ploidy.get() + " from genotype " + genotype);
+                                                    }
+                                                    else if (currentProjectPloidy != currentGtPloidy)
+                                                        throw new Exception("Ambiguous ploidy level, please explicitly specify correct ploidy");
                                                 }
                                                 builder.append(genotype);
-                                                //builder.append("/");
-                                                //builder.append(genotype);
                                             }
                                             matcher.find();
                                         }
@@ -767,7 +788,7 @@ public class FlapjackImport extends AbstractGenotypeImport {
             LOG.info("Genotype matrix transposition took " + (System.currentTimeMillis() - before) + "ms for " + cVariants + " markers and " + cIndividuals + " individuals");
 
         Runtime.getRuntime().gc();  // Release our (lots of) memory as soon as possible
-        return ploidy.get();
+        return nProvidedPloidy != null ? nProvidedPloidy : ploidy.get();
     }
 
     /**
@@ -812,7 +833,7 @@ public class FlapjackImport extends AbstractGenotypeImport {
         }
         
         if (fImportUnknownVariants && variantToFeed.getReferencePosition() == null && position.getSequence() != null) // otherwise we leave it as it is (had some trouble with overridden end-sites)
-            variantToFeed.setReferencePosition(new ReferencePosition(position.getSequence(), position.getPosition(), position.getPosition() + variantToFeed.getKnownAlleles().iterator().next().length() - 1));
+        	variantToFeed.setReferencePosition(new ReferencePosition(position.getSequence(), position.getPosition(), !variantToFeed.getKnownAlleles().isEmpty() ? position.getPosition() + variantToFeed.getKnownAlleles().iterator().next().length() - 1 : null));
 
         // mandatory fields
         if (!alleleIndexMap.isEmpty()) {

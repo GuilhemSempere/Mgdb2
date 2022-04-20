@@ -49,7 +49,7 @@ public interface BrapiV2Service {
     @POST(value = "search/attributevalues")
     public Call<GermplasmAttributeValueListResponse> searchAttributesDirectResult(@Body Map<String, Object> body);
 
-    @GET(value = "search/attributevalues")
+    @GET(value = "search/attributevalues/{searchResultsDbId}")
     public Call<GermplasmAttributeValueListResponse> searchAttributesResult(@Path(value = "searchResultsDbId") String searchResultDbId, @Query(value = "pageSize") String var1, @Query(value = "page") String var2);
 
     @POST(value = "search/germplasm")
