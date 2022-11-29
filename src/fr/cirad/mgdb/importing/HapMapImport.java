@@ -259,7 +259,7 @@ public class HapMapImport extends AbstractGenotypeImport {
             
             final GenotypingProject finalProject = project;
             final MongoTemplate finalMongoTemplate = mongoTemplate;
-            HashMap<String /*individual*/, GenotypingSample> providedIdToSampleMap = new HashMap<String /*individual*/, GenotypingSample>();
+            m_individualToSampleMap = new HashMap<String /*individual*/, GenotypingSample>();
             
             for (int threadIndex = 0; threadIndex < nImportThreads; threadIndex++) {
                 importThreads[threadIndex] = new Thread() {
@@ -305,13 +305,14 @@ public class HapMapImport extends AbstractGenotypeImport {
 	                                            }
 
 	                                            int sampleId = AutoIncrementCounter.getNextSequence(finalMongoTemplate, MongoTemplateManager.getMongoCollectionName(GenotypingSample.class));
-	                                            providedIdToSampleMap.put(sIndOrSpId, new GenotypingSample(sampleId, finalProject.getId(), sRun, sIndividual, sampleToIndividualMap == null ? null : sIndOrSpId));   // add a sample for this individual to the project
+	                                            m_individualToSampleMap.put(sIndOrSpId, new GenotypingSample(sampleId, finalProject.getId(), sRun, sIndividual, sampleToIndividualMap == null ? null : sIndOrSpId));   // add a sample for this individual to the project
 	                                        }
 	                                        if (!indsToAdd.isEmpty()) {
 	                                        	finalMongoTemplate.insert(indsToAdd, Individual.class);
 	                                            indsToAdd = null;
 	                                        }
 	                    					
+	                                        m_fSampleListKnown = true;
 	                                		nNumberOfVariantsToSaveAtOnce.set(sampleIds.size() == 0 ? nMaxChunkSize : Math.max(1, nMaxChunkSize / sampleIds.size()));
 	                    					LOG.info("Importing by chunks of size " + nNumberOfVariantsToSaveAtOnce.get());
                                 		}	
@@ -360,7 +361,7 @@ public class HapMapImport extends AbstractGenotypeImport {
                                         }
                                     }
                 
-                					VariantRunData runToSave = addHapMapDataToVariant(finalMongoTemplate, variant, variantType, alleleIndexMap, hmFeature, finalProject, sRun, providedIdToSampleMap, sampleIds);
+                					VariantRunData runToSave = addHapMapDataToVariant(finalMongoTemplate, variant, variantType, alleleIndexMap, hmFeature, finalProject, sRun, m_individualToSampleMap, sampleIds);
                 					finalProject.getSequences().add(hmFeature.getChr());
                 					finalProject.getAlleleCounts().add(variant.getKnownAlleles().size());	// it's a TreeSet so it will only be added if it's not already present
                 					
@@ -419,7 +420,7 @@ public class HapMapImport extends AbstractGenotypeImport {
 			if (!project.getRuns().contains(sRun))
 				project.getRuns().add(sRun);
 			mongoTemplate.save(project);	// always save project before samples otherwise the sample cleaning procedure in MgdbDao.prepareDatabaseForSearches may remove them if called in the meantime
-            mongoTemplate.insert(providedIdToSampleMap.values(), GenotypingSample.class);
+            mongoTemplate.insert(m_individualToSampleMap.values(), GenotypingSample.class);
 
 			progress.addStep("Preparing database for searches");
 			progress.moveToNextStep();

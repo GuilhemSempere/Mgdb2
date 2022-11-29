@@ -23,6 +23,7 @@ import java.io.IOException;
 import java.net.URL;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -113,11 +114,23 @@ public class IndividualMetadataImport {
 
         importIndividualOrSampleMetadata(args[0], null, new File(args[1]).toURI().toURL(), args[2], args.length > 3 ? args[3] : null, null);
     }
+    
+    public static HashMap<Integer, String> readMetadataFileHeader(String headerLine, Collection<String> fieldsToImport) {
+    	HashMap<Integer, String> columnLabels = new HashMap<Integer, String>();
+        if (columnLabels.isEmpty() && headerLine.startsWith("\uFEFF"))
+        	headerLine = headerLine.substring(1);
+
+        List<String> cells = Helper.split(headerLine, "\t");
+
+        for (int i = 0; i < cells.size(); i++) {
+            String cell = cells.get(i);
+            if (!cell.isEmpty() && (fieldsToImport == null || fieldsToImport.contains(cell.toLowerCase())))
+                columnLabels.put(i, cell);
+        }
+    	return columnLabels;
+    }
 
     public static int importIndividualOrSampleMetadata(String sModule, HttpSession session, URL metadataFileURL, String targetTypeColName, String csvFieldListToImport, String username) throws Exception {
-        List<String> fieldsToImport = csvFieldListToImport != null ? Arrays.asList(csvFieldListToImport.toLowerCase().split(",")) : null;
-        Scanner scanner = new Scanner(metadataFileURL.openStream());
-
         GenericXmlApplicationContext ctx = null;
         MongoTemplate mongoTemplate = MongoTemplateManager.get(sModule);
         if (mongoTemplate == null) { // we are probably being invoked offline
@@ -137,11 +150,9 @@ public class IndividualMetadataImport {
             session.setAttribute(targetTypeColName + "s_metadata_" + sModule, sessionObject);
         }
         
-        boolean fFlapjackFormat = metadataFileURL.getFile().toLowerCase().endsWith(".phenotype");
-
-        try {
-            HashMap<Integer, String> columnLabels = new HashMap<Integer, String>();
-            int idColumn = -1;
+        boolean fFlapjackFormat = false;
+        Scanner scanner = new Scanner(metadataFileURL.openStream());
+        try {            	
             String sLine = null;
             
             BulkOperations bulkOperations;
@@ -150,35 +161,32 @@ public class IndividualMetadataImport {
             else
                 bulkOperations = mongoTemplate.bulkOps(BulkOperations.BulkMode.ORDERED, username == null ? GenotypingSample.class : CustomSampleMetadata.class);
             
+            HashMap<Integer, String> columnLabels = null;
+            Integer idColumn = null;
             List<String> targetEntityList = new ArrayList<>();
             while (scanner.hasNextLine()) {
                 sLine = scanner.nextLine();
-                if (sLine.length() == 0 || (fFlapjackFormat && sLine.replaceAll("\\s+", "").equals("#fjFile=PHENOTYPE")))
-                    continue;
-
-                if (columnLabels.isEmpty() && sLine.startsWith("\uFEFF"))
-                    sLine = sLine.substring(1);
-
-                List<String> cells = Helper.split(sLine, "\t");
-
-                if (columnLabels.isEmpty()) { // it's the header line
-                    for (int i = 0; i < cells.size(); i++) {
-                        String cell = cells.get(i);
-                        if (cell.equalsIgnoreCase(targetTypeColName))
-                            idColumn = i;
-                        else if (!cell.isEmpty() && (fieldsToImport == null || fieldsToImport.contains(cell.toLowerCase())))
-                            columnLabels.put(i, cell);
-                    }
-                    if (idColumn == -1) {
-                    	if (!fFlapjackFormat || columnLabels.containsKey(0))
-                            throw new Exception(cells.size() <= 1 ? "Provided file does not seem to be tab-delimited!" : "Unable to find individual name column \"" + targetTypeColName + "\" in file header!");
-
-                    	idColumn = 0;	// FJ .phenotype file's field-name line starts with an empty string 
-                    }
-                    continue;
+                if (sLine.isEmpty() || sLine.replaceAll("\\s+", "").equals("#fjFile=PHENOTYPE")) {
+                	if (!sLine.isEmpty())
+                		fFlapjackFormat = true;
+                	continue;
                 }
 
-                // now deal with actual data rows
+            	if (columnLabels == null) {
+            		columnLabels = readMetadataFileHeader(sLine, csvFieldListToImport != null ? Arrays.asList(csvFieldListToImport.toLowerCase().split(",")) : null);
+	                idColumn = columnLabels.entrySet().stream().filter(e -> e.getValue().equals(targetTypeColName)).map(Map.Entry::getKey).findFirst().orElse(null);
+	                if (idColumn == null) {
+	                	if (!fFlapjackFormat || columnLabels.containsKey(0))
+	                        throw new Exception(columnLabels.size() <= 1 ? "Provided file does not seem to be tab-delimited!" : "Unable to find individual name column \"" + targetTypeColName + "\" in file header!");
+	
+	                	idColumn = 0;	// FJ phenotype file's field-name line starts with an empty string
+	                }
+                	continue;
+            	}
+                
+                List<String> cells = Helper.split(sLine, "\t");
+
+                // deal with actual data rows
                 LinkedHashMap<String, Object> additionalInfo = new LinkedHashMap<>();
                 for (int col : columnLabels.keySet())
                     if (col != idColumn)

@@ -261,7 +261,7 @@ public class PlinkImport extends AbstractGenotypeImport {
             }
 
             // Create the necessary samples
-            HashMap<String /*individual*/, GenotypingSample> providedIdToSampleMap = new HashMap<String /*individual*/, GenotypingSample>();
+            m_individualToSampleMap = new HashMap<String /*individual*/, GenotypingSample>();
             HashSet<Individual> indsToAdd = new HashSet<>();
             boolean fDbAlreadyContainedIndividuals = mongoTemplate.findOne(new Query(), Individual.class) != null;
             for (String sIndOrSpId : userIndividualToPopulationMap.keySet()) {
@@ -280,13 +280,14 @@ public class PlinkImport extends AbstractGenotypeImport {
                 }
 
                 int sampleId = AutoIncrementCounter.getNextSequence(mongoTemplate, MongoTemplateManager.getMongoCollectionName(GenotypingSample.class));
-                providedIdToSampleMap.put(sIndOrSpId, new GenotypingSample(sampleId, project.getId(), sRun, sIndividual, sampleToIndividualMap == null ? null : sIndOrSpId));   // add a sample for this individual to the project
+                m_individualToSampleMap.put(sIndOrSpId, new GenotypingSample(sampleId, project.getId(), sRun, sIndividual, sampleToIndividualMap == null ? null : sIndOrSpId));   // add a sample for this individual to the project
             }
             if (!indsToAdd.isEmpty()) {
             	mongoTemplate.insert(indsToAdd, Individual.class);
                 indsToAdd = null;
             }
 
+            m_fSampleListKnown = true;
             progress.addStep("Checking genotype consistency between synonyms");
             progress.moveToNextStep();
 
@@ -296,7 +297,7 @@ public class PlinkImport extends AbstractGenotypeImport {
 
             int nConcurrentThreads = Math.max(1, Runtime.getRuntime().availableProcessors());
             LOG.debug("Importing project '" + sProject + "' into " + sModule + " using " + nConcurrentThreads + " threads");
-            long count = importTempFileContents(progress, nConcurrentThreads, mongoTemplate, rotatedFile, variantsAndPositions, existingVariantIDs, project, sRun, inconsistencies, providedIdToSampleMap, userIndividualToPopulationMap, nonSnpVariantTypeMap, fSkipMonomorphic);
+            long count = importTempFileContents(progress, nConcurrentThreads, mongoTemplate, rotatedFile, variantsAndPositions, existingVariantIDs, project, sRun, inconsistencies, m_individualToSampleMap, userIndividualToPopulationMap, nonSnpVariantTypeMap, fSkipMonomorphic);
 
             if (progress.getError() != null)
                 throw new Exception(progress.getError());
@@ -320,7 +321,7 @@ public class PlinkImport extends AbstractGenotypeImport {
         }
     }
 
-    public long importTempFileContents(ProgressIndicator progress, int nNConcurrentThreads, MongoTemplate mongoTemplate, File tempFile, LinkedHashMap<String, String> variantsAndPositions, HashMap<String, String> existingVariantIDs, GenotypingProject project, String sRun, HashMap<String, ArrayList<String>> inconsistencies, HashMap<String /*individual*/, GenotypingSample> providedIdToSampleMap, Map<String, String> userIndividualToPopulationMap, Map<String, Type> nonSnpVariantTypeMap, boolean fSkipMonomorphic) throws Exception
+    public long importTempFileContents(ProgressIndicator progress, int nNConcurrentThreads, MongoTemplate mongoTemplate, File tempFile, LinkedHashMap<String, String> variantsAndPositions, HashMap<String, String> existingVariantIDs, GenotypingProject project, String sRun, HashMap<String, ArrayList<String>> inconsistencies, Map<String /*individual*/, GenotypingSample> providedIdToSampleMap, Map<String, String> userIndividualToPopulationMap, Map<String, Type> nonSnpVariantTypeMap, boolean fSkipMonomorphic) throws Exception
     {
         String[] individuals = userIndividualToPopulationMap.keySet().toArray(new String[userIndividualToPopulationMap.size()]);
         final AtomicInteger count = new AtomicInteger(0);

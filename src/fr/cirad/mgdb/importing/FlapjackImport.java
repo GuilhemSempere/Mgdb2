@@ -256,7 +256,7 @@ public class FlapjackImport extends AbstractGenotypeImport {
                 return createdProject;
             
             // Create the necessary samples
-            HashMap<String /*individual*/, GenotypingSample> providedIdToSampleMap = new HashMap<String /*individual*/, GenotypingSample>();
+            m_individualToSampleMap = new HashMap<String /*individual*/, GenotypingSample>();
             HashSet<Individual> indsToAdd = new HashSet<>();
             boolean fDbAlreadyContainedIndividuals = mongoTemplate.findOne(new Query(), Individual.class) != null;
             for (String sIndOrSpId : individualNames) {
@@ -275,16 +275,17 @@ public class FlapjackImport extends AbstractGenotypeImport {
                 }
 
                 int sampleId = AutoIncrementCounter.getNextSequence(mongoTemplate, MongoTemplateManager.getMongoCollectionName(GenotypingSample.class));
-                providedIdToSampleMap.put(sIndOrSpId, new GenotypingSample(sampleId, project.getId(), sRun, sIndividual, sampleToIndividualMap == null ? null : sIndOrSpId));   // add a sample for this individual to the project
+                m_individualToSampleMap.put(sIndOrSpId, new GenotypingSample(sampleId, project.getId(), sRun, sIndividual, sampleToIndividualMap == null ? null : sIndOrSpId));   // add a sample for this individual to the project
             }
             if (!indsToAdd.isEmpty()) {
             	mongoTemplate.insert(indsToAdd, Individual.class);
                 indsToAdd = null;
             }
 
+            m_fSampleListKnown = true;
             int nConcurrentThreads = Math.max(1, Runtime.getRuntime().availableProcessors());
             LOG.debug("Importing project '" + sProject + "' into " + sModule + " using " + nConcurrentThreads + " threads");
-            long count = importTempFileContents(progress, nConcurrentThreads, mongoTemplate, rotatedFile, variantsAndPositions, existingVariantIDs, project, sRun, providedIdToSampleMap, nonSnpVariantTypeMap, individualNames, fSkipMonomorphic);
+            long count = importTempFileContents(progress, nConcurrentThreads, mongoTemplate, rotatedFile, variantsAndPositions, existingVariantIDs, project, sRun, m_individualToSampleMap, nonSnpVariantTypeMap, individualNames, fSkipMonomorphic);
 
             if (progress.getError() != null)
                 throw new Exception(progress.getError());
@@ -333,7 +334,7 @@ public class FlapjackImport extends AbstractGenotypeImport {
     }
 
     // TODO : check inconsistent variant names between map and genotype
-    public long importTempFileContents(ProgressIndicator progress, int nNConcurrentThreads, MongoTemplate mongoTemplate, File tempFile, Map<String, VariantMapPosition> variantsAndPositions, HashMap<String, String> existingVariantIDs, GenotypingProject project, String sRun, HashMap<String /*individual*/, GenotypingSample> providedIdToSampleMap, Map<String, Type> nonSnpVariantTypeMap, List<String> individuals, boolean fSkipMonomorphic) throws Exception
+    public long importTempFileContents(ProgressIndicator progress, int nNConcurrentThreads, MongoTemplate mongoTemplate, File tempFile, Map<String, VariantMapPosition> variantsAndPositions, HashMap<String, String> existingVariantIDs, GenotypingProject project, String sRun, Map<String /*individual*/, GenotypingSample> providedIdToSampleMap, Map<String, Type> nonSnpVariantTypeMap, List<String> individuals, boolean fSkipMonomorphic) throws Exception
     {
         final AtomicInteger count = new AtomicInteger(0);
 
@@ -833,7 +834,7 @@ public class FlapjackImport extends AbstractGenotypeImport {
      * @param samples 
      * @param fImportUnknownVariants
      */
-    static private VariantRunData addFlapjackDataToVariant(MongoTemplate mongoTemplate, VariantData variantToFeed, VariantMapPosition position, List<String> individuals, Map<String, Type> nonSnpVariantTypeMap, String[][] alleles, GenotypingProject project, String runName, HashMap<String, GenotypingSample> samples, boolean fImportUnknownVariants) throws Exception
+    static private VariantRunData addFlapjackDataToVariant(MongoTemplate mongoTemplate, VariantData variantToFeed, VariantMapPosition position, List<String> individuals, Map<String, Type> nonSnpVariantTypeMap, String[][] alleles, GenotypingProject project, String runName, Map<String, GenotypingSample> samples, boolean fImportUnknownVariants) throws Exception
     {
         VariantRunData vrd = new VariantRunData(new VariantRunData.VariantRunDataId(project.getId(), runName, variantToFeed.getId()));
 

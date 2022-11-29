@@ -296,7 +296,7 @@ public class VcfImport extends AbstractGenotypeImport {
             final GenotypingProject finalProject = project;
             final int finalEffectAnnotationPos = effectAnnotationPos, finalGeneIdAnnotationPos = geneIdAnnotationPos;
 
-            HashMap<String /*individual*/, GenotypingSample> providedIdToSampleMap = new HashMap<String /*individual*/, GenotypingSample>();
+            m_individualToSampleMap = new HashMap<String /*individual*/, GenotypingSample>();
             HashSet<Individual> indsToAdd = new HashSet<>();
             boolean fDbAlreadyContainedIndividuals = mongoTemplate.findOne(new Query(), Individual.class) != null, fDbAlreadyContainedVariants = mongoTemplate.findOne(new Query() {{ fields().include("_id"); }}, VariantData.class) != null;
             for (String sIndOrSpId : header.getSampleNamesInOrder()) {
@@ -315,12 +315,13 @@ public class VcfImport extends AbstractGenotypeImport {
                 }
 
                 int sampleId = AutoIncrementCounter.getNextSequence(mongoTemplate, MongoTemplateManager.getMongoCollectionName(GenotypingSample.class));
-                providedIdToSampleMap.put(sIndOrSpId, new GenotypingSample(sampleId, project.getId(), sRun, sIndividual, sampleToIndividualMap == null ? null : sIndOrSpId));   // add a sample for this individual to the project
+                m_individualToSampleMap.put(sIndOrSpId, new GenotypingSample(sampleId, project.getId(), sRun, sIndividual, sampleToIndividualMap == null ? null : sIndOrSpId));   // add a sample for this individual to the project
             }
             if (!indsToAdd.isEmpty()) {
                 mongoTemplate.insert(indsToAdd, Individual.class);
                 indsToAdd = null;
             }
+            m_fSampleListKnown = true;
 
             // loop over each variation
             while (variantIterator.hasNext()) {
@@ -373,7 +374,7 @@ public class VcfImport extends AbstractGenotypeImport {
                                         totalProcessedVariantCount.getAndIncrement();
 
                                     unsavedVariants.add(variant);
-                                    VariantRunData runToSave = addVcfDataToVariant(finalMongoTemplate, header, variant, vcfEntry, finalProject, sRun, phasingGroups, providedIdToSampleMap, finalEffectAnnotationPos, finalGeneIdAnnotationPos);
+                                    VariantRunData runToSave = addVcfDataToVariant(finalMongoTemplate, header, variant, vcfEntry, finalProject, sRun, phasingGroups, m_individualToSampleMap, finalEffectAnnotationPos, finalGeneIdAnnotationPos);
                                     if (!unsavedRuns.contains(runToSave))
                                         unsavedRuns.add(runToSave);
 
@@ -426,7 +427,7 @@ public class VcfImport extends AbstractGenotypeImport {
                 mongoTemplate.save(project);
             else
                 mongoTemplate.insert(project);
-            mongoTemplate.insert(providedIdToSampleMap.values(), GenotypingSample.class);
+            mongoTemplate.insert(m_individualToSampleMap.values(), GenotypingSample.class);
 
             progress.addStep("Preparing database for searches");
             progress.moveToNextStep();
