@@ -427,6 +427,19 @@ public class HapMapImport extends AbstractGenotypeImport {
 			MgdbDao.prepareDatabaseForSearches(mongoTemplate);
 
 			LOG.info("HapMapImport took " + (System.currentTimeMillis() - before) / 1000 + "s for " + totalProcessedVariantCount.get() + " records");
+			
+			if (m_parallelProcess != null) {
+				long delay = 1000 * 60, parallelProcessWaitStart = System.currentTimeMillis();
+				if (m_parallelProcess.isAlive() && System.currentTimeMillis() - parallelProcessWaitStart < delay) {
+					Thread.sleep(1000);
+					LOG.info("Waiting for metadata import thread to complete");
+				}
+				if (m_parallelProcess.isAlive())
+					LOG.error("Gave up waiting for metadata import thread to complete");
+				else
+					LOG.info("Metadata import thread completed");
+			}
+
 			progress.markAsComplete();
 			return createdProject;
 		}

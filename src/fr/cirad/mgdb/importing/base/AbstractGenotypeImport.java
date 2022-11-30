@@ -66,6 +66,7 @@ public class AbstractGenotypeImport {
 	private boolean m_fAllowDbDropIfNoGenotypingData = true;
 	protected boolean m_fSampleListKnown = false;
 	protected Map<String /* individual name */, GenotypingSample> m_individualToSampleMap = null;
+	protected Thread m_parallelProcess = null;
 
 	public static ArrayList<String> getIdentificationStrings(String sType, String sSeq, Long nStartPos, Collection<String> idAndSynonyms) throws Exception
 	{
@@ -114,6 +115,11 @@ public class AbstractGenotypeImport {
 
 	public Map<String /* individual name */, GenotypingSample> getImportedIndividualsAndSamples() {
 		return m_fSampleListKnown == false? null : m_individualToSampleMap;
+	}
+
+	public AbstractGenotypeImport setParallelProcess(Thread parallelProcess) {
+		this.m_parallelProcess = parallelProcess;
+		return this;
 	}
 	
 //	public static void buildSynonymMappings(MongoTemplate mongoTemplate) throws Exception
