@@ -247,7 +247,7 @@ public class IndividualMetadataImport {
                     verificationQuery.fields().include("_id");
                     List<String> foundIndList = mongoTemplate.find(verificationQuery, Individual.class).stream().map(ind -> ind.getId()).collect(Collectors.toList());
                     if (foundIndList.size() < targetEntityList.size())
-                        throw new Exception("The following individuals do not exist in the selected database: " + StringUtils.join(CollectionUtils.disjunction(targetEntityList, foundIndList), ", "));
+                        throw new Exception("The following individuals do not exist in this dataset: " + StringUtils.join(CollectionUtils.disjunction(targetEntityList, foundIndList), ", "));
                 }
             }
             if (!fIsAnonymous) {

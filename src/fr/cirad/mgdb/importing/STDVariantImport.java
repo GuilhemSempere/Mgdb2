@@ -287,7 +287,6 @@ public class STDVariantImport extends AbstractGenotypeImport {
 			progress.addStep("Preparing database for searches");
 			progress.moveToNextStep();
 			MgdbDao.prepareDatabaseForSearches(mongoTemplate);
-			progress.markAsComplete();
 		}
 		finally
 		{

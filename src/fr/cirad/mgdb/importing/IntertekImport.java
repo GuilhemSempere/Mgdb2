@@ -401,7 +401,6 @@ public class IntertekImport extends AbstractGenotypeImport {
             MgdbDao.prepareDatabaseForSearches(mongoTemplate);
 
             LOG.info("IntertekImport took " + (System.currentTimeMillis() - before) / 1000 + "s for " + count + " records");		
-            progress.markAsComplete();
             return createdProject;
         } finally {
             if (m_fCloseContextOpenAfterImport && ctx != null)

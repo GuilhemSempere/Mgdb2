@@ -202,6 +202,8 @@ public class PlinkImport extends AbstractGenotypeImport {
             if (mongoTemplate == null)
                 throw new Exception("DATASOURCE '" + sModule + "' is not supported!");
         }
+        
+        File rotatedFile = null;
         try
         {
             fImportUnknownVariants = doesDatabaseSupportImportingUnknownVariants(sModule);
@@ -251,7 +253,6 @@ public class PlinkImport extends AbstractGenotypeImport {
             Map<String, String> userIndividualToPopulationMap = new LinkedHashMap<>();
             Map<String, Type> nonSnpVariantTypeMap = new HashMap<>();
 
-            File rotatedFile = null;
             try {
                 m_nCurrentlyTransposingMatrixCount++;
                 rotatedFile = transposePlinkPedFile(variants, pedFile, userIndividualToPopulationMap, nonSnpVariantTypeMap, fSkipMonomorphic, progress);
@@ -310,13 +311,14 @@ public class PlinkImport extends AbstractGenotypeImport {
             MgdbDao.prepareDatabaseForSearches(mongoTemplate);
 
             LOG.info("PlinkImport took " + (System.currentTimeMillis() - before) / 1000 + "s for " + count + " records");
-            progress.markAsComplete();
             return createdProject;
         }
         finally
         {
             if (m_fCloseContextOpenAfterImport && ctx != null)
                 ctx.close();
+            if (rotatedFile != null)
+            	rotatedFile.delete();
             MongoTemplateManager.unlockProjectForWriting(sModule, sProject);
         }
     }
@@ -526,8 +528,6 @@ public class PlinkImport extends AbstractGenotypeImport {
         {
             if (reader != null)
                 reader.close();
-            if (tempFile != null)
-                tempFile.delete();
         }
         return count.get();
     }

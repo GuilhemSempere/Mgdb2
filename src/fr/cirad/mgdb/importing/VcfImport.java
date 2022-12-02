@@ -434,7 +434,6 @@ public class VcfImport extends AbstractGenotypeImport {
             MgdbDao.prepareDatabaseForSearches(mongoTemplate);
 
             LOG.info("VcfImport took " + (System.currentTimeMillis() - before) / 1000 + "s for " + totalProcessedVariantCount + " records");
-            progress.markAsComplete();
             return createdProject;
         }
         finally

@@ -173,6 +173,7 @@ public class FlapjackImport extends AbstractGenotypeImport {
         ProgressIndicator progress = ProgressIndicator.get(m_processID) != null ? ProgressIndicator.get(m_processID) : new ProgressIndicator(m_processID, new String[]{"Initializing import"}); // better to add it straight-away so the JSP doesn't get null in return when it checks for it (otherwise it will assume the process has ended)
 
         GenericXmlApplicationContext ctx = null;
+        File rotatedFile = File.createTempFile("fjImport-" + genotypeFile.getName() + "-", ".tsv");
         try
         {
             MongoTemplate mongoTemplate = MongoTemplateManager.get(sModule);
@@ -240,7 +241,6 @@ public class FlapjackImport extends AbstractGenotypeImport {
             Map<String, Type> nonSnpVariantTypeMap = new HashMap<>();
             ArrayList<String> individualNames = new ArrayList<>();
 
-            File rotatedFile = File.createTempFile("fjImport-" + genotypeFile.getName() + "-", ".tsv");
             try {
                 m_nCurrentlyTransposingMatrixCount++;
                 nPloidy = transposeGenotypeFile(genotypeFile, rotatedFile, nPloidy, nonSnpVariantTypeMap, individualNames, fSkipMonomorphic, progress);
@@ -298,11 +298,11 @@ public class FlapjackImport extends AbstractGenotypeImport {
             MgdbDao.prepareDatabaseForSearches(mongoTemplate);
 
             LOG.info("FlapjackImport took " + (System.currentTimeMillis() - before) / 1000 + "s for " + count + " records");
-            progress.markAsComplete();
             return createdProject;
         }
         finally
         {
+        	rotatedFile.delete();
             if (m_fCloseContextOpenAfterImport && ctx != null)
                 ctx.close();
             MongoTemplateManager.unlockProjectForWriting(sModule, sProject);
@@ -499,8 +499,6 @@ public class FlapjackImport extends AbstractGenotypeImport {
         {
             if (reader != null)
                 reader.close();
-            if (tempFile != null)
-                tempFile.delete();
         }
         return count.get();
     }
