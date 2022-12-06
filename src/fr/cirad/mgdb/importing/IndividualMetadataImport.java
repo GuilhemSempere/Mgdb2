@@ -401,9 +401,13 @@ public class IndividualMetadataImport {
             Update update = new Update();
             if (username == null) { // global metadata
                 aiMap.forEach((k, v) -> update.set(Individual.SECTION_ADDITIONAL_INFO + "." + k, v));
+                update.unset(Individual.SECTION_ADDITIONAL_INFO + "." + BrapiService.BRAPI_FIELD_externalReferenceId);
+                update.unset(Individual.SECTION_ADDITIONAL_INFO + "." + BrapiService.BRAPI_FIELD_externalReferenceSource);
                 bulkOperations.updateMulti(new Query(Criteria.where("_id").is(indName)), update);
             } else if (!fIsAnonymous) { // persistent user-level metadata
                 aiMap.forEach((k, v) -> update.set(CustomIndividualMetadata.SECTION_ADDITIONAL_INFO + "." + k, v));
+                update.unset(CustomIndividualMetadata.SECTION_ADDITIONAL_INFO + "." + BrapiService.BRAPI_FIELD_externalReferenceId);
+                update.unset(CustomIndividualMetadata.SECTION_ADDITIONAL_INFO + "." + BrapiService.BRAPI_FIELD_externalReferenceSource);
                 bulkOperations.upsert(new Query(Criteria.where("_id").is(new CustomIndividualMetadata.CustomIndividualMetadataId(indName, username))), update);
             } else {
             	LinkedHashMap<String, Object> existingEntityMetadata = sessionObject.get(indName);
@@ -412,6 +416,8 @@ public class IndividualMetadataImport {
             		sessionObject.put(indName, existingEntityMetadata);
             	}
             	existingEntityMetadata.putAll(aiMap);
+            	existingEntityMetadata.remove(BrapiService.BRAPI_FIELD_externalReferenceId);
+            	existingEntityMetadata.remove(BrapiService.BRAPI_FIELD_externalReferenceSource);
             }
         }
 
@@ -422,7 +428,7 @@ public class IndividualMetadataImport {
             BulkWriteResult wr = bulkOperations.execute();
             return wr.getModifiedCount() + wr.getUpserts().size();
         } else {
-            LOG.info("Database " + sModule + ": metadata was persisted into session for anonymous user");
+            LOG.info("Database " + sModule + ": individual metadata was persisted into session for anonymous user");
             return 1;
         }
     }
@@ -481,9 +487,13 @@ public class IndividualMetadataImport {
             Update update = new Update();
             if (username == null) { // global metadata
                 aiMap.forEach((k, v) -> update.set(Individual.SECTION_ADDITIONAL_INFO + "." + k, v));
+                update.unset(Individual.SECTION_ADDITIONAL_INFO + "." + BrapiService.BRAPI_FIELD_externalReferenceId);
+                update.unset(Individual.SECTION_ADDITIONAL_INFO + "." + BrapiService.BRAPI_FIELD_externalReferenceSource);
                 bulkOperations.updateMulti(new Query(Criteria.where("_id").is(indName)), update);
             } else if (!fIsAnonymous) { // persistent user-level metadata
                 aiMap.forEach((k, v) -> update.set(CustomIndividualMetadata.SECTION_ADDITIONAL_INFO + "." + k, v));
+                update.unset(CustomIndividualMetadata.SECTION_ADDITIONAL_INFO + "." + BrapiService.BRAPI_FIELD_externalReferenceId);
+                update.unset(CustomIndividualMetadata.SECTION_ADDITIONAL_INFO + "." + BrapiService.BRAPI_FIELD_externalReferenceSource);
                 bulkOperations.upsert(new Query(Criteria.where("_id").is(new CustomIndividualMetadata.CustomIndividualMetadataId(indName, username))), update);
             } else {
             	LinkedHashMap<String, Object> existingEntityMetadata = sessionObject.get(indName);
@@ -492,6 +502,8 @@ public class IndividualMetadataImport {
             		sessionObject.put(indName, existingEntityMetadata);
             	}
             	existingEntityMetadata.putAll(aiMap);
+            	existingEntityMetadata.remove(BrapiService.BRAPI_FIELD_externalReferenceId);
+            	existingEntityMetadata.remove(BrapiService.BRAPI_FIELD_externalReferenceSource);
             }
         }
 
@@ -502,7 +514,7 @@ public class IndividualMetadataImport {
             BulkWriteResult wr = bulkOperations.execute();
             return wr.getModifiedCount() + wr.getUpserts().size();
         } else {
-            LOG.info("Database " + sModule + ": metadata was persisted into session for anonymous user");
+            LOG.info("Database " + sModule + ": individual metadata was persisted into session for anonymous user");
             return 1;
         }
     }
@@ -612,8 +624,12 @@ public class IndividualMetadataImport {
             if (username == null) { // global metadata
                 aiMap.forEach((k, v) -> update.set(GenotypingSample.SECTION_ADDITIONAL_INFO + "." + k, v));
                 bulkOperations.updateMulti(new Query(Criteria.where(GenotypingSample.FIELDNAME_NAME).is(internalId)), update);
+                update.unset(GenotypingSample.SECTION_ADDITIONAL_INFO + "." + BrapiService.BRAPI_FIELD_externalReferenceId);
+                update.unset(GenotypingSample.SECTION_ADDITIONAL_INFO + "." + BrapiService.BRAPI_FIELD_externalReferenceSource);
             } else if (!fIsAnonymous) { // persistent user-level metadata
                 aiMap.forEach((k, v) -> update.set(CustomSampleMetadata.SECTION_ADDITIONAL_INFO + "." + k, v));
+                update.unset(CustomSampleMetadata.SECTION_ADDITIONAL_INFO + "." + BrapiService.BRAPI_FIELD_externalReferenceId);
+                update.unset(CustomSampleMetadata.SECTION_ADDITIONAL_INFO + "." + BrapiService.BRAPI_FIELD_externalReferenceSource);
            		bulkOperations.upsert(new Query(new Criteria().andOperator(Criteria.where("_id." + CustomSampleMetadataId.FIELDNAME_USER).is(username), new Criteria().andOperator(Criteria.where("_id." + CustomSampleMetadataId.FIELDNAME_SAMPLE_ID).is(spId)))), update);
             } else {
             	LinkedHashMap<String, Object> existingEntityMetadata = sessionObject.get(spId);
@@ -622,6 +638,8 @@ public class IndividualMetadataImport {
             		sessionObject.put(spId, existingEntityMetadata);
             	}
             	existingEntityMetadata.putAll(aiMap);
+            	existingEntityMetadata.remove(BrapiService.BRAPI_FIELD_externalReferenceId);
+            	existingEntityMetadata.remove(BrapiService.BRAPI_FIELD_externalReferenceSource);
             }
         }
 
@@ -632,7 +650,7 @@ public class IndividualMetadataImport {
             BulkWriteResult wr = bulkOperations.execute();
             return wr.getModifiedCount() + wr.getUpserts().size();
         } else {
-            LOG.info("Database " + sModule + ": metadata was persisted into session for anonymous user");
+            LOG.info("Database " + sModule + ": sample metadata was persisted into session for anonymous user");
             return 1;
         }
     }
@@ -758,9 +776,13 @@ public class IndividualMetadataImport {
             Update update = new Update();
             if (username == null) { // global metadata
                 aiMap.forEach((k, v) -> update.set(GenotypingSample.SECTION_ADDITIONAL_INFO + "." + k, v));
+                update.unset(GenotypingSample.SECTION_ADDITIONAL_INFO + "." + BrapiService.BRAPI_FIELD_externalReferenceId);
+                update.unset(GenotypingSample.SECTION_ADDITIONAL_INFO + "." + BrapiService.BRAPI_FIELD_externalReferenceSource);
                 bulkOperations.updateMulti(new Query(Criteria.where(GenotypingSample.FIELDNAME_NAME).is(internalId)), update);
             } else if (!fIsAnonymous) { // persistent user-level metadata
                 aiMap.forEach((k, v) -> update.set(CustomSampleMetadata.SECTION_ADDITIONAL_INFO + "." + k, v));
+                update.unset(CustomSampleMetadata.SECTION_ADDITIONAL_INFO + "." + BrapiService.BRAPI_FIELD_externalReferenceId);
+                update.unset(CustomSampleMetadata.SECTION_ADDITIONAL_INFO + "." + BrapiService.BRAPI_FIELD_externalReferenceSource);
            		bulkOperations.upsert(new Query(new Criteria().andOperator(Criteria.where("_id." + CustomSampleMetadataId.FIELDNAME_USER).is(username), new Criteria().andOperator(Criteria.where("_id." + CustomSampleMetadataId.FIELDNAME_SAMPLE_ID).is(spId)))), update);
             } else {
             	LinkedHashMap<String, Object> existingEntityMetadata = sessionObject.get(spId);
@@ -769,6 +791,8 @@ public class IndividualMetadataImport {
             		sessionObject.put(spId, existingEntityMetadata);
             	}
             	existingEntityMetadata.putAll(aiMap);
+            	existingEntityMetadata.remove(BrapiService.BRAPI_FIELD_externalReferenceId);
+            	existingEntityMetadata.remove(BrapiService.BRAPI_FIELD_externalReferenceSource);
             }
         }
 
@@ -780,7 +804,7 @@ public class IndividualMetadataImport {
             return wr.getModifiedCount() + wr.getUpserts().size();
         }
         else {
-            LOG.info("Database " + sModule + ": metadata was persisted into session for anonymous user");
+            LOG.info("Database " + sModule + ": sample metadata was persisted into session for anonymous user");
             return 1;
         }
     }
