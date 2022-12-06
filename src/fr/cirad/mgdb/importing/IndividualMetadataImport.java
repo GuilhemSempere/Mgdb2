@@ -177,7 +177,7 @@ public class IndividualMetadataImport {
 	                idColumn = columnLabels.entrySet().stream().filter(e -> e.getValue().equals(targetTypeColName)).map(Map.Entry::getKey).findFirst().orElse(null);
 	                if (idColumn == null) {
 	                	if (!fFlapjackFormat || columnLabels.containsKey(0))
-	                        throw new Exception(columnLabels.size() <= 1 ? "Provided file does not seem to be tab-delimited!" : "Unable to find individual name column \"" + targetTypeColName + "\" in file header!");
+	                        throw new Exception(columnLabels.size() <= 1 ? "Provided file does not seem to be tab-delimited!" : "Unable to find column named \"" + targetTypeColName + "\" in metadata file header!");
 	
 	                	idColumn = 0;	// FJ phenotype file's field-name line starts with an empty string
 	                }
@@ -237,9 +237,9 @@ public class IndividualMetadataImport {
                 	sessionObject.clear();
             } else {	// first check if all referred objects actually exist in the DB
                 if (targetTypeColName.equals("sample")) {
-                    Query query = new Query(Criteria.where(GenotypingSample.FIELDNAME_NAME).in(targetEntityList));
-                    List<String> foundSamples = mongoTemplate.find(query, GenotypingSample.class).stream().map(s -> s.getSampleName()).collect(Collectors.toList());
-  
+                    Query verificationQuery = new Query(Criteria.where(GenotypingSample.FIELDNAME_NAME).in(targetEntityList));
+                    verificationQuery.fields().include(GenotypingSample.FIELDNAME_NAME);
+                    List<String> foundSamples = mongoTemplate.find(verificationQuery, GenotypingSample.class).stream().map(s -> s.getSampleName()).collect(Collectors.toList());
                     if (foundSamples.size() < targetEntityList.size())
                         throw new Exception("The following samples do not exist in the selected database: " + StringUtils.join(CollectionUtils.disjunction(targetEntityList, foundSamples), ", "));
                 } else {
@@ -261,9 +261,9 @@ public class IndividualMetadataImport {
                 return wr.getModifiedCount() + wr.getUpserts().size() + wr.getDeletedCount();
             } else {
             	if (targetEntityList.size() == 0)
-            		LOG.info("Database " + sModule + ": " + targetTypeColName + " metadata was deleted from session for anonymous user");
+            		LOG.info("Database " + sModule + ": " + targetTypeColName + " metadata was deleted from session " + session.getId() + " for anonymous user");
             	else
-            		LOG.info("Database " + sModule + ": " + targetTypeColName + " metadata was persisted into session for anonymous user");
+            		LOG.info("Database " + sModule + ": " + targetTypeColName + " metadata was persisted into session " + session.getId() + " for anonymous user");
                 return 1;
             }
         } finally {
