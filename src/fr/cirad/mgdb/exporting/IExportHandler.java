@@ -174,24 +174,4 @@ public interface IExportHandler
             os.write("\n".getBytes());
         }
 	}
-
-	/**
-	 * Used for providing access to session attributes when exporting to server (in that case, export runs in a Thread and HttpResponse is returned immediately).
-	 * We don't want to keep a reference to the session itself because it may get invalidated before the thread actually tries to access the attributes.
-	 */
-	public class SessionAttributeAwareExportThread extends Thread {
-		private Map<String, Object> sessionAttributes = new HashMap<>();
-		
-		public SessionAttributeAwareExportThread(HttpSession session) {
-	       Enumeration<String> attrNames = session.getAttributeNames();
-	       while (attrNames.hasMoreElements() ) {
-	            String name = attrNames.nextElement();
-	            sessionAttributes.put(name, session.getAttribute(name));
-	        }
-		}
-		
-		public Map<String, Object> getSessionAttributes() {
-			return sessionAttributes;
-		}
-	}
 }
