@@ -250,7 +250,7 @@ public class ProgressIndicator
 		    	progressIndicators.remove(m_processId);
 //		    	LOG.debug("removed " + (hashCode()  + ": " + getProgressDescription()) + " for process " + m_processId);
 		    }
-		}, 1500);
+		}, 5000);
 	}
 	
 	/**

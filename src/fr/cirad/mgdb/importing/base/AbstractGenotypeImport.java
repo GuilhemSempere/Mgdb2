@@ -64,8 +64,8 @@ public class AbstractGenotypeImport {
 	protected static final int nMaxChunkSize = 20000;
 
 	private boolean m_fAllowDbDropIfNoGenotypingData = true;
-	protected boolean m_fSampleListKnown = false;
-	protected Map<String /* individual name */, GenotypingSample> m_individualToSampleMap = null;
+	protected boolean m_fSamplesPersisted = false;
+	protected Map<String /* individual or sample name */, GenotypingSample> m_providedIdToSampleMap = null;
 
 	public static ArrayList<String> getIdentificationStrings(String sType, String sSeq, Long nStartPos, Collection<String> idAndSynonyms) throws Exception
 	{
@@ -112,8 +112,8 @@ public class AbstractGenotypeImport {
 		return sampleToIndividualMap;
 	}
 
-	public Map<String /* individual name */, GenotypingSample> getImportedIndividualsAndSamples() {
-		return m_fSampleListKnown == false? null : m_individualToSampleMap;
+	public boolean haveSamplesBeenPersisted() {
+		return m_fSamplesPersisted;
 	}
 	
 //	public static void buildSynonymMappings(MongoTemplate mongoTemplate) throws Exception

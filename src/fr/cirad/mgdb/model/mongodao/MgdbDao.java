@@ -113,18 +113,21 @@ public class MgdbDao {
     /**
      * Prepare database for searches.
      *
-     * @param mongoTemplate the mongo template
+     * @param sModule the database name
      * @return the list
      * @throws Exception
      */
-    public static List<String> prepareDatabaseForSearches(MongoTemplate mongoTemplate) throws Exception {
-        // cleanup unused sample that eventually got persisted during a failed import
+    public static List<String> prepareDatabaseForSearches(String sModule) throws Exception {
+    	MongoTemplate mongoTemplate = MongoTemplateManager.get(sModule);
+    	if (!MongoTemplateManager.isModuleAvailableForWriting(sModule)) 
+    		throw new Exception("prepareDatabaseForSearches may only be called when database is unlocked");
+    	
+    	// cleanup unused samples that possibly got persisted during a failed import
         Collection<Integer> validProjIDs = (Collection<Integer>) mongoTemplate.getCollection(MongoTemplateManager.getMongoCollectionName(GenotypingProject.class)).distinct("_id", Integer.class).into(new ArrayList<>());
         DeleteResult dr = mongoTemplate.remove(new Query(Criteria.where(GenotypingSample.FIELDNAME_PROJECT_ID).not().in(validProjIDs)), GenotypingSample.class);
-        if (dr.getDeletedCount() > 0) {
+        if (dr.getDeletedCount() > 0)
             LOG.info(dr.getDeletedCount() + " unused samples were removed");
-        }
-
+    
         // empty count cache
         mongoTemplate.dropCollection(mongoTemplate.getCollectionName(CachedCount.class));
 

@@ -195,7 +195,7 @@ public class IntertekImport extends AbstractGenotypeImport {
             Set<VariantData> variantsToSave = new HashSet<>();
             HashMap<String /*variant ID*/, List<String> /*allelesList*/> variantAllelesMap = new HashMap<>();
             HashMap<String /*variant ID*/, HashMap<Integer, SampleGenotype>> variantSamplesMap = new HashMap<>();
-            m_individualToSampleMap = new HashMap<>();
+            m_providedIdToSampleMap = new HashMap<>();
 
             GenotypingProject project = mongoTemplate.findOne(new Query(Criteria.where(GenotypingProject.FIELDNAME_NAME).is(sProject)), GenotypingProject.class);
             MongoTemplateManager.lockProjectForWriting(sModule, sProject);
@@ -296,7 +296,7 @@ public class IntertekImport extends AbstractGenotypeImport {
                                 		break;
                                 	}
 
-                                    GenotypingSample sample = m_individualToSampleMap.get(sIndividual);
+                                    GenotypingSample sample = m_providedIdToSampleMap.get(sIndividual);
                                     if (sample == null) {
                                         Individual ind = mongoTemplate.findById(sIndividual, Individual.class);
                                         if (ind == null)
@@ -305,7 +305,7 @@ public class IntertekImport extends AbstractGenotypeImport {
                                         int sampleId = AutoIncrementCounter.getNextSequence(mongoTemplate, MongoTemplateManager.getMongoCollectionName(GenotypingSample.class));
                                         sample = new GenotypingSample(sampleId, project.getId(), sRun, sIndividual, sampleToIndividualMap == null ? null : sIndOrSpId);
                                         sample.getAdditionalInfo().put("masterPlate", masterPlate);
-                                        m_individualToSampleMap.put(sIndividual, sample);
+                                        m_providedIdToSampleMap.put(sIndividual, sample);
                                     }
 
                                     SampleGenotype sampleGt = new SampleGenotype(gtCode);
@@ -318,8 +318,7 @@ public class IntertekImport extends AbstractGenotypeImport {
                     }
                 }
                 csvReader.close();
-                m_fSampleListKnown = true;
-
+                
                 if (variantsToSave.isEmpty())
                 	progress.setError("Found no variants to import in provided file, please check its contents!");
                 else {
@@ -328,6 +327,9 @@ public class IntertekImport extends AbstractGenotypeImport {
 	                project.setPloidyLevel(nPloidy);
                 }
             }
+            
+            mongoTemplate.insert(m_providedIdToSampleMap.values(), GenotypingSample.class);
+            m_fSamplesPersisted = true;
                         
             VCFFormatHeaderLine headerLineGT = new VCFFormatHeaderLine("GT", 1, VCFHeaderLineType.String, "Genotype");
             VCFFormatHeaderLine headerLineFI = new VCFFormatHeaderLine("FI", 2, VCFHeaderLineType.Float, "Fluorescence intensity");
@@ -370,7 +372,7 @@ public class IntertekImport extends AbstractGenotypeImport {
                 variantsChunk.add(variant);
 
                 if (count == 0) {
-                    nNumberOfVariantsToSaveAtOnce = Math.max(1, nMaxChunkSize / m_individualToSampleMap.size());
+                    nNumberOfVariantsToSaveAtOnce = Math.max(1, nMaxChunkSize / m_providedIdToSampleMap.size());
                     LOG.info("Importing by chunks of size " + nNumberOfVariantsToSaveAtOnce);
                 } else if (count % nNumberOfVariantsToSaveAtOnce == 0) {
                     saveChunk(variantsChunk, variantRunsChunk, existingVariantIDs, mongoTemplate, progress, saveService);
@@ -385,7 +387,6 @@ public class IntertekImport extends AbstractGenotypeImport {
                 persistVariantsAndGenotypes(!existingVariantIDs.isEmpty(), mongoTemplate, variantsChunk, variantRunsChunk);
             
             // Store the project
-            // always save project before samples otherwise the sample cleaning procedure in MgdbDao.prepareDatabaseForSearches may remove them if called in the meantime
             if (!project.getRuns().contains(sRun))
                 project.getRuns().add(sRun);
             if (createdProject == null)
@@ -393,19 +394,17 @@ public class IntertekImport extends AbstractGenotypeImport {
             else
                 mongoTemplate.insert(project);
 
-            // Store samples
-            mongoTemplate.insert(m_individualToSampleMap.values(), GenotypingSample.class);
-            
-            progress.addStep("Preparing database for searches");
-            progress.moveToNextStep();
-            MgdbDao.prepareDatabaseForSearches(mongoTemplate);
-
             LOG.info("IntertekImport took " + (System.currentTimeMillis() - before) / 1000 + "s for " + count + " records");		
             return createdProject;
         } finally {
             if (m_fCloseContextOpenAfterImport && ctx != null)
                 ctx.close();
             MongoTemplateManager.unlockProjectForWriting(sModule, sProject);
+            if (progress.getError() == null && !progress.isAborted()) {
+                progress.addStep("Preparing database for searches");
+                progress.moveToNextStep();
+                MgdbDao.prepareDatabaseForSearches(sModule);
+            }
         }
     }
 }
