@@ -376,10 +376,13 @@ public class IndividualMetadataImport {
         }
 
         boolean fIsAnonymous = "anonymousUser".equals(username);
-        LinkedHashMap<Comparable /*individual*/, LinkedHashMap<String, Object>> sessionObject = (LinkedHashMap<Comparable, LinkedHashMap<String, Object>>) session.getAttribute("individuals_metadata_" + sModule);
-        if (fIsAnonymous && sessionObject == null) {
-            sessionObject = new LinkedHashMap<>();
-            session.setAttribute("individuals_metadata_" + sModule, sessionObject);
+        LinkedHashMap<Comparable /*individual*/, LinkedHashMap<String, Object>> sessionObject = null;
+        if (fIsAnonymous) {	// metadata goes into the session for anonymous users
+        	sessionObject = (LinkedHashMap<Comparable, LinkedHashMap<String, Object>>) session.getAttribute("individuals_metadata_" + sModule);
+        	if (sessionObject == null) {
+	            sessionObject = new LinkedHashMap<>();
+	            session.setAttribute("individuals_metadata_" + sModule, sessionObject);
+        	}
         }
 
         // Inserting germplasm and attributes information in DB as additional info
@@ -462,10 +465,13 @@ public class IndividualMetadataImport {
         }
 
         boolean fIsAnonymous = "anonymousUser".equals(username);
-        LinkedHashMap<Comparable /*individual*/, LinkedHashMap<String, Object>> sessionObject = (LinkedHashMap<Comparable, LinkedHashMap<String, Object>>) session.getAttribute("individuals_metadata_" + sModule);
-        if (fIsAnonymous && sessionObject == null) {
-            sessionObject = new LinkedHashMap<>();
-            session.setAttribute("individuals_metadata_" + sModule, sessionObject);
+        LinkedHashMap<Comparable /*individual*/, LinkedHashMap<String, Object>> sessionObject = null;
+        if (fIsAnonymous) {	// metadata goes into the session for anonymous users
+        	sessionObject = (LinkedHashMap<Comparable, LinkedHashMap<String, Object>>) session.getAttribute("individuals_metadata_" + sModule);
+        	if (sessionObject == null) {
+	            sessionObject = new LinkedHashMap<>();
+	            session.setAttribute("individuals_metadata_" + sModule, sessionObject);
+        	}
         }
 
         // Inserting germplasm and attributes information in DB as additional info
@@ -588,10 +594,13 @@ public class IndividualMetadataImport {
         }
 
         boolean fIsAnonymous = "anonymousUser".equals(username);
-        LinkedHashMap<Comparable /*sample*/, LinkedHashMap<String, Object>> sessionObject = (LinkedHashMap<Comparable, LinkedHashMap<String, Object>>) session.getAttribute("samples_metadata_" + sModule);
-        if (fIsAnonymous && sessionObject == null) {
-            sessionObject = new LinkedHashMap<>();
-            session.setAttribute("samples_metadata_" + sModule, sessionObject);
+        LinkedHashMap<Comparable /*sample*/, LinkedHashMap<String, Object>> sessionObject = null;
+        if (fIsAnonymous) {	// metadata goes into the session for anonymous users
+        	sessionObject = (LinkedHashMap<Comparable, LinkedHashMap<String, Object>>) session.getAttribute("samples_metadata_" + sModule);
+        	if (sessionObject == null) {
+	            sessionObject = new LinkedHashMap<>();
+	            session.setAttribute("samples_metadata_" + sModule, sessionObject);
+        	}
         }
 
         // Inserting samples (also germplasm and attributes) information in DB as additional info
@@ -740,10 +749,13 @@ public class IndividualMetadataImport {
         }
 
         boolean fIsAnonymous = "anonymousUser".equals(username);
-        LinkedHashMap<Comparable /*sample*/, LinkedHashMap<String, Object>> sessionObject = (LinkedHashMap<Comparable, LinkedHashMap<String, Object>>) session.getAttribute("samples_metadata_" + sModule);
-        if (fIsAnonymous && sessionObject == null) {
-            sessionObject = new LinkedHashMap<>();
-            session.setAttribute("samples_metadata_" + sModule, sessionObject);
+        LinkedHashMap<Comparable /*sample*/, LinkedHashMap<String, Object>> sessionObject = null;
+        if (fIsAnonymous) {	// metadata goes into the session for anonymous users
+        	sessionObject = (LinkedHashMap<Comparable, LinkedHashMap<String, Object>>) session.getAttribute("samples_metadata_" + sModule);
+        	if (sessionObject == null) {
+	            sessionObject = new LinkedHashMap<>();
+	            session.setAttribute("samples_metadata_" + sModule, sessionObject);
+        	}
         }
 
         // Inserting sample information in DB as additional info
