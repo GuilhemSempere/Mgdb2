@@ -432,6 +432,11 @@ public class VcfImport extends AbstractGenotypeImport {
             LOG.info("VcfImport took " + (System.currentTimeMillis() - before) / 1000 + "s for " + totalProcessedVariantCount + " records");
             return createdProject;
         }
+        catch (Exception e) {
+        	LOG.error("Error", e);
+        	progress.setError(e.getMessage());
+        	return null;
+        }
         finally
         {
             if (m_fCloseContextOpenAfterImport && ctx != null)
@@ -613,7 +618,7 @@ public class VcfImport extends AbstractGenotypeImport {
                 aGT.getAdditionalInfo().put(VariantData.FIELD_FILTERS, genotype.getFilters());
 
             if (genotype.isCalled() || !aGT.getAdditionalInfo().isEmpty())  // otherwise there's no point in persisting an empty object
-                vrd.getSampleGenotypes().put(m_providedIdToSampleMap.get(sIndOrSpId).getId(), aGT);	// FIXME: must be costly to call HashMap.get() this often
+            	vrd.getSampleGenotypes().put(m_providedIdToSampleMap.get(sIndOrSpId).getId(), aGT);
         }
 
         vrd.setKnownAlleles(variantToFeed.getKnownAlleles());
