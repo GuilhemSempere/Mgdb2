@@ -72,6 +72,7 @@ public abstract class AbstractIndividualOrientedExportHandler implements IExport
 	 * @param outputStream the output stream
 	 * @param sModule the module
      * @param nAssemblyId ID of the assembly to work with
+	 * @param sExportingUser the user who launched the export 
 	 * @param individualExportFiles the individual export files
 	 * @param fDeleteSampleExportFilesOnExit whether or not to delete sample export files on exit
 	 * @param progress the progress
@@ -84,8 +85,7 @@ public abstract class AbstractIndividualOrientedExportHandler implements IExport
 	 * @throws Exception the exception
 	 */
 	
-	abstract public void exportData(OutputStream outputStream, String sModule, Integer nAssemblyId, File[] individualExportFiles, boolean fDeleteSampleExportFilesOnExit, ProgressIndicator progress, String tmpVarCollName, Document varQuery, long markerCount, Map<String, String> markerSynonyms, Collection<String> individualMetadataFieldsToExport, Map<String, InputStream> readyToExportFiles) throws Exception;
-
+	abstract public void exportData(OutputStream outputStream, String sModule, Integer nAssemblyId, String sExportingUser, File[] individualExportFiles, boolean fDeleteSampleExportFilesOnExit, ProgressIndicator progress, String tmpVarCollName, Document varQuery, long markerCount, Map<String, String> markerSynonyms, Collection<String> individualMetadataFieldsToExport, Map<String, InputStream> readyToExportFiles) throws Exception;
 	/**
 	 * Creates the export files.
 	 *
@@ -136,9 +136,9 @@ public abstract class AbstractIndividualOrientedExportHandler implements IExport
 				StringBuilder[] individualGenotypeBuffers = new StringBuilder[individualPositions.size()];	// keeping all files open leads to failure (see ulimit command), keeping them closed and reopening them each time we need to write a genotype is too time consuming: so our compromise is to reopen them only once per chunk
 				try
 				{
-					for (List<VariantRunData> runsToWrite : markerRunsToWrite) {
-						if (progress.isAborted())
-							break;
+				    markerRunsToWrite.forEach(runsToWrite -> {
+						if (progress.isAborted() || progress.getError() != null)
+							return;
 
 						HashMap<String, String> genotypeStringCache = new HashMap<>();
 						LinkedHashSet<String>[] individualGenotypes = new LinkedHashSet[individualPositions.size()];
@@ -182,7 +182,7 @@ public abstract class AbstractIndividualOrientedExportHandler implements IExport
 							if (initialStringBuilderCapacity.get() == 0)
 							    initialStringBuilderCapacity.set(individualGenotypeBuffers[individualIndex].length());
 						}
-					}
+					});
 
 					// write genotypes collected in this chunk to each individual's file
 					for (String individual : individualPositions.keySet()) {

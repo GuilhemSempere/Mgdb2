@@ -54,6 +54,7 @@ public abstract class AbstractMarkerOrientedExportHandler implements IExportHand
      * @param outputStream the output stream
      * @param sModule the module
      * @param nAssemblyId ID of the assembly to work with
+	 * @param sExportingUser the user who launched the export
      * @param individuals1 the individuals in group 1
      * @param individuals2 the individuals in group 2
      * @param progress the progress
@@ -68,34 +69,7 @@ public abstract class AbstractMarkerOrientedExportHandler implements IExportHand
      * @param readyToExportFiles files to export along with the genotyping data
      * @throws Exception the exception
      */
-    abstract public void exportData(OutputStream outputStream, String sModule, Integer nAssemblyId, Collection<String> individuals1, Collection<String> individuals2, ProgressIndicator progress, String tmpVarCollName, Document varQuery, long markerCount, Map<String, String> markerSynonyms, HashMap<String, Float> annotationFieldThresholds, HashMap<String, Float> annotationFieldThresholds2, List<GenotypingSample> samplesToExport, Collection<String> individualMetadataFieldsToExport, Map<String, InputStream> readyToExportFiles) throws Exception;
-
-//	/**
-//	 * Gets the individuals from samples.
-//	 *
-//	 * @param sModule the module
-//	 * @param sampleIDs the sample i ds
-//	 * @return the individuals from samples
-//	 */
-//	protected List<Individual> getIndividualsFromSamples(final String sModule, final List<SampleId> sampleIDs)
-//	{
-//		MongoTemplate mongoTemplate = MongoTemplateManager.get(sModule);
-//		HashMap<Integer, GenotypingProject> loadedProjects = new HashMap<Integer, GenotypingProject>();
-//		ArrayList<Individual> result = new ArrayList<Individual>();
-//		for (SampleId spId : sampleIDs)
-//		{
-//			GenotypingProject project = loadedProjects.get(spId.getProject());
-//			if (project == null)
-//			{
-//				project = mongoTemplate.findById(spId.getProject(), GenotypingProject.class);
-//				loadedProjects.put(spId.getProject(), project);
-//			}
-//			Integer spIndex = spId.getSampleIndex();
-//			String individual = project.getSamples().get(spIndex).getIndividual();
-//			result.add(mongoTemplate.findById(individual, Individual.class));
-//		}
-//		return result;
-//	}
+    abstract public void exportData(OutputStream outputStream, String sModule, Integer nAssemblyId, String sExportingUser, Collection<String> individuals1, Collection<String> individuals2, ProgressIndicator progress, String tmpVarCollName, Document varQuery, long markerCount, Map<String, String> markerSynonyms, HashMap<String, Float> annotationFieldThresholds, HashMap<String, Float> annotationFieldThresholds2, List<GenotypingSample> samplesToExport, Collection<String> individualMetadataFieldsToExport, Map<String, InputStream> readyToExportFiles) throws Exception;
 	
 	/**
 	 * Gets the marker oriented export handlers.

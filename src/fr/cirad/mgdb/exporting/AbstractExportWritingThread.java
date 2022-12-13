@@ -16,8 +16,7 @@
  *******************************************************************************/
 package fr.cirad.mgdb.exporting;
 
-import java.util.ArrayList;
-import java.util.List;
+import java.util.Collection;
 import java.util.concurrent.CompletableFuture;
 
 import org.apache.log4j.Logger;
@@ -32,10 +31,10 @@ public abstract class AbstractExportWritingThread extends Thread
 	/** The Constant LOG. */
 	static final Logger LOG = Logger.getLogger(AbstractExportWritingThread.class);
 	
-	protected List<List<VariantRunData>> markerRunsToWrite;
+	protected Collection<Collection<VariantRunData>> markerRunsToWrite;
 	
-	public CompletableFuture<Void> writeRuns(List<List<VariantRunData>> markerRunsToWrite) {
-		this.markerRunsToWrite = new ArrayList(markerRunsToWrite);	// duplicate it to avoid concurrent modifications
+	public CompletableFuture<Void> writeRuns(Collection<Collection<VariantRunData>> markerRunsToWrite) {
+		this.markerRunsToWrite = markerRunsToWrite;
 		return CompletableFuture.runAsync(this);
 	}
 	

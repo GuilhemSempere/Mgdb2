@@ -82,6 +82,15 @@ public class DBVCFHeader
 			this.project = project;
 			this.run = run;
 		}
+
+                public Integer getProject() {
+                    return project;
+                }
+
+                public String getRun() {
+                    return run;
+                }
+                
 	}
 	
 	/** The id. */
@@ -97,6 +106,8 @@ public class DBVCFHeader
 	private Map<String, VCFInfoHeaderLine> mInfoMetaData = new LinkedHashMap();
 	
 	/** The m format meta data. */
+        public final static String FIELDNAME_FORMAT_METADATA = "mFormatMetaData";
+
 	private Map<String, VCFFormatHeaderLine> mFormatMetaData = new LinkedHashMap();
 	
 	/** The m filter meta data. */

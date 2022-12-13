@@ -77,7 +77,7 @@ public class ReferencePosition
 	 */
 	public ReferencePosition(String sequence, long startSite, Long endSite) {
 		this(sequence, startSite);
-		if (endSite != startSite)
+		if (endSite != null && endSite != startSite)
 			this.endSite = endSite;
 	}
 	

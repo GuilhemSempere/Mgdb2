@@ -25,8 +25,10 @@ import java.net.UnknownHostException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
+import java.util.Date;
 import java.util.Enumeration;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.MissingResourceException;
@@ -34,6 +36,7 @@ import java.util.Properties;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.TreeSet;
+import java.util.stream.Collectors;
 
 import org.apache.log4j.Logger;
 import org.bson.Document;
@@ -44,14 +47,18 @@ import org.springframework.context.ApplicationContextAware;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.convert.MappingMongoConverter;
+import org.springframework.data.mongodb.core.query.Query;
+import org.springframework.data.mongodb.core.query.Update;
 import org.springframework.stereotype.Component;
 
 import com.mongodb.BasicDBObject;
+import com.mongodb.ServerAddress;
 import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.connection.ClusterDescription;
 import com.mongodb.connection.ServerDescription;
 
+import fr.cirad.mgdb.model.mongo.maintypes.DatabaseInformation;
 import fr.cirad.mgdb.model.mongo.maintypes.VariantData;
 import fr.cirad.mgdb.model.mongo.maintypes.VariantRunData;
 import fr.cirad.mgdb.model.mongodao.MgdbDao;
@@ -135,6 +142,11 @@ public class MongoTemplateManager implements ApplicationContextAware {
     @Autowired private AppConfig appConfig;
     
     private static final List<String> addressesConsideredLocal = Arrays.asList("127.0.0.1", "localhost");
+    
+	/** Map that associates modules to projects currently undergoing a write operation, thus making them unavailable for other write operations
+	 *  A null value in the set indicates the whole module is locked (i.e., a dump is being generated or restored)
+	 */
+	private static HashMap<String /*module*/, Set<String> /*projects*/> currentlyImportedProjects = new HashMap<String, Set<String>>();
 
     @Override
     public void setApplicationContext(ApplicationContext ac) throws BeansException {
@@ -146,14 +158,17 @@ public class MongoTemplateManager implements ApplicationContextAware {
         for (String sModule : templateMap.keySet()) {
         	List<ServerDescription> serverDescriptions = mongoClients.get(getModuleHost(sModule)).getClusterDescription().getServerDescriptions();
             MongoTemplate mongoTemplate = templateMap.get(sModule);
-            if (authorizedCleanupServers == null || (serverDescriptions.size() == 1 && authorizedCleanupServers.contains(serverDescriptions.get(0).getAddress().toString()))) {
-                for (String collName : mongoTemplate.getCollectionNames()) {
-                    if (collName.startsWith(TEMP_COLL_PREFIX)) {
-                        mongoTemplate.dropCollection(collName);
-                        LOG.debug("Dropped collection " + collName + " in module " + sModule);
+            if (authorizedCleanupServers == null || (serverDescriptions.size() == 1 && authorizedCleanupServers.contains(serverDescriptions.get(0).getAddress().toString()))) 
+                new Thread() {
+                    public void run() {
+                        for (String collName : mongoTemplate.getCollectionNames()) {
+                            if (collName.startsWith(TEMP_COLL_PREFIX)) {
+                                mongoTemplate.dropCollection(collName);
+                                LOG.debug("Dropped collection " + collName + " in module " + sModule);
+                            }
+                        }
                     }
-                }
-            }
+                }.start();
         }
     }
 
@@ -362,6 +377,7 @@ public class MongoTemplateManager implements ApplicationContextAware {
 		                    publicDatabases.add(sModule);
 		                if (fHidden)
 		                    hiddenDatabases.add(sModule);
+		                updateDatabaseLastModification(sModule);
 		                return true;
 		            }
 		        }
@@ -492,18 +508,24 @@ public class MongoTemplateManager implements ApplicationContextAware {
         return publicDatabases;
     }
 
-    static public void dropAllTempColls(String token) {
-    	if (token == null)
-    		return;
+    static public void dropAllTempColls(Collection<String> tokens) {
+    	List<String> tempCollNames = tokens.stream().filter(token -> token != null && !tokens.isEmpty()).map(token -> MongoTemplateManager.TEMP_COLL_PREFIX + Helper.convertToMD5(token)).collect(Collectors.toList());
+        if (tokens.isEmpty())
+            return;
     	
-        MongoCollection<Document> tmpColl;
-        String tempCollName = MongoTemplateManager.TEMP_COLL_PREFIX + Helper.convertToMD5(token);
-        for (String module : MongoTemplateManager.getTemplateMap().keySet()) {
-            // drop all temp collections associated to this token
-            tmpColl = templateMap.get(module).getCollection(tempCollName);
-//            LOG.debug("Dropping " + module + "." + tempCollName + " from dropAllTempColls");
-            tmpColl.drop();
-        }
+        new Thread() {
+            public void run() {
+                for (String module : MongoTemplateManager.getTemplateMap().keySet()) {
+                    for (String tempCollName : tempCollNames) { // drop all temp collections associated to this token in this module
+                        MongoCollection<Document> coll = templateMap.get(module).getCollection(tempCollName);
+                        if (coll.estimatedDocumentCount() != 0) {
+                        	coll.drop();
+                        	LOG.debug("Dropped " + module + "." + tempCollName + " from dropAllTempColls");
+                        }
+                    }
+                }
+            }
+        }.start();
     }
 
     /**
@@ -601,7 +623,7 @@ public class MongoTemplateManager implements ApplicationContextAware {
 		String taxonName = splitTaxonDetails[1].isEmpty() && splitTaxonDetails.length > 2 ? splitTaxonDetails[2] : splitTaxonDetails[1];
 		return "".equals(taxonName) ? null : taxonName;
 	}
-	
+
 	public static String getSpecies(String database) {
 		String taxon = taxonMap.get(database);
 		if (taxon == null)
@@ -635,5 +657,83 @@ public class MongoTemplateManager implements ApplicationContextAware {
     		if (!addressesConsideredLocal.contains(desc.getAddress().getHost()))
     			return false;
     	return true;
+    }
+    
+    public static List<String> getServerHosts(String sHost) {
+    	MongoClient client = mongoClients.get(sHost);
+    	ClusterDescription cluster = client.getClusterDescription();
+    	List<ServerDescription> servers = cluster.getServerDescriptions();
+    	List<String> hosts = new ArrayList<String>();
+    	for (ServerDescription desc : servers) {
+    		ServerAddress address = desc.getAddress();
+    		hosts.add(address.getHost() + ":" + address.getPort());
+    	}
+    	return hosts;
+    }
+    
+    public static String getDatabaseName(String sModule) {
+    	String sModuleKey = (isModulePublic(sModule) ? "*" : "") + sModule + (isModuleHidden(sModule) ? "*" : "");
+    	String dataSource = dataSourceProperties.getProperty(sModuleKey);
+    	return dataSource.split(",")[1];
+    }
+    
+	public static boolean isModuleAvailableForWriting(String sModule) {
+		Set<String> projects = currentlyImportedProjects.get(sModule);
+		if (projects != null) {
+			return projects.size() == 0;
+		} else {
+			return true;
+		}
+	}
+
+	public static void lockProjectForWriting(String sModule, String sProject) {
+		Set<String> projects = currentlyImportedProjects.get(sModule);
+		if (projects != null) {
+			projects.add(sProject);
+		} else {
+			projects = new HashSet<String>();
+			projects.add(sProject);
+			currentlyImportedProjects.put(sModule, projects);
+		}
+	}
+
+	public static void unlockProjectForWriting(String sModule, String sProject) {
+		currentlyImportedProjects.get(sModule).remove(sProject);
+	}
+
+	public static void lockModuleForWriting(String sModule) {
+		Set<String> projects = currentlyImportedProjects.get(sModule);
+		if (projects != null) {
+			projects.add(null);
+		} else {
+			projects = new HashSet<String>();
+			projects.add(null);
+			currentlyImportedProjects.put(sModule, projects);
+		}
+	}
+
+	public static void unlockModuleForWriting(String sModule) {
+		Set<String> projects = currentlyImportedProjects.get(sModule);
+		if (projects != null) {
+			projects.clear();
+		}
+	}
+	
+    public static void updateDatabaseLastModification(String sModule) {
+    	MongoTemplateManager.updateDatabaseLastModification(sModule, new Date(), false);
+    }
+    
+    public static void updateDatabaseLastModification(String sModule, Date lastModification, boolean restored) {
+    	MongoTemplate template = MongoTemplateManager.get(sModule);
+    	
+    	Update update = new Update();
+    	update.set(DatabaseInformation.FIELDNAME_LAST_MODIFICATION, lastModification);
+    	update.set(DatabaseInformation.FIELDNAME_RESTORE_DATE, restored ? new Date() : null);
+    	template.upsert(new Query(), update, "dbInfo");
+    }
+    
+    public static DatabaseInformation getDatabaseInformation(String sModule) {
+    	MongoTemplate template = MongoTemplateManager.get(sModule);
+    	return template.findOne(new Query(), DatabaseInformation.class, "dbInfo");
     }
 }

@@ -36,7 +36,7 @@ public class BrapiGermplasm {
     private String acquisitionDate;
     
     static {
-    	germplasmFields.put("germplasmname", "germplasmName");
+//    	germplasmFields.put("germplasmname", "germplasmName");
     	germplasmFields.put("defaultdisplayname", "defaultDisplayName");
     	germplasmFields.put("accessionnumber", "accessionNumber");
     	germplasmFields.put("germplasmpui", "germplasmPUI");

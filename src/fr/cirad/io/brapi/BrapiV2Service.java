@@ -31,10 +31,6 @@ import retrofit2.http.*;
 
 public interface BrapiV2Service {
 
-    public static final String BRAPI_FIELD_germplasmDbId = "germplasmDbId";
-    public static final String BRAPI_FIELD_germplasmExternalReferenceId = "extRefId";
-    public static final String BRAPI_FIELD_germplasmExternalReferenceSource = "extRefSrc";
-
     //get list of available calls in brapi V2
     @GET(value = "serverinfo")
     public Call<ServerInfoResponse> getServerInfo(@Query(value = "dataType") String var1);
@@ -49,7 +45,7 @@ public interface BrapiV2Service {
     @POST(value = "search/attributevalues")
     public Call<GermplasmAttributeValueListResponse> searchAttributesDirectResult(@Body Map<String, Object> body);
 
-    @GET(value = "search/attributevalues")
+    @GET(value = "search/attributevalues/{searchResultsDbId}")
     public Call<GermplasmAttributeValueListResponse> searchAttributesResult(@Path(value = "searchResultsDbId") String searchResultDbId, @Query(value = "pageSize") String var1, @Query(value = "page") String var2);
 
     @POST(value = "search/germplasm")

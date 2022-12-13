@@ -8,24 +8,24 @@ import org.springframework.data.annotation.TypeAlias;
 import org.springframework.data.mongodb.core.mapping.Document;
 import org.springframework.data.mongodb.core.mapping.Field;
 
-@Document(collection = "customIndividualMetadata")
-@TypeAlias("M")
-public class CustomIndividualMetadata {
+@Document(collection = "customSampleMetadata")
+@TypeAlias("SM")
+public class CustomSampleMetadata {
 	
 	/** The Constant SECTION_ADDITIONAL_INFO. */
 	public final static String SECTION_ADDITIONAL_INFO = "ai";
 	
-	static public class CustomIndividualMetadataId {
-		
-		/** The Constant FIELDNAME_INDIVIDUAL_ID. */
-		public final static String FIELDNAME_INDIVIDUAL_ID = "ii";
+	static public class CustomSampleMetadataId {
+                
+         /** The Constant FIELDNAME_SAMPLE_ID. */
+		public final static String FIELDNAME_SAMPLE_ID= "si";
 		
 		/** The Constant FIELDNAME_USER. */
 		public final static String FIELDNAME_USER = "ur";
-
-		/** The individual id. */
-		@Field(FIELDNAME_INDIVIDUAL_ID)
-		private String individualId;
+                
+		/** The sample id. */
+		@Field(FIELDNAME_SAMPLE_ID)
+		private Integer sampleId;
 
 		/** The user name. */
 		@Field(FIELDNAME_USER)
@@ -33,23 +33,14 @@ public class CustomIndividualMetadata {
 
 
 		/**
-		 * Instantiates a new custom individual metadata id.
+		 * Instantiates a new custom sample metadata id.
 		 *
-		 * @param individual the individual id
+		 * @param sampleId the sample id
 		 * @param user the user's name
 		 */
-		public CustomIndividualMetadataId(String individualId, String user) {
-			this.individualId = individualId;
+		public CustomSampleMetadataId(Integer sampleId, String user) {
+			this.sampleId = sampleId;
 			this.user = user;
-		}
-
-		/**
-		 * Gets the individual id.
-		 *
-		 * @return the individual id
-		 */
-		public String getIndividualId() {
-			return individualId;
 		}
 
 		/**
@@ -60,12 +51,16 @@ public class CustomIndividualMetadata {
 		public String getUser() {
 			return user;
 		}
+
+        public Integer getSampleId() {
+            return sampleId;
+        }  
 	}
 	
 	
 	/** The id. */
 	@Id
-	private CustomIndividualMetadataId id;
+	private CustomSampleMetadataId id;
 
 	/** The additional info. */
 	@Field(SECTION_ADDITIONAL_INFO)
@@ -76,7 +71,7 @@ public class CustomIndividualMetadata {
 	 *
 	 * @return the id
 	 */
-	public CustomIndividualMetadataId getId() {
+	public CustomSampleMetadataId getId() {
 		return id;
 	}
 	
@@ -103,7 +98,7 @@ public class CustomIndividualMetadata {
 	
 	@Override
 	public String toString() {
-		return id.getIndividualId();
+		return id.getSampleId() + "§" + id.getUser();
 	}
 
 }

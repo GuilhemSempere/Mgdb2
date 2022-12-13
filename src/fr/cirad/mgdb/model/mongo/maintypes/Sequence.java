@@ -38,6 +38,10 @@ public class Sequence {
      */
     public final static String FIELDNAME_LENGTH = "ln";
     /**
+     * assembly name
+     */
+    public final static String FIELDNAME_ASSEMBLY = "as";
+    /**
      * sequence md5 checksum
      */
     public final static String FIELDNAME_CHECKSUM = "cs";
@@ -65,6 +69,13 @@ public class Sequence {
     @BsonProperty(FIELDNAME_LENGTH)
     @Field(FIELDNAME_LENGTH)
     private long length;
+    
+    /**
+     * assembly name
+     */
+    @BsonProperty(FIELDNAME_ASSEMBLY)
+    @Field(FIELDNAME_ASSEMBLY)
+    private String assembly;
 
     /**
      * checksum of the upper-case sequence without spaces
@@ -93,12 +104,10 @@ public class Sequence {
      * Instantiates a new sequence.
      *
      * @param id the id
-     * @param length
      */
-    public Sequence(String id, long length) {
+    public Sequence(String id) {
         super();
         this.id = id;
-        this.length = length;
     }
     
     /**
@@ -181,6 +190,14 @@ public class Sequence {
         this.length = length;
     }
 
+    public String getAssembly() {
+        return assembly;
+    }
+
+    public void setAssembly(String assembly) {
+        this.assembly = assembly;
+    }
+    
     /**
      * get the checksum of the sequence
      *

@@ -30,6 +30,7 @@ import java.util.TreeMap;
 import java.util.TreeSet;
 import java.util.stream.Collectors;
 
+import javax.ejb.ObjectNotFoundException;
 import javax.servlet.http.HttpSession;
 
 import org.apache.log4j.Level;
@@ -41,6 +42,7 @@ import org.springframework.data.domain.Sort;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
+import org.springframework.security.core.GrantedAuthority;
 import org.springframework.stereotype.Component;
 
 import com.mongodb.BasicDBObject;
@@ -54,6 +56,9 @@ import fr.cirad.mgdb.exporting.IExportHandler;
 import fr.cirad.mgdb.exporting.IExportHandler.SessionAttributeAwareExportThread;
 import fr.cirad.mgdb.model.mongo.maintypes.CachedCount;
 import fr.cirad.mgdb.model.mongo.maintypes.CustomIndividualMetadata;
+import fr.cirad.mgdb.model.mongo.maintypes.CustomIndividualMetadata.CustomIndividualMetadataId;
+import fr.cirad.mgdb.model.mongo.maintypes.CustomSampleMetadata;
+import fr.cirad.mgdb.model.mongo.maintypes.CustomSampleMetadata.CustomSampleMetadataId;
 import fr.cirad.mgdb.model.mongo.maintypes.DBVCFHeader;
 import fr.cirad.mgdb.model.mongo.maintypes.DBVCFHeader.VcfHeaderId;
 import fr.cirad.mgdb.model.mongo.maintypes.GenotypingProject;
@@ -61,10 +66,10 @@ import fr.cirad.mgdb.model.mongo.maintypes.GenotypingSample;
 import fr.cirad.mgdb.model.mongo.maintypes.Individual;
 import fr.cirad.mgdb.model.mongo.maintypes.VariantData;
 import fr.cirad.mgdb.model.mongo.maintypes.VariantRunData;
-import fr.cirad.mgdb.model.mongo.maintypes.CustomIndividualMetadata.CustomIndividualMetadataId;
 import fr.cirad.mgdb.model.mongo.maintypes.VariantRunData.VariantRunDataId;
 import fr.cirad.mgdb.model.mongo.subtypes.ReferencePosition;
 import fr.cirad.tools.mongo.MongoTemplateManager;
+import fr.cirad.tools.security.base.AbstractTokenManager;
 import htsjdk.variant.vcf.VCFConstants;
 import htsjdk.variant.vcf.VCFFormatHeaderLine;
 import htsjdk.variant.vcf.VCFHeaderLineCount;
@@ -123,31 +128,90 @@ public class MgdbDao {
         // empty count cache
         mongoTemplate.dropCollection(mongoTemplate.getCollectionName(CachedCount.class));
 
-        MongoCollection<Document> variantColl = mongoTemplate.getCollection(mongoTemplate.getCollectionName(VariantData.class));
         MongoCollection<Document> runColl = mongoTemplate.getCollection(mongoTemplate.getCollectionName(VariantRunData.class));
 
-        // create indexes
-        LOG.debug("Creating index on field " + VariantData.FIELDNAME_SYNONYMS + "." + VariantData.FIELDNAME_SYNONYM_TYPE_ID_ILLUMINA + " of collection " + variantColl.getNamespace());
-        variantColl.createIndex(new BasicDBObject(VariantData.FIELDNAME_SYNONYMS + "." + VariantData.FIELDNAME_SYNONYM_TYPE_ID_ILLUMINA, 1));
-        LOG.debug("Creating index on field " + VariantData.FIELDNAME_SYNONYMS + "." + VariantData.FIELDNAME_SYNONYM_TYPE_ID_INTERNAL + " of collection " + variantColl.getNamespace());
-        variantColl.createIndex(new BasicDBObject(VariantData.FIELDNAME_SYNONYMS + "." + VariantData.FIELDNAME_SYNONYM_TYPE_ID_ILLUMINA, 1));
-        LOG.debug("Creating index on field " + VariantData.FIELDNAME_SYNONYMS + "." + VariantData.FIELDNAME_SYNONYM_TYPE_ID_NCBI + " of collection " + variantColl.getNamespace());
-        variantColl.createIndex(new BasicDBObject(VariantData.FIELDNAME_SYNONYMS + "." + VariantData.FIELDNAME_SYNONYM_TYPE_ID_ILLUMINA, 1));
-        LOG.debug("Creating index on field " + VariantData.FIELDNAME_TYPE + " of collection " + variantColl.getNamespace());
-        try {
-            variantColl.createIndex(new BasicDBObject(VariantData.FIELDNAME_TYPE, 1));
-        } catch (MongoCommandException mce) {
-            if (!mce.getMessage().contains("already exists with a different name")) {
-                throw mce;	// otherwise we have nothing to do because it already exists anyway
-            }
-        }
-
+        // make sure positions are indexed with correct collation etc...
         ensurePositionIndexes(mongoTemplate, Arrays.asList(mongoTemplate.getCollection(mongoTemplate.getCollectionName(VariantData.class)), mongoTemplate.getCollection(mongoTemplate.getCollectionName(VariantRunData.class))));
+        
+        MongoCollection<Document> variantColl = mongoTemplate.getCollection(mongoTemplate.getCollectionName(VariantData.class));
+        if (!variantColl.find(new BasicDBObject()).projection(new BasicDBObject("_id", 1)).limit(1).cursor().hasNext())
+        	throw new Exception("No variants found in database!");
+        	
+        MongoCollection<Document> taggedVarColl = mongoTemplate.getCollection(MgdbDao.COLLECTION_NAME_TAGGED_VARIANT_IDS);
 
-        LOG.debug("Creating index on field " + VariantRunData.SECTION_ADDITIONAL_INFO + "." + VariantRunData.FIELDNAME_ADDITIONAL_INFO_EFFECT_GENE + " of collection " + runColl.getNamespace());
-        runColl.createIndex(new BasicDBObject(VariantRunData.SECTION_ADDITIONAL_INFO + "." + VariantRunData.FIELDNAME_ADDITIONAL_INFO_EFFECT_GENE, 1));
-        LOG.debug("Creating index on field " + VariantRunData.SECTION_ADDITIONAL_INFO + "." + VariantRunData.FIELDNAME_ADDITIONAL_INFO_EFFECT_NAME + " of collection " + runColl.getNamespace());
-        runColl.createIndex(new BasicDBObject(VariantRunData.SECTION_ADDITIONAL_INFO + "." + VariantRunData.FIELDNAME_ADDITIONAL_INFO_EFFECT_NAME, 1));
+        List<String> result = new ArrayList<>();
+        Thread t = new Thread() {
+            public void run() {
+                // create indexes
+                LOG.debug("Creating index on field " + VariantData.FIELDNAME_SYNONYMS + "." + VariantData.FIELDNAME_SYNONYM_TYPE_ID_ILLUMINA + " of collection " + variantColl.getNamespace());
+                variantColl.createIndex(new BasicDBObject(VariantData.FIELDNAME_SYNONYMS + "." + VariantData.FIELDNAME_SYNONYM_TYPE_ID_ILLUMINA, 1));
+                LOG.debug("Creating index on field " + VariantData.FIELDNAME_SYNONYMS + "." + VariantData.FIELDNAME_SYNONYM_TYPE_ID_INTERNAL + " of collection " + variantColl.getNamespace());
+                variantColl.createIndex(new BasicDBObject(VariantData.FIELDNAME_SYNONYMS + "." + VariantData.FIELDNAME_SYNONYM_TYPE_ID_ILLUMINA, 1));
+                LOG.debug("Creating index on field " + VariantData.FIELDNAME_SYNONYMS + "." + VariantData.FIELDNAME_SYNONYM_TYPE_ID_NCBI + " of collection " + variantColl.getNamespace());
+                variantColl.createIndex(new BasicDBObject(VariantData.FIELDNAME_SYNONYMS + "." + VariantData.FIELDNAME_SYNONYM_TYPE_ID_ILLUMINA, 1));
+                LOG.debug("Creating index on field " + VariantData.FIELDNAME_TYPE + " of collection " + variantColl.getNamespace());
+                try {
+                    variantColl.createIndex(new BasicDBObject(VariantData.FIELDNAME_TYPE, 1));
+                } catch (MongoCommandException mce) {
+                    if (!mce.getMessage().contains("already exists with a different name")) {
+                        throw mce;  // otherwise we have nothing to do because it already exists anyway
+                    }
+                }
+
+                // tag variant IDs across database
+                mongoTemplate.dropCollection(COLLECTION_NAME_TAGGED_VARIANT_IDS);
+                long totalVariantCount = mongoTemplate.count(new Query(), VariantData.class);
+                long totalIndividualCount = mongoTemplate.count(new Query(), Individual.class);
+                long maxGenotypeCount = totalVariantCount * totalIndividualCount;
+                long numberOfTaggedVariants = Math.min(totalVariantCount / 2, maxGenotypeCount > 200000000 ? 500 : (maxGenotypeCount > 100000000 ? 300 : (maxGenotypeCount > 50000000 ? 100 : (maxGenotypeCount > 20000000 ? 50 : (maxGenotypeCount > 5000000 ? 40 : 25)))));
+                int nChunkSize = (int) Math.max(1, (int) totalVariantCount / Math.max(1, numberOfTaggedVariants - 1));
+                LOG.debug("Number of variants between 2 tagged ones: " + nChunkSize);
+
+                taggedVarColl.drop();
+                String cursor = null;
+                ArrayList<Document> taggedVariants = new ArrayList<>();
+                for (int nChunkNumber = 0; nChunkNumber < (float) totalVariantCount / nChunkSize; nChunkNumber++) {
+                    long before = System.currentTimeMillis();
+                    Query q = new Query();
+                    q.fields().include("_id");
+                    q.limit(nChunkSize);
+                    q.with(Sort.by(Arrays.asList(new Sort.Order(Sort.Direction.ASC, "_id"))));
+                    if (cursor != null) {
+                        q.addCriteria(Criteria.where("_id").gt(cursor));
+                    }
+                    List<VariantData> chunk = mongoTemplate.find(q, VariantData.class);
+                    try {
+                        cursor = chunk.get(chunk.size() - 1).getId();
+                    } catch (ArrayIndexOutOfBoundsException aioobe) {
+                        if (aioobe.getMessage().equals("-1")) {
+                            LOG.error("Database is mixing String and ObjectID types!");
+                            result.clear();
+                        }
+                    }
+                    taggedVariants.add(new Document("_id", cursor));
+                    result.add(cursor.toString());
+                    LOG.debug("Variant " + cursor + " tagged as position " + nChunkNumber + " (" + (System.currentTimeMillis() - before) + "ms)");
+                }
+                if (!taggedVariants.isEmpty())
+                	taggedVarColl.insertMany(taggedVariants);	// otherwise there is apparently no variant in the DB
+            }
+            
+            /*  This is how it is internally handled when sharding the data:
+            var splitKeys = db.runCommand({splitVector: "mgdb_Musa_acuminata_v2_private.variantRunData", keyPattern: {"_id":1}, maxChunkSizeBytes: 40250000}).splitKeys;
+            for (var key in splitKeys)
+              db.taggedVariants.insert({"_id" : splitKeys[key]["_id"]["vi"]});
+             */
+        };
+        t.start();
+
+        if (mongoTemplate.findOne(new Query(Criteria.where(GenotypingProject.FIELDNAME_EFFECT_ANNOTATIONS + ".0").exists(true)) {{ fields().include("_id"); }}, GenotypingProject.class) == null)
+            LOG.debug("Skipping index creation for effect name & gene since database contains no such information");
+        else {
+            LOG.debug("Creating index on field " + VariantRunData.SECTION_ADDITIONAL_INFO + "." + VariantRunData.FIELDNAME_ADDITIONAL_INFO_EFFECT_GENE + " of collection " + runColl.getNamespace());
+            runColl.createIndex(new BasicDBObject(VariantRunData.SECTION_ADDITIONAL_INFO + "." + VariantRunData.FIELDNAME_ADDITIONAL_INFO_EFFECT_GENE, 1));
+            LOG.debug("Creating index on field " + VariantRunData.SECTION_ADDITIONAL_INFO + "." + VariantRunData.FIELDNAME_ADDITIONAL_INFO_EFFECT_NAME + " of collection " + runColl.getNamespace());
+            runColl.createIndex(new BasicDBObject(VariantRunData.SECTION_ADDITIONAL_INFO + "." + VariantRunData.FIELDNAME_ADDITIONAL_INFO_EFFECT_NAME, 1));
+        }
         LOG.debug("Creating index on field _id." + VariantRunDataId.FIELDNAME_VARIANT_ID + " of collection " + runColl.getNamespace());
         runColl.createIndex(new BasicDBObject("_id." + VariantRunDataId.FIELDNAME_VARIANT_ID, 1));
         LOG.debug("Creating index on field _id." + VariantRunDataId.FIELDNAME_PROJECT_ID + " of collection " + runColl.getNamespace());
@@ -156,49 +220,10 @@ public class MgdbDao {
 //		BasicDBObject runCollIndexKeys = new BasicDBObject("_id." + VariantRunDataId.FIELDNAME_VARIANT_ID, 1);
 //		runCollIndexKeys.put("_id." + VariantRunDataId.FIELDNAME_PROJECT_ID, 1);
 //		runColl.createIndex(runCollIndexKeys);
-
-        // tag variant IDs across database
-        List<String> result = new ArrayList<>();
-        mongoTemplate.dropCollection(COLLECTION_NAME_TAGGED_VARIANT_IDS);
-        long totalVariantCount = mongoTemplate.count(new Query(), VariantData.class);
-        long totalIndividualCount = mongoTemplate.count(new Query(), Individual.class);
-        long maxGenotypeCount = totalVariantCount * totalIndividualCount;
-        long numberOfTaggedVariants = Math.min(totalVariantCount / 2, maxGenotypeCount > 200000000 ? 500 : (maxGenotypeCount > 100000000 ? 300 : (maxGenotypeCount > 50000000 ? 100 : (maxGenotypeCount > 20000000 ? 50 : (maxGenotypeCount > 5000000 ? 40 : 25)))));
-        int nChunkSize = (int) Math.max(1, (int) totalVariantCount / Math.max(1, numberOfTaggedVariants - 1));
-        LOG.debug("Number of variants between 2 tagged ones: " + nChunkSize);
-
-        MongoCollection<Document> collection = mongoTemplate.getCollection(MgdbDao.COLLECTION_NAME_TAGGED_VARIANT_IDS);
-        collection.drop();
-        String cursor = null;
-        ArrayList<Document> taggedVariants = new ArrayList<>();
-        for (int nChunkNumber = 0; nChunkNumber < (float) totalVariantCount / nChunkSize; nChunkNumber++) {
-            long before = System.currentTimeMillis();
-            Query q = new Query();
-            q.fields().include("_id");
-            q.limit(nChunkSize);
-            q.with(Sort.by(Arrays.asList(new Sort.Order(Sort.Direction.ASC, "_id"))));
-            if (cursor != null) {
-                q.addCriteria(Criteria.where("_id").gt(cursor));
-            }
-            List<VariantData> chunk = mongoTemplate.find(q, VariantData.class);
-            try {
-                cursor = chunk.get(chunk.size() - 1).getId();
-            } catch (ArrayIndexOutOfBoundsException aioobe) {
-                if (aioobe.getMessage().equals("-1")) {
-                    throw new Exception("Database is mixing String and ObjectID types!");
-                }
-            }
-            taggedVariants.add(new Document("_id", cursor));
-            result.add(cursor.toString());
-            LOG.debug("Variant " + cursor + " tagged as position " + nChunkNumber + " (" + (System.currentTimeMillis() - before) + "ms)");
-        }
-        collection.insertMany(taggedVariants);
-
-        /*	This is how it is internally handled when sharding the data:
- 		var splitKeys = db.runCommand({splitVector: "mgdb_Musa_acuminata_v2_private.variantRunData", keyPattern: {"_id":1}, maxChunkSizeBytes: 40250000}).splitKeys;
-		for (var key in splitKeys)
-		  db.taggedVariants.insert({"_id" : splitKeys[key]["_id"]["vi"]});
-         */
+        
+        t.join();
+        if (result.isEmpty())
+            throw new Exception("An error occured while preparing database for searches, please check server logs");
         return result;
     }
 
@@ -414,7 +439,7 @@ public class MgdbDao {
         return result;
     }
 
-    public static Set<String> getProjectIndividuals(String sModule, int projId) {
+    public static Set<String> getProjectIndividuals(String sModule, int projId) throws ObjectNotFoundException {
         return getSamplesByIndividualForProject(sModule, projId, null).keySet();
     }
 
@@ -434,9 +459,12 @@ public class MgdbDao {
         return result;
     }
 
-    public static TreeMap<String /*individual*/, ArrayList<GenotypingSample>> getSamplesByIndividualForProject(final String sModule, final int projId, final Collection<String> individuals) {
+    public static TreeMap<String /*individual*/, ArrayList<GenotypingSample>> getSamplesByIndividualForProject(final String sModule, final int projId, final Collection<String> individuals) throws ObjectNotFoundException {
         TreeMap<String /*individual*/, ArrayList<GenotypingSample>> result = new TreeMap<>();
         MongoTemplate mongoTemplate = MongoTemplateManager.get(sModule);
+        if (mongoTemplate == null) {
+            throw new ObjectNotFoundException("Database " + sModule + " does not exist");
+        }
         Criteria crit = Criteria.where(GenotypingSample.FIELDNAME_PROJECT_ID).is(projId);
         if (individuals != null && individuals.size() > 0) {
             crit.andOperator(Criteria.where(GenotypingSample.FIELDNAME_INDIVIDUAL).in(individuals));
@@ -454,24 +482,36 @@ public class MgdbDao {
         return result;
     }
 
-    public static ArrayList<GenotypingSample> getSamplesForProject(final String sModule, final int projId, final Collection<String> individuals) {
+    public static ArrayList<GenotypingSample> getSamplesForProject(final String sModule, final int projId, final Collection<String> individuals) throws ObjectNotFoundException {
         ArrayList<GenotypingSample> result = new ArrayList<>();
         for (ArrayList<GenotypingSample> sampleList : getSamplesByIndividualForProject(sModule, projId, individuals).values()) {
             result.addAll(sampleList);
         }
         return result;
     }
+    
+    public static Map<String /*sample name*/, Integer /*sample id*/> getSamplesByNames(final String sModule, final Collection<String> sampleNames) {
+        Map<String, Integer> map = new HashMap<>();
+        MongoTemplate mongoTemplate = MongoTemplateManager.get(sModule);
+        if (sampleNames != null && sampleNames.size() > 0) {
+            Criteria crit = Criteria.where(GenotypingSample.FIELDNAME_NAME).in(sampleNames);
+            List<GenotypingSample> samples = mongoTemplate.find(new Query(crit), GenotypingSample.class);        
+            map = samples.stream().collect(Collectors.toMap(GenotypingSample::getSampleName, GenotypingSample::getId));        
+        }
+        return map;
+    }
 
     /**
-     * Gets the individual population.
+     * Gets individuals' populations.
      *
      * @param sModule the module
-     * @param individual the individual
-     * @return the individual population
+     * @param individuals the individual IDs
+     * @return the individual ID to population map
      */
-    public static String getIndividualPopulation(final String sModule, final String individual) {
-        MongoTemplate mongoTemplate = MongoTemplateManager.get(sModule);
-        return mongoTemplate.findById(individual, Individual.class).getPopulation();
+    public static Map<String, String> getIndividualPopulations(final String sModule, final Collection<String> individuals) {
+        Query query = new Query(new Criteria().andOperator(Criteria.where("_id").in(individuals), Criteria.where(Individual.FIELDNAME_POPULATION).ne(null)));
+        query.fields().include(Individual.FIELDNAME_POPULATION);
+        return MongoTemplateManager.get(sModule).find(query, Individual.class).stream().collect(Collectors.toMap(ind -> ind.getId(), ind -> ind.getPopulation()));
     }
 
     public static TreeSet<String> getAnnotationFields(MongoTemplate mongoTemplate, int projId, boolean fOnlySearchableFields) {
@@ -494,12 +534,8 @@ public class MgdbDao {
         headerCursor.close();
         return result;
     }
-
+    
     /**
-     * This method is not static because it requires access to a HttpSession
-     * which we get from a ObjectFactory<HttpSession> that we couln't autowire
-     * from a static getter
-     *
      * @param module the database name (mandatory)
      * @param sCurrentUser username for whom to get custom metadata (optional)
      * @param projIDs a list of project IDs (optional)
@@ -527,21 +563,117 @@ public class MgdbDao {
         boolean fGrabSessionAttributesFromThread = SessionAttributeAwareExportThread.class.isAssignableFrom(Thread.currentThread().getClass());
         LinkedHashMap<String, LinkedHashMap<String, Object>> sessionMetaData = (LinkedHashMap<String, LinkedHashMap<String, Object>>) (fGrabSessionAttributesFromThread ? ((SessionAttributeAwareExportThread) Thread.currentThread()).getSessionAttributes().get("individuals_metadata_" + module) : httpSessionFactory.getObject().getAttribute("individuals_metadata_" + module));
         if (sCurrentUser != null) {	// merge with custom metadata if available
-            if ("anonymousUser".equals(sCurrentUser) && sessionMetaData != null) {
-                for (String indId : indIDs) {
-                    LinkedHashMap<String, Object> indSessionMetadata = sessionMetaData.get(indId);
-                    if (indSessionMetadata != null && !indSessionMetadata.isEmpty()) {
-                        result.get(indId).getAdditionalInfo().putAll(indSessionMetadata);
-                    }
-                }
-            } else {
-                for (CustomIndividualMetadata cimd : mongoTemplate.find(new Query(new Criteria().andOperator(Criteria.where("_id." + CustomIndividualMetadataId.FIELDNAME_USER).is(sCurrentUser), Criteria.where("_id." + CustomIndividualMetadataId.FIELDNAME_INDIVIDUAL_ID).in(indIDs))), CustomIndividualMetadata.class)) {
-                    if (cimd.getAdditionalInfo() != null && !cimd.getAdditionalInfo().isEmpty()) {
+            if ("anonymousUser".equals(sCurrentUser)) {
+            	if (sessionMetaData != null)
+	                for (String indId : indIDs) {
+	                    LinkedHashMap<String, Object> indSessionMetadata = sessionMetaData.get(indId);
+	                    if (indSessionMetadata != null && !indSessionMetadata.isEmpty())
+	                        result.get(indId).getAdditionalInfo().putAll(indSessionMetadata);
+	                }
+            } else
+                for (CustomIndividualMetadata cimd : mongoTemplate.find(new Query(new Criteria().andOperator(Criteria.where("_id." + CustomIndividualMetadataId.FIELDNAME_USER).is(sCurrentUser), Criteria.where("_id." + CustomIndividualMetadataId.FIELDNAME_INDIVIDUAL_ID).in(indIDs))), CustomIndividualMetadata.class))
+                    if (cimd.getAdditionalInfo() != null && !cimd.getAdditionalInfo().isEmpty())
                         result.get(cimd.getId().getIndividualId()).getAdditionalInfo().putAll(cimd.getAdditionalInfo());
-                    }
-                }
-            }
         }
         return result;
     }
+
+    /**
+     * @param module the database name (mandatory)
+     * @param sCurrentUser username for whom to get custom metadata (optional)
+     * @param projIDs a list of project IDs (optional)
+     * @param spIDs a list of sample IDs (optional)
+     * @return sample IDs mapped to sample objects with static metada +
+     * custom metadata (if available). If spIDs is specified the list is
+     * restricted by it, otherwise if projIDs is specified the list is
+     * restricted by it, otherwise all database samples are returned
+     */
+    public LinkedHashMap<Integer, GenotypingSample> loadSamplesWithAllMetadata(String module, String sCurrentUser, Collection<Integer> projIDs, Collection<Integer> spIDs) {
+        MongoTemplate mongoTemplate = MongoTemplateManager.get(module);
+
+        // build the initial list of Sample objects
+        if (spIDs == null) {
+            spIDs = mongoTemplate.findDistinct(projIDs == null || projIDs.isEmpty() ? new Query() : new Query(Criteria.where(GenotypingSample.FIELDNAME_PROJECT_ID).in(projIDs)), "_id", GenotypingSample.class, Integer.class);
+        }
+        Query q = new Query(Criteria.where("_id").in(spIDs));
+        q.with(Sort.by(Sort.Direction.ASC, "_id"));
+        Map<Integer, GenotypingSample> indMap = mongoTemplate.find(q, GenotypingSample.class).stream().collect(Collectors.toMap(GenotypingSample::getId, sp -> sp));
+        LinkedHashMap<Integer, GenotypingSample> result = new LinkedHashMap<>();	// this one will be sorted according to the provided list
+        for (Integer spId : spIDs) {
+            result.put(spId, indMap.get(spId));
+        }
+
+        boolean fGrabSessionAttributesFromThread = SessionAttributeAwareExportThread.class.isAssignableFrom(Thread.currentThread().getClass());
+        LinkedHashMap<String, LinkedHashMap<String, Object>> sessionMetaData = (LinkedHashMap<String, LinkedHashMap<String, Object>>) (fGrabSessionAttributesFromThread ? ((SessionAttributeAwareExportThread) Thread.currentThread()).getSessionAttributes().get("samples_metadata_" + module) : httpSessionFactory.getObject().getAttribute("samples_metadata_" + module));
+        if (sCurrentUser != null) {	// merge with custom metadata if available
+            if ("anonymousUser".equals(sCurrentUser)) {
+            	if (sessionMetaData != null)
+	                for (Integer spID : spIDs) {
+	                    LinkedHashMap<String, Object> indSessionMetadata = sessionMetaData.get(spID);
+	                    if (indSessionMetadata != null && !indSessionMetadata.isEmpty())
+	                        result.get(spID).getAdditionalInfo().putAll(indSessionMetadata);
+	                }
+            } else
+                for (CustomSampleMetadata cimd : mongoTemplate.find(new Query(new Criteria().andOperator(Criteria.where("_id." + CustomSampleMetadataId.FIELDNAME_USER).is(sCurrentUser), Criteria.where("_id." + CustomSampleMetadataId.FIELDNAME_SAMPLE_ID).in(spIDs))), CustomSampleMetadata.class))
+                    if (cimd.getAdditionalInfo() != null && !cimd.getAdditionalInfo().isEmpty())
+                        result.get(cimd.getId().getSampleId()).getAdditionalInfo().putAll(cimd.getAdditionalInfo());
+        }
+        return result;
+    }
+//    
+//    public static List<Integer> getUserReadableProjectsIds(AbstractTokenManager tokenManager, String token, String sModule, boolean getReadable) throws ObjectNotFoundException {
+//        boolean fGotDBRights = tokenManager.canUserReadDB(token, sModule);
+//        if (fGotDBRights) {
+//            Query q = new Query();
+//            q.fields().include(GenotypingProject.FIELDNAME_NAME);
+//            List<GenotypingProject> listProj = MongoTemplateManager.get(sModule).find(q, GenotypingProject.class);
+//            List<Integer> projIds = listProj.stream().map(p -> p.getId()).collect(Collectors.toList());
+//            List<Integer> readableProjIds = new ArrayList<>();
+//            for (Integer id : projIds) {
+//                if (tokenManager.canUserReadProject(token, sModule, id)) {
+//                    readableProjIds.add(id);
+//                }
+//            }
+//            if (getReadable) {
+//                return readableProjIds;
+//            } else {
+//                projIds.removeAll(readableProjIds);
+//                return projIds;
+//            }
+//           
+//        } else {
+//            throw new ObjectNotFoundException(sModule);
+//        }
+//    }
+    
+    public static List<Integer> getUserReadableProjectsIds(AbstractTokenManager tokenManager, Collection<? extends GrantedAuthority> authorities, String sModule, boolean getReadable) throws ObjectNotFoundException {
+        boolean fGotDBRights = tokenManager.canUserReadDB(authorities, sModule);
+        if (fGotDBRights) {
+            Query q = new Query();
+            q.fields().include(GenotypingProject.FIELDNAME_NAME);
+            List<GenotypingProject> listProj = MongoTemplateManager.get(sModule).find(q, GenotypingProject.class);
+            List<Integer> projIds = listProj.stream().map(p -> p.getId()).collect(Collectors.toList());
+            List<Integer> readableProjIds = new ArrayList<>();
+            for (Integer id : projIds) {
+                if (tokenManager.canUserReadProject(authorities, sModule, id)) {
+                    readableProjIds.add(id);
+                }
+            }
+            if (getReadable) {
+                return readableProjIds;
+            } else {
+                projIds.removeAll(readableProjIds);
+                return projIds;
+            }
+           
+        } else {
+            throw new ObjectNotFoundException(sModule);
+        }
+    }
+    
+    public static List<GenotypingSample> getSamplesFromIndividualIds(String sModule, List<String> indIDs) {
+        Query q = new Query(Criteria.where(GenotypingSample.FIELDNAME_INDIVIDUAL).in(indIDs));
+        List<GenotypingSample> samples = MongoTemplateManager.get(sModule).find(q, GenotypingSample.class);
+        return samples;
+    } 
 }

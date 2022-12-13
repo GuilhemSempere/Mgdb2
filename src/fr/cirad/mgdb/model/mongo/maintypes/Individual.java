@@ -225,4 +225,9 @@ public class Individual implements Comparable<Individual> {
     public String toString() {
         return id;
     }
+    
+    @Override
+    public int hashCode() {
+        return toString().hashCode();
+    }
 }

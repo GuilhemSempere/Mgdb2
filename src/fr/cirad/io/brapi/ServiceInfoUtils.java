@@ -22,7 +22,7 @@ import java.util.*;
 import org.brapi.v2.model.Service;
 
 import org.brapi.v2.model.Service.MethodsEnum;
-import org.brapi.v2.model.WSMIMEDataTypes;
+import org.brapi.v2.model.ContentTypes;
 
 public class ServiceInfoUtils {
 
@@ -38,19 +38,19 @@ public class ServiceInfoUtils {
     }
 
     boolean ensureGenotypesCanBeImported() {	// validate the calls that MUST be present
-        if (!hasCall("studies-search", WSMIMEDataTypes.APPLICATION_JSON, MethodsEnum.GET)) {
+        if (!hasCall("studies-search", ContentTypes.APPLICATION_JSON, MethodsEnum.GET)) {
             return false;
         }
-        if (!hasCall("maps", WSMIMEDataTypes.APPLICATION_JSON, MethodsEnum.GET)) {
+        if (!hasCall("maps", ContentTypes.APPLICATION_JSON, MethodsEnum.GET)) {
             return false;
         }
-        if (!hasCall("maps/{mapDbId}/positions", WSMIMEDataTypes.APPLICATION_JSON, MethodsEnum.GET)) {
+        if (!hasCall("maps/{mapDbId}/positions", ContentTypes.APPLICATION_JSON, MethodsEnum.GET)) {
             return false;
         }
-        if (!hasCall("markerprofiles", WSMIMEDataTypes.APPLICATION_JSON, MethodsEnum.GET)) {
+        if (!hasCall("markerprofiles", ContentTypes.APPLICATION_JSON, MethodsEnum.GET)) {
             return false;
         }
-        if (!hasCall("allelematrix-search", WSMIMEDataTypes.APPLICATION_JSON, MethodsEnum.POST) && !hasCall("allelematrix-search", WSMIMEDataTypes.TEXT_TSV, MethodsEnum.POST)) {
+        if (!hasCall("allelematrix-search", ContentTypes.APPLICATION_JSON, MethodsEnum.POST) && !hasCall("allelematrix-search", ContentTypes.TEXT_TSV, MethodsEnum.POST)) {
             return false;
         }
 
@@ -58,10 +58,10 @@ public class ServiceInfoUtils {
     }
 
     boolean ensureGermplasmInfoCanBeImported() {	// validate that at least one of the MUST calls is present
-        if (hasCall("search/germplasm", WSMIMEDataTypes.APPLICATION_JSON, MethodsEnum.POST)) {
+        if (hasCall("search/germplasm", ContentTypes.APPLICATION_JSON, MethodsEnum.POST)) {
             return true;
         }
-        if (hasCall("germplasm/{germplasmDbId}/attributes", WSMIMEDataTypes.APPLICATION_JSON, MethodsEnum.GET)) {
+        if (hasCall("germplasm/{germplasmDbId}/attributes", ContentTypes.APPLICATION_JSON, MethodsEnum.GET)) {
             return true;
         }
 
@@ -69,18 +69,18 @@ public class ServiceInfoUtils {
     }
 
     boolean hasCallSearchAttributes() {
-        return hasCall("search/attributevalues", WSMIMEDataTypes.APPLICATION_JSON, MethodsEnum.POST);
+        return hasCall("search/attributevalues", ContentTypes.APPLICATION_JSON, MethodsEnum.POST);
     }
 
     boolean hasCallSearchGermplasm() {
-        return hasCall("search/germplasm", WSMIMEDataTypes.APPLICATION_JSON, MethodsEnum.POST);
+        return hasCall("search/germplasm", ContentTypes.APPLICATION_JSON, MethodsEnum.POST);
     }
 
     boolean hasCallSearchSamples() {
-        return hasCall("search/samples", WSMIMEDataTypes.APPLICATION_JSON, MethodsEnum.POST);
+        return hasCall("search/samples", ContentTypes.APPLICATION_JSON, MethodsEnum.POST);
     }
 
-    public boolean hasCall(String signature, WSMIMEDataTypes datatype, MethodsEnum method) {
+    public boolean hasCall(String signature, ContentTypes datatype, MethodsEnum method) {
         for (Service service : services) {
             String implementedCall = service.getService();
             if (implementedCall.startsWith("/")) {
@@ -96,19 +96,19 @@ public class ServiceInfoUtils {
     }
 
     boolean hasToken() {
-        return hasCall("token", WSMIMEDataTypes.APPLICATION_JSON, MethodsEnum.GET);
+        return hasCall("token", ContentTypes.APPLICATION_JSON, MethodsEnum.GET);
     }
 
     boolean hasPostMarkersSearch() {
-        return hasCall("markers-search", WSMIMEDataTypes.APPLICATION_JSON, MethodsEnum.POST);
+        return hasCall("markers-search", ContentTypes.APPLICATION_JSON, MethodsEnum.POST);
     }
 
     boolean hasGetMarkersSearch() {
-        return hasCall("markers-search", WSMIMEDataTypes.APPLICATION_JSON, MethodsEnum.GET);
+        return hasCall("markers-search", ContentTypes.APPLICATION_JSON, MethodsEnum.GET);
     }
 
     boolean hasMarkersDetails() {
-        return hasCall("markers/{markerDbId}", WSMIMEDataTypes.APPLICATION_JSON, MethodsEnum.GET);
+        return hasCall("markers/{markerDbId}", ContentTypes.APPLICATION_JSON, MethodsEnum.GET);
     }
 
 //	boolean hasMapsMapDbId()
@@ -116,6 +116,6 @@ public class ServiceInfoUtils {
 //		return hasCall("maps/id", JSON, GET);
 //	}
     boolean hasAlleleMatrixSearchTSV() {
-        return hasCall("allelematrix-search", WSMIMEDataTypes.TEXT_TSV, MethodsEnum.POST);
+        return hasCall("allelematrix-search", ContentTypes.TEXT_TSV, MethodsEnum.POST);
     }
 }

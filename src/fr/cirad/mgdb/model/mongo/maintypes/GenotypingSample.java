@@ -16,6 +16,7 @@
  *******************************************************************************/
 package fr.cirad.mgdb.model.mongo.maintypes;
 
+import java.util.LinkedHashMap;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.annotation.TypeAlias;
 import org.springframework.data.mongodb.core.mapping.Document;
@@ -33,7 +34,8 @@ public class GenotypingSample {
 	public final static String FIELDNAME_INDIVIDUAL = "in";
 	public final static String FIELDNAME_PROJECT_ID = "pj";
 	public final static String FIELDNAME_RUN = "rn";
-
+    public final static String SECTION_ADDITIONAL_INFO = "ai";
+    
 	/** The sample id. */
 	@Id
 	private int id;
@@ -53,7 +55,30 @@ public class GenotypingSample {
 	/** The run. */
 	@Field(FIELDNAME_RUN)
 	private String run;
+        
+    /**
+     * The additional info.
+     */
+    @Field(SECTION_ADDITIONAL_INFO)
+    private LinkedHashMap<String, Object> additionalInfo = null;
 
+	/**
+	 * Instantiates a new GenotypingSample.
+	 *
+	 * @param sampleId the sample id
+	 * @param projectId the project id
+	 * @param run the run name
+	 * @param individual the individual
+	 * @param sampleName the sampleName
+	 */
+	public GenotypingSample(int sampleId, int projectId, String run, String individual, String sampleName) {
+		this.id = sampleId;
+		this.projectId = projectId;
+		this.run = run;
+		this.individual = individual;
+		this.sampleName = sampleName != null ? sampleName : getIndividual() + "-" + getProjectId() + "-" + getRun();
+	}
+	
 	/**
 	 * Instantiates a new GenotypingSample.
 	 *
@@ -63,11 +88,7 @@ public class GenotypingSample {
 	 * @param individual the individual
 	 */
 	public GenotypingSample(int sampleId, int projectId, String run, String individual) {
-		this.id = sampleId;
-		this.projectId = projectId;
-		this.run = run;
-		this.individual = individual;
-		sampleName = getIndividual() + "-" + getProjectId() + "-" + getRun();
+		this(sampleId, projectId, run, individual, null);
 	}
 
 	public Integer getProjectId() {
@@ -93,6 +114,17 @@ public class GenotypingSample {
 //	public void setIndividual(String individual) {
 //		this.individual = individual;
 //	}
+
+    public LinkedHashMap<String, Object> getAdditionalInfo() {
+        if (additionalInfo == null) {
+            additionalInfo = new LinkedHashMap<String, Object>();
+        }
+        return additionalInfo;
+    }
+
+    public void setAdditionalInfo(LinkedHashMap<String, Object> additionalInfo) {
+        this.additionalInfo = additionalInfo;
+    }
 	
 	@Override
 	public boolean equals(Object o)

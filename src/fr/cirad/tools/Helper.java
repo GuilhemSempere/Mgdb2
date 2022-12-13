@@ -387,9 +387,31 @@ public class Helper {
 		return runsByProject;
     }
     
-    static public void convertIdFiltersToRunFormat(BasicDBList filters) {
-        for (Object filter : filters)
-            if (((BasicDBObject) filter).containsField("_id"))
-                ((BasicDBObject) filter).append("_id." + VariantRunDataId.FIELDNAME_VARIANT_ID, ((BasicDBObject) filter).remove("_id"));
+    static public void convertIdFiltersToRunFormat(Collection<BasicDBList> filters) {
+        for (BasicDBList query: filters) {
+            for (Object filter : query) {
+                if (filter instanceof BasicDBObject) {
+                    if (((BasicDBObject) filter).containsField("_id"))
+                        ((BasicDBObject) filter).append("_id." + VariantRunDataId.FIELDNAME_VARIANT_ID, ((BasicDBObject) filter).remove("_id"));
+                }
+                else
+                    if (((Document) filter).containsKey("_id"))
+                        ((Document) filter).append("_id." + VariantRunDataId.FIELDNAME_VARIANT_ID, ((BasicDBObject) filter).remove("_id"));
+            }
+        }
+    }
+    
+    static public <T> List<Collection<T>> evenlySplitCollection(Collection<T> collection, int nChunkCount) {
+        int nChunkSize = (int) Math.ceil((float) collection.size() / nChunkCount), nCounter = 0;
+        List<Collection<T>> splitCollection = new ArrayList<>(nChunkCount);
+        Collection<T> currentChunk = null;
+        for (T variantRuns : collection) {
+            if (nCounter++ % nChunkSize == 0) {
+                currentChunk = new ArrayList<>();
+                splitCollection.add(currentChunk);
+            }
+            currentChunk.add(variantRuns);
+        }
+        return splitCollection;
     }
 }

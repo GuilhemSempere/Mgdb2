@@ -68,6 +68,8 @@ public class STDVariantImport extends AbstractGenotypeImport {
 	private String m_processID;
 	private boolean fImportUnknownVariants = false;
 	private boolean m_fTryAndMatchRandomObjectIDs = false;
+
+	private HashMap<String, String> individualToSampleMap = null;
 	
 	public STDVariantImport()
 	{
@@ -119,9 +121,17 @@ public class STDVariantImport extends AbstractGenotypeImport {
 		}
 		
 		GenericXmlApplicationContext ctx = null;
-		try
-		{
-			MongoTemplate mongoTemplate = MongoTemplateManager.get(sModule);
+		File genotypeFile = new File(mainFilePath);
+		List<File> sortTempFiles = null;
+		File sortedFile = new File("sortedImportFile_" + genotypeFile.getName());
+		sortedFile.deleteOnExit();	//just to be sure
+
+		MongoTemplate mongoTemplate = MongoTemplateManager.get(sModule);
+		if (mongoTemplate == null) { // we are probably being invoked offline
+			ctx = new GenericXmlApplicationContext("applicationContext-data.xml");
+
+			MongoTemplateManager.initialize(ctx);
+			mongoTemplate = MongoTemplateManager.get(sModule);
 			if (mongoTemplate == null)
 			{	// we are probably being invoked offline
 				ctx = new GenericXmlApplicationContext("applicationContext-data.xml");
@@ -131,7 +141,10 @@ public class STDVariantImport extends AbstractGenotypeImport {
 				if (mongoTemplate == null)
 					throw new Exception("DATASOURCE '" + sModule + "' is not supported!");
 			}
-			
+		}
+
+		try
+		{
             HashMap<String, String> existingVariantIDs;
             Assembly assembly = mongoTemplate.findOne(new Query(Criteria.where(Assembly.FIELDNAME_NAME).is(assemblyName)), Assembly.class);
             if (assembly == null) {
@@ -149,18 +162,18 @@ public class STDVariantImport extends AbstractGenotypeImport {
                 progress.moveToNextStep();
                 existingVariantIDs = buildSynonymToIdMapForExistingVariants(mongoTemplate, false, assembly.getId());
             }
-            
-			mongoTemplate.getDb().runCommand(new BasicDBObject("profile", 0));	// disable profiling
+
+            mongoTemplate.getDb().runCommand(new BasicDBObject("profile", 0));	// disable profiling
 			GenotypingProject project = mongoTemplate.findOne(new Query(Criteria.where(GenotypingProject.FIELDNAME_NAME).is(sProject)), GenotypingProject.class);
             if (importMode == 0 && project != null && project.getPloidyLevel() > 0 && project.getPloidyLevel() != m_ploidy)
             	throw new Exception("Ploidy levels differ between existing (" + project.getPloidyLevel() + ") and provided (" + m_ploidy + ") data!");
             
 			fImportUnknownVariants = doesDatabaseSupportImportingUnknownVariants(sModule);
 			
+			MongoTemplateManager.lockProjectForWriting(sModule, sProject);
+			
 			cleanupBeforeImport(mongoTemplate, sModule, project, importMode, sRun);
-						
-			File genotypeFile = new File(mainFilePath);
-						
+
 			progress.addStep("Checking genotype consistency");
 			progress.moveToNextStep();
 
@@ -177,37 +190,33 @@ public class STDVariantImport extends AbstractGenotypeImport {
 					return (splitted1[finalMarkerFieldIndex]/* + "_" + splitted1[finalSampleFieldIndex]*/).compareTo(splitted2[finalMarkerFieldIndex]/* + "_" + splitted2[finalSampleFieldIndex]*/);
 				}
 			};
-			File sortedFile = new File("sortedImportFile_" + genotypeFile.getName());
-			sortedFile.deleteOnExit();
 			LOG.info("Sorted file will be " + sortedFile.getAbsolutePath());
 			
-			List<File> sortTempFiles = null;
 			try
 			{
 				progress.addStep("Creating temp files to sort in batch");
 				progress.moveToNextStep();			
 				sortTempFiles = ExternalSort.sortInBatch(in, genotypeFile.length(), comparator, ExternalSort.DEFAULTMAXTEMPFILES, Charset.defaultCharset(), sortedFile.getParentFile(), false, 0, true, progress);
+	            if (progress.getError() != null || progress.isAborted())
+	                return;
+
 				long afterSortInBatch = System.currentTimeMillis();
 				LOG.info("sortInBatch took " + (afterSortInBatch - before)/1000 + "s");
 				
 				progress.addStep("Merging temp files");
 				progress.moveToNextStep();
 				ExternalSort.mergeSortedFiles(sortTempFiles, sortedFile, comparator, Charset.defaultCharset(), false, false, true, progress, genotypeFile.length());
+	            if (progress.getError() != null || progress.isAborted())
+	                return;
+
 				LOG.info("mergeSortedFiles took " + (System.currentTimeMillis() - afterSortInBatch)/1000 + "s");
 			}
 	        catch (java.io.IOException ioe)
 	        {
-	        	// it failed: let's cleanup
-	        	if (sortTempFiles != null)
-	            	for (File f : sortTempFiles)
-	            		f.delete();
-	        	if (sortedFile.exists())
-	        		sortedFile.delete();
 	        	LOG.error("Error occured sorting import file", ioe);
 	        	return;
 	        }
 
-			// create project if necessary
 			if (project == null)
 			{	// create it
 				project = new GenotypingProject(AutoIncrementCounter.getNextSequence(mongoTemplate, MongoTemplateManager.getMongoCollectionName(GenotypingProject.class)));
@@ -265,7 +274,10 @@ public class STDVariantImport extends AbstractGenotypeImport {
 					LOG.info(info);
 				}
 			}
-			while (sLine != null);		
+			while (sLine != null && progress.getError() == null && !progress.isAborted());
+			
+            if (progress.getError() != null || progress.isAborted())
+                return;
 
 			String mgdbVariantId = existingVariantIDs.get(sVariantName.toUpperCase());	// when saving the last variant there is not difference between sVariantName and sPreviousVariant
 			if (mgdbVariantId == null && !fImportUnknownVariants)
@@ -278,7 +290,6 @@ public class STDVariantImport extends AbstractGenotypeImport {
 				unsavedVariants.add(sVariantName);
 	
 			in.close();
-			sortedFile.delete();
 							
 			// save project data
             if (!project.getVariantTypes().contains(Type.SNP.toString()))
@@ -303,28 +314,38 @@ public class STDVariantImport extends AbstractGenotypeImport {
 		}
 		finally
 		{
+        	// let's cleanup
+        	if (sortedFile.exists())
+        		sortedFile.delete();
+        	if (sortTempFiles != null)
+            	for (File f : sortTempFiles)
+            		if (f.exists())
+            			f.delete();
+        	
 			if (ctx != null)
 				ctx.close();
+			
+			MongoTemplateManager.unlockProjectForWriting(sModule, sProject);
 		}
 	}
 	
-	private boolean saveWithOptimisticLock(MongoTemplate mongoTemplate, GenotypingProject project, String runName, String mgdbVariantId, HashMap<String, String> individualPopulations, HashMap<String, ArrayList<String>> inconsistencies, ArrayList<String> linesForVariant, int nNumberOfRetries, Map<String, GenotypingSample> usedSamples, Map<Integer, TreeSet<String>> affectedSequencesByAssembly) throws Exception
-	{
-		if (linesForVariant.size() == 0)
-			return false;
-		
-		for (int j=0; j<Math.max(1, nNumberOfRetries); j++)
-		{			
-			Query query = new Query(Criteria.where("_id").is(mgdbVariantId));
-			query.fields().include(VariantData.FIELDNAME_REFERENCE_POSITION).include(VariantData.FIELDNAME_KNOWN_ALLELES).include(VariantData.FIELDNAME_PROJECT_DATA + "." + project.getId()).include(VariantData.FIELDNAME_VERSION);
-			
-			VariantData variant = mongoTemplate.findOne(query, VariantData.class);
-			Update update = variant == null ? null : new Update();
-			if (update == null)
-			{	// it's the first time we deal with this variant
-				variant = new VariantData((ObjectId.isValid(mgdbVariantId) ? "_" : "") + mgdbVariantId);
-				variant.setType(Type.SNP.toString());
-			}
+    private boolean saveWithOptimisticLock(MongoTemplate mongoTemplate, GenotypingProject project, String runName, String mgdbVariantId, HashMap<String, String> individualPopulations, HashMap<String, ArrayList<String>> inconsistencies, ArrayList<String> linesForVariant, int nNumberOfRetries, Map<String, GenotypingSample> usedSamples, Map<Integer, TreeSet<String>> affectedSequencesByAssembly) throws Exception
+    {
+        if (linesForVariant.size() == 0)
+            return false;
+        
+        for (int j=0; j<Math.max(1, nNumberOfRetries); j++)
+        {           
+            Query query = new Query(Criteria.where("_id").is(mgdbVariantId));
+            query.fields().include(VariantData.FIELDNAME_REFERENCE_POSITION).include(VariantData.FIELDNAME_KNOWN_ALLELES).include(VariantData.FIELDNAME_PROJECT_DATA + "." + project.getId()).include(VariantData.FIELDNAME_VERSION);
+            
+            VariantData variant = mongoTemplate.findOne(query, VariantData.class);
+            Update update = variant == null ? null : new Update();
+            if (update == null)
+            {   // it's the first time we deal with this variant
+                variant = new VariantData((ObjectId.isValid(mgdbVariantId) ? "_" : "") + mgdbVariantId);
+                variant.setType(Type.SNP.toString());
+            }
             else
                 for (Integer assemblyId : variant.getReferencePositions().keySet()) {
                     ReferencePosition rp = variant.getReferencePositions().get(assemblyId);
@@ -338,110 +359,107 @@ public class STDVariantImport extends AbstractGenotypeImport {
                     }
                 }
             
-			
-			String sVariantName = linesForVariant.get(0).trim().split(" ")[2];
-//			if (!mgdbVariantId.equals(sVariantName))
-//				variant.setSynonyms(markerSynonymMap.get(mgdbVariantId));	// provided id was a synonym
-			
-			VariantRunData vrd = new VariantRunData(new VariantRunData.VariantRunDataId(project.getId(), runName, mgdbVariantId));
-			
-			ArrayList<String> inconsistentIndividuals = inconsistencies.get(mgdbVariantId);
-			for (String individualLine : linesForVariant)
-			{				
-				String[] cells = individualLine.trim().split(" ");
-				String sIndividual = cells[1];
-						
-				if (!usedSamples.containsKey(sIndividual))	// we don't want to persist each sample several times
-				{
-	                Individual ind = mongoTemplate.findById(sIndividual, Individual.class);
-                	String sPop = individualPopulations.get(sIndividual);
-	                boolean fAlreadyExists = ind != null, fNeedToSave = true;
-	                if (!fAlreadyExists) {
-	                    ind = new Individual(sIndividual);
-	                    ind.setPopulation(sPop);
-	                }
-	                else if (sPop.equals(ind.getPopulation()))
-                		fNeedToSave = false;
-                	else {
-                		if (ind.getPopulation() != null)
-                			LOG.warn("Changing individual " + sIndividual + "'s population from " + ind.getPopulation() + " to " + sPop);
-                		ind.setPopulation(sPop);
-                	}
-					if (fNeedToSave)
-	                    mongoTemplate.save(ind);
-	                int sampleId = AutoIncrementCounter.getNextSequence(mongoTemplate, MongoTemplateManager.getMongoCollectionName(GenotypingSample.class));
-	                usedSamples.put(sIndividual, new GenotypingSample(sampleId, project.getId(), vrd.getRunName(), sIndividual));	// add a sample for this individual to the project
-	            }
+            
+            String sVariantName = linesForVariant.get(0).trim().split(" ")[2];
+//          if (!mgdbVariantId.equals(sVariantName))
+//              variant.setSynonyms(markerSynonymMap.get(mgdbVariantId));   // provided id was a synonym
+            
+            VariantRunData vrd = new VariantRunData(new VariantRunData.VariantRunDataId(project.getId(), runName, mgdbVariantId));
+            
+            ArrayList<String> inconsistentIndividuals = inconsistencies.get(mgdbVariantId);
+            for (String individualLine : linesForVariant)
+            {               
+                String[] cells = individualLine.trim().split(" ");
+                String sIndividual = cells[1];
+                        
+                if (!usedSamples.containsKey(sIndividual))  // we don't want to persist each sample several times
+                {
+                    Individual ind = mongoTemplate.findById(sIndividual, Individual.class);
+                    String sPop = individualPopulations.get(sIndividual);
+                    boolean fAlreadyExists = ind != null, fNeedToSave = true;
+                    if (!fAlreadyExists) {
+                        ind = new Individual(sIndividual);
+                        ind.setPopulation(sPop);
+                    }
+                    else if (sPop.equals(ind.getPopulation()))
+                        fNeedToSave = false;
+                    else {
+                        if (ind.getPopulation() != null)
+                            LOG.warn("Changing individual " + sIndividual + "'s population from " + ind.getPopulation() + " to " + sPop);
+                        ind.setPopulation(sPop);
+                    }
+                    if (fNeedToSave)
+                        mongoTemplate.save(ind);
+                    int sampleId = AutoIncrementCounter.getNextSequence(mongoTemplate, MongoTemplateManager.getMongoCollectionName(GenotypingSample.class));
+                    usedSamples.put(sIndividual, new GenotypingSample(sampleId, project.getId(), vrd.getRunName(), sIndividual, individualToSampleMap == null ? null : individualToSampleMap.get(sIndividual)));   // add a sample for this individual to the project
+                }
 
-				String gtCode = null;
-				boolean fInconsistentData = inconsistentIndividuals != null && inconsistentIndividuals.contains(sIndividual);
-				if (fInconsistentData)
-					LOG.warn("Not adding inconsistent data: " + sVariantName + " / " + sIndividual);
-				else if (cells.length > 3)
-				{
-					ArrayList<Integer> alleleIndexList = new ArrayList<Integer>();	
-					boolean fAddedSomeAlleles = false;
-					for (int i=3; i<3 + m_ploidy; i++)
-					{
-						int indexToUse = cells.length == 3 + m_ploidy ? i : 3;	// support for collapsed homozygous genotypes
-						if (!variant.getKnownAlleles().contains(cells[indexToUse]))
-						{
-							variant.getKnownAlleles().add(cells[indexToUse]);	// it's the first time we encounter this alternate allele for this variant
-							fAddedSomeAlleles = true;
-						}
-						
-						alleleIndexList.add(variant.getKnownAlleleList().indexOf(cells[indexToUse]));
-					}
-					
-					if (fAddedSomeAlleles && update != null)
-						update.set(VariantData.FIELDNAME_KNOWN_ALLELES, variant.getKnownAlleles());
+                String gtCode = null;
+                boolean fInconsistentData = inconsistentIndividuals != null && inconsistentIndividuals.contains(sIndividual);
+                if (fInconsistentData)
+                    LOG.warn("Not adding inconsistent data: " + sVariantName + " / " + sIndividual);
+                else if (cells.length > 3)
+                {
+                    ArrayList<Integer> alleleIndexList = new ArrayList<Integer>();  
+                    boolean fAddedSomeAlleles = false;
+                    for (int i=3; i<3 + m_ploidy; i++)
+                    {
+                        int indexToUse = cells.length == 3 + m_ploidy ? i : 3;  // support for collapsed homozygous genotypes
+                        if (!variant.getKnownAlleles().contains(cells[indexToUse]))
+                        {
+                            variant.getKnownAlleles().add(cells[indexToUse]);   // it's the first time we encounter this alternate allele for this variant
+                            fAddedSomeAlleles = true;
+                        }
+                        
+                        alleleIndexList.add(variant.getKnownAlleles().indexOf(cells[indexToUse]));
+                    }
+                    
+                    if (fAddedSomeAlleles && update != null)
+                        update.set(VariantData.FIELDNAME_KNOWN_ALLELES, variant.getKnownAlleles());
 
-					Collections.sort(alleleIndexList);
-					gtCode = StringUtils.join(alleleIndexList, "/");
-				}
-				
-				if (gtCode != null && (gtCode.contains("-1") || gtCode.contains("2")))
-	                System.err.println(vrd.getVariantId() + " - " + sIndividual);
+                    Collections.sort(alleleIndexList);
+                    gtCode = StringUtils.join(alleleIndexList, "/");
+                }
 
-				if (gtCode == null)
-					continue;	// we don't add missing genotypes
-				
-				SampleGenotype genotype = new SampleGenotype(gtCode);
-				vrd.getSampleGenotypes().put(usedSamples.get(sIndividual).getId(), genotype);
-			}
-            project.getAlleleCounts().add(variant.getKnownAlleles().size());	// it's a TreeSet so it will only be added if it's not already present
-			
-			try
-			{
-				if (update == null)
-				{
-					mongoTemplate.save(variant);
-//					System.out.println("saved: " + variant.getId());
-				}
-				else if (!update.getUpdateObject().keySet().isEmpty())
-				{
-//					update.set(VariantData.FIELDNAME_PROJECT_DATA + "." + project.getId(), projectData);
-					mongoTemplate.upsert(new Query(Criteria.where("_id").is(mgdbVariantId)).addCriteria(Criteria.where(VariantData.FIELDNAME_VERSION).is(variant.getVersion())), update, VariantData.class);
-//					System.out.println("updated: " + variant.getId());
-				}
+                if (gtCode == null)
+                    continue;   // we don't add missing genotypes
+                
+                SampleGenotype genotype = new SampleGenotype(gtCode);
+                vrd.getSampleGenotypes().put(usedSamples.get(sIndividual).getId(), genotype);
+            }
+            project.getAlleleCounts().add(variant.getKnownAlleles().size());    // it's a TreeSet so it will only be added if it's not already present
+            
+            try
+            {
+                if (update == null)
+                {
+                    mongoTemplate.save(variant);
+//                  System.out.println("saved: " + variant.getId());
+                }
+                else if (!update.getUpdateObject().keySet().isEmpty())
+                {
+//                  update.set(VariantData.FIELDNAME_PROJECT_DATA + "." + project.getId(), projectData);
+                    mongoTemplate.upsert(new Query(Criteria.where("_id").is(mgdbVariantId)).addCriteria(Criteria.where(VariantData.FIELDNAME_VERSION).is(variant.getVersion())), update, VariantData.class);
+//                  System.out.println("updated: " + variant.getId());
+                }
 
-		        vrd.setKnownAlleles(variant.getKnownAlleles());
-		        vrd.setReferencePositions(variant.getReferencePositions());
-		        vrd.setType(Type.SNP.toString());
-		        vrd.setSynonyms(variant.getSynonyms());
-				mongoTemplate.save(vrd);
+                vrd.setKnownAlleles(variant.getKnownAlleles());
+                vrd.setReferencePositions(variant.getReferencePositions());
+                vrd.setType(Type.SNP.toString());
+                vrd.setSynonyms(variant.getSynonyms());
+                mongoTemplate.save(vrd);
 
-				if (j > 0)
-					LOG.info("It took " + j + " retries to save variant " + variant.getId());
-				return true;
-			}
-			catch (OptimisticLockingFailureException olfe)
-			{
-//				LOG.info("failed: " + variant.getId());
-			}
-		}
-		return false;	// all attempts failed
-	}
+                if (j > 0)
+                    LOG.info("It took " + j + " retries to save variant " + variant.getId());
+                return true;
+            }
+            catch (OptimisticLockingFailureException olfe)
+            {
+//              LOG.info("failed: " + variant.getId());
+            }
+        }
+        return false;   // all attempts failed
+    }
 	
 	private static HashMap<String, ArrayList<String>> checkSynonymGenotypeConsistency(HashMap<String, String> markerIDs, File stdFile, String outputFilePrefix) throws IOException
 	{
@@ -515,5 +533,9 @@ public class STDVariantImport extends AbstractGenotypeImport {
 
 	public void setPloidy(int ploidy) {
 		m_ploidy = ploidy;
+	}
+
+	public void setIndividualToSampleMap(HashMap<String, String> individualToSampleMap) {
+		this.individualToSampleMap  = individualToSampleMap;
 	}
 }

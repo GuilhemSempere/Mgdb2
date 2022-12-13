@@ -18,6 +18,7 @@ package fr.cirad.mgdb.exporting.tools;
 
 import java.io.FileWriter;
 import java.io.IOException;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
@@ -113,6 +114,8 @@ public class ExportManager
     
     private Class resultType;
     
+    int involvedRunCount;
+    
     private BasicDBObject matchStage = null;
     private BasicDBObject sortStage = null;
     private BasicDBObject projectStage = null;
@@ -144,6 +147,8 @@ public class ExportManager
 
         // optimization 1: filling in involvedProjectRuns will provide means to apply filtering on project and/or run fields when exporting from temporary collection
         HashMap<Integer, List<String>> involvedProjectRuns = Helper.getRunsByProjectInSampleCollection(samplesToExport);
+        involvedRunCount = involvedProjectRuns.values().stream().mapToInt(b -> b.size()).sum();
+
         int nDbProjectCount = (int) Helper.estimDocCount(mongoTemplate, GenotypingProject.class);
         for (int projId : involvedProjectRuns.keySet()) {
             List<String> projectInvolvedRuns = involvedProjectRuns.get(projId);
@@ -157,9 +162,9 @@ public class ExportManager
 
         // optimization 2: build the $project stage by excluding fields when over 50% of overall samples are selected; even remove that stage when exporting all (or almost all) samples (makes it much faster)
         long nTotalNumberOfSamplesInDB = Helper.estimDocCount(mongoTemplate, GenotypingSample.class);
-        long percentageOfExportedSamples = 100 * samplesToExport.size() / nTotalNumberOfSamplesInDB;
-        sampleIDsToExport = samplesToExport == null ? new ArrayList() : samplesToExport.stream().map(sp -> sp.getId()).collect(Collectors.toList());
-        Collection<Integer> sampleIDsNotToExport = percentageOfExportedSamples >= 98 ? new ArrayList() /* if almost all individuals are being exported we directly omit the $project stage */ : (percentageOfExportedSamples > 50 ? mongoTemplate.findDistinct(new Query(Criteria.where("_id").not().in(sampleIDsToExport)), "_id", GenotypingSample.class, Integer.class) : null);
+        long percentageOfExportedSamples = nTotalNumberOfSamplesInDB == 0 ? 100 : 100 * samplesToExport.size() / nTotalNumberOfSamplesInDB;
+        sampleIDsToExport = samplesToExport == null ? new ArrayList<>() : samplesToExport.stream().map(sp -> sp.getId()).collect(Collectors.toList());
+        Collection<Integer> sampleIDsNotToExport = percentageOfExportedSamples >= 98 ? new ArrayList<>() /* if almost all individuals are being exported we directly omit the $project stage */ : (percentageOfExportedSamples > 50 ? mongoTemplate.findDistinct(new Query(Criteria.where("_id").not().in(sampleIDsToExport)), "_id", GenotypingSample.class, Integer.class) : null);
 
         if (!varQuery.isEmpty()) {
             if (!fWorkingOnTempColl && !projectFilterList.isEmpty()) {
@@ -214,9 +219,9 @@ public class ExportManager
      */
     private void exportFromTempColl(int nAssemblyId) throws IOException, InterruptedException, ExecutionException {
         CompletableFuture<Void> future = null;
-        List<List<VariantRunData>> tempMarkerRunsToWrite = new ArrayList<>(nQueryChunkSize);
-        List<VariantRunData> currentMarkerRuns = new ArrayList<>();
-        List<String> currentMarkerIDs = new ArrayList<>();
+        Collection<Collection<VariantRunData>> tempMarkerRunsToWrite = new ArrayList<>(nQueryChunkSize);
+        List<VariantRunData> currentMarkerRuns = new ArrayList<>(involvedRunCount);
+        List<String> currentMarkerIDs = new ArrayList<>(nQueryChunkSize);
         String varId = null, previousVarId = null;
         int nWrittenmarkerCount = 0;
         
@@ -267,7 +272,7 @@ public class ExportManager
                     LOG.debug("Export pipeline: " + pipeline);
                 }
 
-                ArrayList<VariantRunData> runs = runColl.aggregate(pipeline, VariantRunData.class).allowDiskUse(true).into(new ArrayList<>()); // we don't use collation here because it leads to unexpected behaviour (sometimes fetches some additional variants to those in currentMarkerIDs) => we'll have to sort each chunk by hand
+                ArrayList<VariantRunData> runs = runColl.aggregate(pipeline, VariantRunData.class).allowDiskUse(true).into(new ArrayList<>(currentMarkerIDs.size())); // we don't use collation here because it leads to unexpected behaviour (sometimes fetches some additional variants to those in currentMarkerIDs) => we'll have to sort each chunk by hand
                 Collections.sort(runs, vrdComparator);    // make sure variants within this chunk are correctly sorted
                 
                 for (VariantRunData vrd : runs) {
@@ -275,7 +280,7 @@ public class ExportManager
                     
                     if (previousVarId != null && !varId.equals(previousVarId)) {
                         tempMarkerRunsToWrite.add(currentMarkerRuns);
-                        currentMarkerRuns = new ArrayList<>();
+                        currentMarkerRuns = new ArrayList<>(involvedRunCount);
                         nWrittenmarkerCount++;
                     }
                     currentMarkerRuns.add(vrd);
@@ -314,7 +319,7 @@ public class ExportManager
                 if (markerCount != null)
                     progress.setCurrentStepProgress(nWrittenmarkerCount * 100l / markerCount);
                 future = writingThread.writeRuns(tempMarkerRunsToWrite);
-                tempMarkerRunsToWrite.clear();
+                tempMarkerRunsToWrite = new ArrayDeque<>(nQueryChunkSize); 
             }
         }
 
@@ -327,7 +332,7 @@ public class ExportManager
 
     private void exportDirectlyFromRuns() throws IOException, InterruptedException, ExecutionException {
         CompletableFuture<Void> future = null;
-        List<List<VariantRunData>> tempMarkerRunsToWrite = new ArrayList<>(nQueryChunkSize);
+        Collection<Collection<VariantRunData>> tempMarkerRunsToWrite = new ArrayDeque<>(nQueryChunkSize);
         List<VariantRunData> currentMarkerRuns = new ArrayList<>();
         String varId = null, previousVarId = null;
         int nWrittenmarkerCount = 0;
@@ -336,7 +341,7 @@ public class ExportManager
         if (matchStage != null) {
             Document matchContents = (Document) matchStage.get("$match");
             BasicDBList filters = matchContents.containsKey("$and") ? (BasicDBList) matchContents.get("$and") : new BasicDBList() {{ add(new BasicDBObject(matchContents)); }};
-            Helper.convertIdFiltersToRunFormat(filters);
+            Helper.convertIdFiltersToRunFormat(Arrays.asList(filters));
             pipeline.add(matchStage);
         }
         pipeline.add(sortStage);
@@ -423,7 +428,7 @@ public class ExportManager
                 if (markerCount != null && markerCount > 0)
                     progress.setCurrentStepProgress(nWrittenmarkerCount * 100l / markerCount);
                 future = writingThread.writeRuns(tempMarkerRunsToWrite);
-                tempMarkerRunsToWrite.clear();
+                tempMarkerRunsToWrite = new ArrayDeque<>(nQueryChunkSize); 
             }
             previousVarId = varId;
         }
