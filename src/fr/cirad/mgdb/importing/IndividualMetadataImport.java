@@ -53,6 +53,7 @@ import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.data.mongodb.core.query.Update;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.exc.UnrecognizedPropertyException;
 import com.fasterxml.jackson.databind.module.SimpleModule;
 import com.mongodb.bulk.BulkWriteResult;
 
@@ -703,7 +704,7 @@ public class IndividualMetadataImport {
                     sampleList.addAll(br.getResult().getData());
                     samplePager.paginate(br.getMetadata());
                 }
-            } catch (Exception e) {    // we did not get a searchResultDbId: see if we actually got results straight away
+            } catch (UnrecognizedPropertyException e) {    // we did not get a searchResultDbId: see if we actually got results straight away
                 try {
                     Response<SampleListResponse> response = service.searchSamplesDirectResult(reqBody).execute();
                     handleErrorCode(response.code());
@@ -721,9 +722,12 @@ public class IndividualMetadataImport {
                     return 0;
                 }
             }
+            catch (Throwable t) {
+            	progress.setError(endpointUrl + " - " + t.getMessage());
+            }
         }
 
-        progress.addStep("Getting germplasm information from " + endpointUrl);
+        progress.addStep("Getting sample information from " + endpointUrl);
         progress.moveToNextStep();
 
         //fill map with germplasmDbIds to get linked information
@@ -856,7 +860,7 @@ public class IndividualMetadataImport {
                 germplasmList.addAll(br.getResult().getData());
                 germplasmPager.paginate(br.getMetadata());
             }
-        } catch (Exception e1) {    // we did not get a searchResultDbId: see if we actually got results straight away
+        } catch (UnrecognizedPropertyException e1) {    // we did not get a searchResultDbId: see if we actually got results straight away
             try {
                 Response<GermplasmListResponse> response = service.searchGermplasmDirectResult(reqBody).execute();
                 handleErrorCode(response.code());
@@ -872,8 +876,10 @@ public class IndividualMetadataImport {
                 LOG.error(e1);
                 LOG.error(progress.getError(), e2);
                 return new ArrayList<>();
-
             }
+        }
+        catch (Throwable t) {
+        	progress.setError(endPointUrl + " - " + t.getMessage());
         }
 
         return germplasmList;
