@@ -207,7 +207,7 @@ public class InitialVariantImport {
                                 for (String syn : syns.split(";"))
                                     if (!syn.equals("."))
                                         synSet.add(syn);
-                                variant.getSynonyms().put(header.get(i), synSet);
+                                variant.putSynonyms(header.get(i), synSet);
                             }
                         }
                         unsavedVariants.add(variant);

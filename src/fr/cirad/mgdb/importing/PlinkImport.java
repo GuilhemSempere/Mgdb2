@@ -496,7 +496,9 @@ public class PlinkImport extends AbstractGenotypeImport {
 
                                     VariantRunData runToSave = addPlinkDataToVariant(mongoTemplate, variant, nAssemblyId, sequence, bpPosition, userIndividualToPopulationMap, nonSnpVariantTypeMap, alleles, project, sRun, providedIdToSampleMap, fImportUnknownVariants);
 
-                                    project.getSequences(nAssemblyId).add(variant.getReferencePosition(nAssemblyId).getSequence());
+                                    ReferencePosition rp = variant.getReferencePosition(nAssemblyId);
+                                    if (rp != null)
+                                    	project.getSequences(nAssemblyId).add(rp.getSequence());
                                     project.getAlleleCounts().add(variant.getKnownAlleles().size()); // it's a TreeSet so it will only be added if it's not already present
                                     if (variant.getKnownAlleles().size() > 2)
                                         LOG.warn("Variant " + variant.getId() + " (" + providedVariantId + ") has more than 2 alleles!");
@@ -508,7 +510,7 @@ public class PlinkImport extends AbstractGenotypeImport {
                                             unsavedRuns.add(runToSave);
                                     }
                                     else
-                                    	LOG.warn("Skipping variant " + variant.getId() + " positioned at " + variant.getReferencePosition(nAssemblyId).getSequence() + ":" + variant.getReferencePosition(nAssemblyId).getStartSite() + " because its alleles are not known");
+                                    	LOG.warn("Skipping variant " + variant.getId() + (rp != null ? " positioned at " + variant.getReferencePosition(nAssemblyId).getSequence() + ":" + variant.getReferencePosition(nAssemblyId).getStartSite() : "") + " because its alleles are not known");
 
                                     if (processedVariants % nNumberOfVariantsToSaveAtOnce == 0) {
                                         saveChunk(unsavedVariants, unsavedRuns, existingVariantIDs, mongoTemplate, progress, saveService);
