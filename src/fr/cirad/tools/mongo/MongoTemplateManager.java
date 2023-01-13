@@ -708,7 +708,9 @@ public class MongoTemplateManager implements ApplicationContextAware {
 	}
 
 	public static void unlockProjectForWriting(String sModule, String sProject) {
-		currentlyImportedProjects.get(sModule).remove(sProject);
+		Set<String> projects = currentlyImportedProjects.get(sModule);
+		if (projects != null)
+			projects.remove(sProject);
 	}
 
 	public static void lockModuleForWriting(String sModule) {
