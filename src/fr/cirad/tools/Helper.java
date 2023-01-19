@@ -401,10 +401,10 @@ public class Helper {
         }
     }
     
-    static public <T> List<Collection<T>> evenlySplitCollection(Collection<T> collection, int nChunkCount) {
+    static public <T> ArrayList<ArrayList<T>> evenlySplitCollection(Collection<T> collection, int nChunkCount) {
         int nChunkSize = (int) Math.ceil((float) collection.size() / nChunkCount), nCounter = 0;
-        List<Collection<T>> splitCollection = new ArrayList<>(nChunkCount);
-        Collection<T> currentChunk = null;
+        ArrayList<ArrayList<T>> splitCollection = new ArrayList<>(nChunkCount);
+        ArrayList<T> currentChunk = null;
         for (T variantRuns : collection) {
             if (nCounter++ % nChunkSize == 0) {
                 currentChunk = new ArrayList<>();
