@@ -25,6 +25,7 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map.Entry;
 import java.util.concurrent.CompletableFuture;
@@ -124,11 +125,11 @@ public class ExportManager
     
     private ArrayList<Document> projectFilterList = new ArrayList<>();
     
-    private int nAssemblyId;
+    private Integer nAssemblyId;
 
     public static final CodecRegistry pojoCodecRegistry = CodecRegistries.fromRegistries(MongoClientSettings.getDefaultCodecRegistry(), CodecRegistries.fromProviders(PojoCodecProvider.builder().register(new IntKeyMapPropertyCodecProvider()).automatic(true).build()));
     
-    public ExportManager(MongoTemplate mongoTemplate, int nAssemblyId, MongoCollection<Document> varColl, Class resultType, Document varQuery, Collection<GenotypingSample> samplesToExport, boolean fIncludeMetadata, int nQueryChunkSize, AbstractExportWritingThread writingThread, Long markerCount, FileWriter warningFileWriter, ProgressIndicator progress) {
+    public ExportManager(MongoTemplate mongoTemplate, Integer nAssemblyId, MongoCollection<Document> varColl, Class resultType, Document varQuery, Collection<GenotypingSample> samplesToExport, boolean fIncludeMetadata, int nQueryChunkSize, AbstractExportWritingThread writingThread, Long markerCount, FileWriter warningFileWriter, ProgressIndicator progress) {
         this.progress = progress;
         this.nQueryChunkSize = nQueryChunkSize;
         this.warningFileWriter = warningFileWriter;
@@ -142,7 +143,7 @@ public class ExportManager
         String varCollName = varColl.getNamespace().getCollectionName();
         fWorkingOnTempColl = varCollName.startsWith(MongoTemplateManager.TEMP_COLL_PREFIX);
 
-        String refPosPath = AbstractVariantData.FIELDNAME_REFERENCE_POSITION;
+        String refPosPath = AbstractVariantData.FIELDNAME_REFERENCE_POSITION + (this.nAssemblyId != null ? "." + nAssemblyId : "");
         sortStage = new BasicDBObject("$sort", new Document(refPosPath  + "." + ReferencePosition.FIELDNAME_SEQUENCE, 1).append(refPosPath + "." + ReferencePosition.FIELDNAME_START_SITE, 1));
 
         // optimization 1: filling in involvedProjectRuns will provide means to apply filtering on project and/or run fields when exporting from temporary collection
@@ -218,8 +219,7 @@ public class ExportManager
      * @throws ExecutionException
      */
     private void exportFromTempColl(int nAssemblyId) throws IOException, InterruptedException, ExecutionException {
-        CompletableFuture<Void> future = null;
-        Collection<Collection<VariantRunData>> tempMarkerRunsToWrite = new ArrayList<>(nQueryChunkSize);
+        CompletableFuture<Void> future = null;        
         List<VariantRunData> currentMarkerRuns = new ArrayList<>(involvedRunCount);
         List<String> currentMarkerIDs = new ArrayList<>(nQueryChunkSize);
         String varId = null, previousVarId = null;
@@ -233,7 +233,7 @@ public class ExportManager
         pipeline.add(sortStage);
         pipeline.add(new BasicDBObject("$project", new BasicDBObject("_id", 1)));
 
-        MongoCursor markerCursor = varColl.aggregate(pipeline, Document.class).collation(IExportHandler.collationObj).allowDiskUse(true).batchSize(nQueryChunkSize).iterator();   /*FIXME: didn't find a way to set noCursorTimeOut on aggregation cursors*/
+        MongoCursor<Document> markerCursor = varColl.aggregate(pipeline, Document.class).collation(IExportHandler.collationObj).allowDiskUse(true).batchSize(nQueryChunkSize).iterator();   /*FIXME: didn't find a way to set noCursorTimeOut on aggregation cursors*/
 
         // pipeline object will we re-used to query VariantRunData, we won't need the $project stage for that
         pipeline = new ArrayList<>();
@@ -250,9 +250,9 @@ public class ExportManager
                 return;
             }
             
-            currentMarkerIDs.add(((Document) markerCursor.next()).getString("_id"));
-            
-            if (currentMarkerIDs.size() >= nQueryChunkSize || !markerCursor.hasNext()) {
+            currentMarkerIDs.add(markerCursor.next().getString("_id"));
+                        
+            if (currentMarkerIDs.size() >= nQueryChunkSize || !markerCursor.hasNext()) {	// current variant ID list is large enough to start exporting chunk
                 nChunkIndex++;
 
                 BasicDBList matchAndList = new BasicDBList();
@@ -275,23 +275,25 @@ public class ExportManager
                 ArrayList<VariantRunData> runs = runColl.aggregate(pipeline, VariantRunData.class).allowDiskUse(true).into(new ArrayList<>(currentMarkerIDs.size())); // we don't use collation here because it leads to unexpected behaviour (sometimes fetches some additional variants to those in currentMarkerIDs) => we'll have to sort each chunk by hand
                 Collections.sort(runs, vrdComparator);    // make sure variants within this chunk are correctly sorted
                 
+                LinkedHashMap<String /*variant ID*/, Collection<VariantRunData>> chunkMarkerRunsToWrite = new LinkedHashMap<>(currentMarkerIDs.size());
+                for (String variantId : currentMarkerIDs)
+                	chunkMarkerRunsToWrite.put(variantId, null);	// there must be an entry for each exported variant
+                
                 for (VariantRunData vrd : runs) {
                     varId = vrd.getId().getVariantId();
                     
                     if (previousVarId != null && !varId.equals(previousVarId)) {
-                        tempMarkerRunsToWrite.add(currentMarkerRuns);
+                        chunkMarkerRunsToWrite.put(previousVarId, currentMarkerRuns);
                         currentMarkerRuns = new ArrayList<>(involvedRunCount);
-                        nWrittenmarkerCount++;
                     }
                     currentMarkerRuns.add(vrd);
                     previousVarId = varId;
                 }
-
-                if (!markerCursor.hasNext()) {    // special case, when the end of the cursor is being reached
-                    tempMarkerRunsToWrite.add(currentMarkerRuns);
-                    nWrittenmarkerCount++;
+                
+                if (!currentMarkerRuns.isEmpty()) {	// add runs for this chunk's last variant (among those we have data for)
+	                chunkMarkerRunsToWrite.put(previousVarId, currentMarkerRuns);
+	                currentMarkerRuns = new ArrayList<>(involvedRunCount);
                 }
-                currentMarkerIDs.clear();
 
                 if (nNumberOfChunksUsedForSpeedEstimation != null) {  // pipeline contains a $project stage that we need to assess: let's compare execution speed with and without it (best option depends on so many things that we can't find it out otherwise)
                     if (nChunkIndex == nNumberOfChunksUsedForSpeedEstimation) { // we just tested without $project, let's try with it now
@@ -316,10 +318,15 @@ public class ExportManager
 //                        LOG.debug(progress.getProcessId() + " waited " + delay + "ms before writing variant " + nWrittenmarkerCount/* + ", increasing nQueryChunkSize from " + nQueryChunkSize + " to " + nQueryChunkSize*2*/);
                 }
                 
+                nWrittenmarkerCount += currentMarkerIDs.size();
+                previousVarId = null;
+
                 if (markerCount != null)
                     progress.setCurrentStepProgress(nWrittenmarkerCount * 100l / markerCount);
-                future = writingThread.writeRuns(tempMarkerRunsToWrite);
-                tempMarkerRunsToWrite = new ArrayDeque<>(nQueryChunkSize); 
+                future = writingThread.writeChunkRuns(currentMarkerIDs, chunkMarkerRunsToWrite.values());
+                chunkMarkerRunsToWrite = new LinkedHashMap<>(nQueryChunkSize);
+                
+                currentMarkerIDs = new ArrayList<>(nQueryChunkSize);
             }
         }
 
@@ -427,7 +434,7 @@ public class ExportManager
 
                 if (markerCount != null && markerCount > 0)
                     progress.setCurrentStepProgress(nWrittenmarkerCount * 100l / markerCount);
-                future = writingThread.writeRuns(tempMarkerRunsToWrite);
+                future = writingThread.writeChunkRuns(null /* FIXME*/, tempMarkerRunsToWrite);
                 tempMarkerRunsToWrite = new ArrayDeque<>(nQueryChunkSize); 
             }
             previousVarId = varId;
