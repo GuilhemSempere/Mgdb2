@@ -66,6 +66,9 @@ abstract public class AbstractVariantData
     
     /** The Constant FIELDNAME_REFERENCE_POSITION. */
     public final static String FIELDNAME_REFERENCE_POSITION = "rp";
+
+    /** The Constant FIELDNAME_POSITIONS. */
+    public final static String FIELDNAME_POSITIONS = "p";
     
     /** The Constant FIELDNAME_PROJECT_DATA. */
     public final static String FIELDNAME_PROJECT_DATA = "pj";
@@ -125,11 +128,16 @@ abstract public class AbstractVariantData
     @BsonProperty(FIELDNAME_TYPE)
     @Field(FIELDNAME_TYPE)
     private String type;
-
+    
 	/** The reference positions. */
     @BsonProperty(FIELDNAME_REFERENCE_POSITION)
     @Field(FIELDNAME_REFERENCE_POSITION)
-    protected Map<Integer, ReferencePosition> referencePositions = new HashMap<>();
+    protected ReferencePosition referencePosition;
+
+	/** The reference positions. */
+    @BsonProperty(FIELDNAME_POSITIONS)
+    @Field(FIELDNAME_POSITIONS)
+    protected Map<Integer, ReferencePosition> positions = new HashMap<>();
 	
 	/** The synonyms. */
 	@BsonProperty(FIELDNAME_SYNONYMS)
@@ -426,8 +434,8 @@ abstract public class AbstractVariantData
      *
      * @return the reference positions
      */
-    public Map<Integer, ReferencePosition> getReferencePositions() {
-        return referencePositions;
+    public Map<Integer, ReferencePosition> getPositions() {
+        return positions;
     }
     
     /**
@@ -435,17 +443,17 @@ abstract public class AbstractVariantData
      *
      * @return the reference position
      */
-    public ReferencePosition getReferencePosition(int nAssemblyId) {
-        return referencePositions.get(nAssemblyId);
+    public ReferencePosition getReferencePosition(Integer nAssemblyId) {
+        return nAssemblyId == null ? referencePosition : positions.get(nAssemblyId);
     }
 
     /**
      * Sets the reference positions.
      *
-     * @param referencePositions the new reference position
+     * @param positions the new reference position
      */
-    public void setReferencePositions(Map<Integer, ReferencePosition> referencePositions) {
-        this.referencePositions = referencePositions;
+    public void setPositions(Map<Integer, ReferencePosition> positions) {
+        this.positions = positions;
     }    
 
     /**
@@ -453,8 +461,11 @@ abstract public class AbstractVariantData
      *
      * @param referencePosition the new reference position
      */
-    public void setReferencePosition(int nAssemblyId, ReferencePosition referencePosition) {
-        referencePositions.put(nAssemblyId, referencePosition);
+    public void setReferencePosition(Integer nAssemblyId, ReferencePosition referencePosition) {
+    	if (nAssemblyId == null)
+    		this.referencePosition = referencePosition;
+    	else
+    		positions.put(nAssemblyId, referencePosition);
     }
 	
     /**
@@ -728,7 +739,7 @@ abstract public class AbstractVariantData
             }
 
 //<<<<<<< HEAD
-//		ReferencePosition referencePosition = referencePositions.get(nAssemblyId);
+//		ReferencePosition referencePosition = positions.get(nAssemblyId);
 //		Long start = referencePosition == null ? null : referencePosition.getStartSite();
 //		Long stop = null;
 //		if (referencePosition != null) {
@@ -829,7 +840,7 @@ abstract public class AbstractVariantData
         VariantRunData run = runsWhereDataWasFound.size() == 1 ? runsWhereDataWasFound.iterator().next() : null;    // if there is not exactly one run involved then we do not export meta-data
         String source = run == null ? null : (String) run.getAdditionalInfo().get(FIELD_SOURCE);
 
-        ReferencePosition referencePosition = referencePositions.get(nAssemblyId);
+        ReferencePosition referencePosition = positions.get(nAssemblyId);
         Long start = referencePosition == null ? null : referencePosition.getStartSite();
         Long stop = null;
         if (referencePosition != null) {

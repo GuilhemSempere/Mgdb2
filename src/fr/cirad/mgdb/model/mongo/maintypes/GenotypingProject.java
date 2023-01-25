@@ -81,6 +81,11 @@ public class GenotypingProject {
      * The Constant FIELDNAME_SEQUENCES.
      */
     public static final String FIELDNAME_SEQUENCES = "ch";
+    
+    /**
+     * The Constant FIELDNAME_CONTIGS.
+     */
+    public static final String FIELDNAME_CONTIGS = "c";
 
     /**
      * The Constant FIELDNAME_RUNS.
@@ -165,8 +170,14 @@ public class GenotypingProject {
     /**
      * The sequences.
      */
-    @Field(FIELDNAME_SEQUENCES) /*TODO: not backwards compatible*/
-    private Map<Integer, TreeSet<String>> sequences = new HashMap<>();
+    @Field(FIELDNAME_SEQUENCES)
+    private TreeSet<String> sequences = new TreeSet<String>(new AlphaNumericComparator());
+    
+    /**
+     * The sequences.
+     */
+    @Field(FIELDNAME_CONTIGS) /*TODO: not backwards compatible*/
+    private Map<Integer, TreeSet<String>> contigs = new HashMap<>();
 
     /**
      * The allele counts.
@@ -360,26 +371,38 @@ public class GenotypingProject {
     public List<String> getRuns() {
         return runs;
     }
-
+    
     /**
-     * Gets the sequences by assembly ID.
+     * Gets the sequences.
      *
-     * @return the sequences by assembly ID
+     * @return the sequences
      */
-    public Map<Integer, TreeSet<String>> getSequencesByAssembly() {
+    public TreeSet<String> getSequences() {
         return sequences;
     }
 
     /**
-     * Gets the sequences for a given assembly ID.
+     * Gets the contigs by assembly ID.
      *
-     * @return the sequences for a given assembly ID
+     * @return the contigs by assembly ID
      */
-    public TreeSet<String> getSequences(int nAssemblyId) {
-        TreeSet<String> seqs = sequences.get(nAssemblyId);
+    public Map<Integer, TreeSet<String>> getContigs() {
+        return contigs;
+    }
+
+    /**
+     * Gets the contigs for a given assembly ID.
+     *
+     * @return the contigs for a given assembly ID
+     */
+    public TreeSet<String> getContigs(Integer nAssemblyId) {
+    	if (nAssemblyId == null)
+    		return getSequences();
+
+        TreeSet<String> seqs = contigs.get(nAssemblyId);
         if (seqs == null) {
             seqs = new TreeSet<String>(new AlphaNumericComparator());
-            sequences.put(nAssemblyId, seqs);
+            contigs.put(nAssemblyId, seqs);
         }
         return seqs;
     }
@@ -426,7 +449,8 @@ public class GenotypingProject {
 		getAlleleCounts().clear();
 		getEffectAnnotations().clear();
 		getVariantTypes().clear();
-		getSequencesByAssembly().clear();
+		getSequences().clear();
+		getContigs().clear();
 		setPloidyLevel(0);
 		getAdditionalInfo().clear();
     }
