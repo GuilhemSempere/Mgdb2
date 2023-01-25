@@ -269,11 +269,6 @@ public class PlinkImport extends AbstractGenotypeImport {
             LinkedHashMap<String, String> variantsAndPositions = PlinkEigenstratTool.getVariantsAndPositionsFromPlinkMapFile(mapFileURL, redundantVariantIndexes, "\t");
             String[] variants = variantsAndPositions.keySet().toArray(new String[variantsAndPositions.size()]);
 
-            info = "Checking genotype consistency";
-//          LOG.info(info);
-            progress.addStep(info);
-            progress.moveToNextStep();
-
             // rotate matrix using temporary files
             info = "Reading and reorganizing genotypes";
             LOG.info(info);
@@ -778,7 +773,13 @@ public class PlinkImport extends AbstractGenotypeImport {
                                             outputFileSeparatorPattern.splitAsStream(variantLine)
                                                 .filter(allele -> !"0".equals(allele))
                                                 .distinct()
-                                                .map(allele -> Allele.create(allele))
+                                                .map(allele -> {
+                                                					try {
+                                                						return Allele.create(allele);
+						                                            } catch (IllegalArgumentException e) {
+						                                            	throw new IllegalArgumentException("Variant " + variantName + " - " + e.getClass().getName() + ": " + e.getMessage());
+						                                            }
+                                                				})
                                                 .collect(Collectors.toList());
 
                                     if (!alleleList.isEmpty()) {
