@@ -377,9 +377,9 @@ public class GenotypingProject {
      *
      * @return the sequences
      */
-    public TreeSet<String> getSequences() {
-        return sequences;
-    }
+//    public TreeSet<String> getSequences() {
+//        return sequences;
+//    }
 
     /**
      * Gets the contigs by assembly ID.
@@ -397,7 +397,7 @@ public class GenotypingProject {
      */
     public TreeSet<String> getContigs(Integer nAssemblyId) {
     	if (nAssemblyId == null)
-    		return getSequences();
+    		return sequences;
 
         TreeSet<String> seqs = contigs.get(nAssemblyId);
         if (seqs == null) {
@@ -449,8 +449,9 @@ public class GenotypingProject {
 		getAlleleCounts().clear();
 		getEffectAnnotations().clear();
 		getVariantTypes().clear();
-		getSequences().clear();
-		getContigs().clear();
+		sequences.clear();
+		if (getContigs() != null)
+			getContigs().clear();
 		setPloidyLevel(0);
 		getAdditionalInfo().clear();
     }

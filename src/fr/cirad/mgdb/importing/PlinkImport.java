@@ -406,6 +406,7 @@ public class PlinkImport extends AbstractGenotypeImport {
             Thread[] importThreads = new Thread[nImportThreads];
             BlockingQueue<Runnable> saveServiceQueue = new LinkedBlockingQueue<Runnable>(saveServiceQueueLength(nNConcurrentThreads));
             ExecutorService saveService = new ThreadPoolExecutor(1, saveServiceThreads(nNConcurrentThreads), 30, TimeUnit.SECONDS, saveServiceQueue, new ThreadPoolExecutor.CallerRunsPolicy());
+            final TreeSet<String> contigs = project.getContigs(nAssemblyId);
 
             for (int threadIndex = 0; threadIndex < nImportThreads; threadIndex++) {
                 importThreads[threadIndex] = new Thread() {
@@ -493,7 +494,7 @@ public class PlinkImport extends AbstractGenotypeImport {
 
                                     ReferencePosition rp = variant.getReferencePosition(nAssemblyId);
                                     if (rp != null)
-                                    	project.getSequences(nAssemblyId).add(rp.getSequence());
+                                    	contigs.add(rp.getSequence());
                                     project.getAlleleCounts().add(variant.getKnownAlleles().size()); // it's a TreeSet so it will only be added if it's not already present
                                     if (variant.getKnownAlleles().size() > 2)
                                         LOG.warn("Variant " + variant.getId() + " (" + providedVariantId + ") has more than 2 alleles!");
@@ -889,7 +890,7 @@ public class PlinkImport extends AbstractGenotypeImport {
         }
 
         vrd.setKnownAlleles(variantToFeed.getKnownAlleles());
-        vrd.setReferencePositions(variantToFeed.getReferencePositions());
+        vrd.setPositions(variantToFeed.getPositions());
         vrd.setType(variantToFeed.getType());
         vrd.setSynonyms(variantToFeed.getSynonyms());
         return vrd;
