@@ -24,6 +24,7 @@ import java.io.InputStreamReader;
 import java.net.URL;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -392,6 +393,7 @@ public class FlapjackImport extends AbstractGenotypeImport {
             Thread[] importThreads = new Thread[nImportThreads];
             BlockingQueue<Runnable> saveServiceQueue = new LinkedBlockingQueue<Runnable>(saveServiceQueueLength(nNConcurrentThreads));
             ExecutorService saveService = new ThreadPoolExecutor(1, saveServiceThreads(nNConcurrentThreads), 30, TimeUnit.SECONDS, saveServiceQueue, new ThreadPoolExecutor.CallerRunsPolicy());
+            final Collection<Assembly> assemblies = mongoTemplate.findAll(Assembly.class);
 
             for (int threadIndex = 0; threadIndex < nImportThreads; threadIndex++) {
                 importThreads[threadIndex] = new Thread() {
@@ -452,8 +454,11 @@ public class FlapjackImport extends AbstractGenotypeImport {
 
                                     VariantRunData runToSave = addFlapjackDataToVariant(mongoTemplate, variant, nAssemblyId, position, individuals, nonSnpVariantTypeMap, alleles, project, sRun, providedIdToSampleMap, fImportUnknownVariants);
 
-                                    if (variant.getReferencePosition(nAssemblyId) != null)
-                                        project.getSequences(nAssemblyId).add(variant.getReferencePosition(nAssemblyId).getSequence());
+                                    for (Assembly assembly : assemblies) {
+                                        ReferencePosition rp = variant.getReferencePosition(assembly.getId());
+                                        if (rp != null)
+                                        	project.getContigs(assembly.getId()).add(rp.getSequence());
+                                    }
 
                                     project.getAlleleCounts().add(variant.getKnownAlleles().size()); // it's a TreeSet so it will only be added if it's not already present
                                     // FIXME ?
@@ -897,12 +902,12 @@ public class FlapjackImport extends AbstractGenotypeImport {
                 variantToFeed.setType(sVariantType);
                 project.getVariantTypes().add(sVariantType);
             }
-            else if (Type.NO_VARIATION != variantType && !variantToFeed.getType().equals(sVariantType))
+            else if (null != variantType && Type.NO_VARIATION != variantType && !variantToFeed.getType().equals(sVariantType))
                 throw new Exception("Variant type mismatch between existing data and data to import: " + variantToFeed.getId());
         }
 
         vrd.setKnownAlleles(variantToFeed.getKnownAlleles());
-        vrd.setReferencePositions(variantToFeed.getReferencePositions());
+        vrd.setPositions(variantToFeed.getPositions());
         vrd.setType(variantToFeed.getType());
         vrd.setSynonyms(variantToFeed.getSynonyms());
         return vrd;

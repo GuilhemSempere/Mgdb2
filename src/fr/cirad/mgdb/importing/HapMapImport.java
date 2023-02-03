@@ -20,6 +20,7 @@ import java.io.File;
 import java.net.URL;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -287,6 +288,8 @@ public class HapMapImport extends AbstractGenotypeImport {
             Iterator<RawHapMapFeature> it = reader.iterator();
             BlockingQueue<Runnable> saveServiceQueue = new LinkedBlockingQueue<Runnable>(saveServiceQueueLength(nNConcurrentThreads));
             ExecutorService saveService = new ThreadPoolExecutor(1, saveServiceThreads(nNConcurrentThreads), 30, TimeUnit.SECONDS, saveServiceQueue, new ThreadPoolExecutor.CallerRunsPolicy());
+            final Collection<Assembly> assemblies = mongoTemplate.findAll(Assembly.class);
+
             int nImportThreads = Math.max(1, nNConcurrentThreads - 1);
             Thread[] importThreads = new Thread[nImportThreads];
             boolean fDbAlreadyContainedVariants = mongoTemplate.findOne(new Query() {{ fields().include("_id"); }}, VariantData.class) != null;
@@ -396,7 +399,13 @@ public class HapMapImport extends AbstractGenotypeImport {
                                     }
                 
                 					VariantRunData runToSave = addHapMapDataToVariant(finalMongoTemplate, variant, finalAssembly.getId(), variantType, alleleIndexMap, hmFeature, finalProject, sRun, providedIdToSampleMap, sampleIds);
-                					finalProject.getSequences(finalAssembly.getId()).add(hmFeature.getChr());
+
+                                    for (Assembly assembly : assemblies) {
+                                        ReferencePosition rp = variant.getReferencePosition(assembly.getId());
+                                        if (rp != null)
+                                        	finalProject.getContigs(assembly.getId()).add(rp.getSequence());
+                                    }
+                					
                 					finalProject.getAlleleCounts().add(variant.getKnownAlleles().size());	// it's a TreeSet so it will only be added if it's not already present
                 					
                 					if (variant.getKnownAlleles().size() > 0)
@@ -498,7 +507,7 @@ public class HapMapImport extends AbstractGenotypeImport {
 
 		if (variantToFeed.getType() == null || Type.NO_VARIATION.toString().equals(variantToFeed.getType()))
 			variantToFeed.setType(variantType.toString());
-		else if (Type.NO_VARIATION != variantType && !variantToFeed.getType().equals(variantType.toString()))
+		else if (null != variantType && Type.NO_VARIATION != variantType && !variantToFeed.getType().equals(variantType.toString()))
 			throw new Exception("Variant type mismatch between existing data and data to import: " + variantToFeed.getId());
 
         if (variantToFeed.getReferencePosition(nAssemblyId) == null)    // otherwise we leave it as it is (had some trouble with overridden end-sites)
@@ -557,7 +566,7 @@ public class HapMapImport extends AbstractGenotypeImport {
 
 		project.getVariantTypes().add(variantType.toString());
         vrd.setKnownAlleles(variantToFeed.getKnownAlleles());
-        vrd.setReferencePositions(variantToFeed.getReferencePositions());
+        vrd.setPositions(variantToFeed.getPositions());
         vrd.setType(variantToFeed.getType());
         vrd.setSynonyms(variantToFeed.getSynonyms());
 		return vrd;

@@ -723,7 +723,7 @@ public class BrapiImport extends AbstractGenotypeImport {
 			ArrayList<String> unsavedVariants = new ArrayList<String>();
 			Map<String, GenotypingSample> previouslyCreatedSamples = new TreeMap<>();	// will auto-magically remove all duplicates, and sort data, cool eh?
             Map<Integer, TreeSet<String>> affectedSequencesByAssembly = new HashMap<>();    // will contain all sequences containing variants for which we are going to add genotypes
-			Collection<Assembly> assemblies = mongoTemplate.findAll(Assembly.class);
+            mongoTemplate.findAll(Assembly.class).stream().forEach(asm -> affectedSequencesByAssembly.put(asm.getId(), null));
 			HashMap<String /*individual*/, String> phasingGroup = new HashMap<>();
 			do {
 	            if (progress.getError() != null || progress.isAborted())
@@ -754,8 +754,11 @@ public class BrapiImport extends AbstractGenotypeImport {
 			// save project data
             if (!project.getVariantTypes().contains(Type.SNP.toString()))
                 project.getVariantTypes().add(Type.SNP.toString());
-            for (Assembly anAssembly : assemblies)
-                project.getSequences(anAssembly.getId()).addAll(affectedSequencesByAssembly.get(anAssembly.getId()));
+            for (Integer anAssemblyId : affectedSequencesByAssembly.keySet()) {
+            	TreeSet<String> affectedSequencesForssembly = affectedSequencesByAssembly.get(anAssemblyId);
+            	if (affectedSequencesForssembly != null)
+            		project.getContigs(anAssemblyId).addAll(affectedSequencesForssembly);
+            }
             if (!project.getRuns().contains(sRun))
                 project.getRuns().add(sRun);
 			mongoTemplate.save(project);	// always save project before samples otherwise the sample cleaning procedure in MgdbDao.prepareDatabaseForSearches may remove them if called in the meantime
@@ -788,13 +791,13 @@ public class BrapiImport extends AbstractGenotypeImport {
 			
 			VariantData variant = mongoTemplate.findOne(query, VariantData.class);
 			Update update = variant == null ? null : new Update();
-            for (Integer assemblyId : variant.getReferencePositions().keySet()) {
-                ReferencePosition rp = variant.getReferencePositions().get(assemblyId);
+        	for (Integer anAssemblyId : affectedSequencesByAssembly.keySet()) {
+                ReferencePosition rp = variant.getPositions().get(anAssemblyId);
                 if (rp != null) {
-                    TreeSet<String> affectedSequencesForAssembly = affectedSequencesByAssembly.get(assemblyId);
+                    TreeSet<String> affectedSequencesForAssembly = affectedSequencesByAssembly.get(anAssemblyId);
                     if (affectedSequencesForAssembly == null) {
                         affectedSequencesForAssembly = new TreeSet<>();
-                        affectedSequencesByAssembly.put(assemblyId, affectedSequencesForAssembly);
+                        affectedSequencesByAssembly.put(anAssemblyId, affectedSequencesForAssembly);
                     }
                     affectedSequencesForAssembly.add(rp.getSequence());
                 }
@@ -886,7 +889,7 @@ public class BrapiImport extends AbstractGenotypeImport {
 					mongoTemplate.upsert(new Query(Criteria.where("_id").is(mgdbVariantId)).addCriteria(Criteria.where(VariantData.FIELDNAME_VERSION).is(variant.getVersion())), update, VariantData.class);
 				}
 		        vrd.setKnownAlleles(variant.getKnownAlleles());
-		        vrd.setReferencePositions(variant.getReferencePositions());
+		        vrd.setPositions(variant.getPositions());
 		        vrd.setType(variant.getType());
 		        vrd.setSynonyms(variant.getSynonyms());
 				mongoTemplate.save(vrd);

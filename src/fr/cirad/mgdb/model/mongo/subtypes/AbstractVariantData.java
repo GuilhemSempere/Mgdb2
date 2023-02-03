@@ -840,7 +840,7 @@ abstract public class AbstractVariantData
         VariantRunData run = runsWhereDataWasFound.size() == 1 ? runsWhereDataWasFound.iterator().next() : null;    // if there is not exactly one run involved then we do not export meta-data
         String source = run == null ? null : (String) run.getAdditionalInfo().get(FIELD_SOURCE);
 
-        ReferencePosition referencePosition = positions.get(nAssemblyId);
+        ReferencePosition referencePosition = getReferencePosition(nAssemblyId);
         Long start = referencePosition == null ? null : referencePosition.getStartSite();
         Long stop = null;
         if (referencePosition != null) {

@@ -31,6 +31,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
 import java.util.TreeSet;
+import java.util.stream.Collectors;
 
 import org.apache.commons.lang.StringUtils;
 import org.apache.log4j.Logger;
@@ -239,7 +240,7 @@ public class STDVariantImport extends AbstractGenotypeImport {
 			ArrayList<String> linesForVariant = new ArrayList<String>(), unsavedVariants = new ArrayList<String>();
 			TreeMap<String /* individual name */, GenotypingSample> previouslyCreatedSamples = new TreeMap<>();	// will auto-magically remove all duplicates, and sort data, cool eh?
             Map<Integer, TreeSet<String>> affectedSequencesByAssembly = new HashMap<>();    // will contain all sequences containing variants for which we are going to add genotypes
-            Collection<Assembly> assemblies = mongoTemplate.findAll(Assembly.class);
+            mongoTemplate.findAll(Assembly.class).stream().forEach(asm -> affectedSequencesByAssembly.put(asm.getId(), null));
 			do
 			{
 				if (sLine.length() > 0)
@@ -294,8 +295,11 @@ public class STDVariantImport extends AbstractGenotypeImport {
 			// save project data
             if (!project.getVariantTypes().contains(Type.SNP.toString()))
                 project.getVariantTypes().add(Type.SNP.toString());
-            for (Assembly anAssembly : assemblies)
-                project.getSequences(anAssembly.getId()).addAll(affectedSequencesByAssembly.get(anAssembly.getId()));
+            for (Integer anAssemblyId : affectedSequencesByAssembly.keySet()) {
+            	TreeSet<String> affectedSequencesForssembly = affectedSequencesByAssembly.get(anAssemblyId);
+            	if (affectedSequencesForssembly != null)
+            		project.getContigs(anAssemblyId).addAll(affectedSequencesForssembly);
+            }
             if (!project.getRuns().contains(sRun))
                 project.getRuns().add(sRun);
             if (project.getPloidyLevel() == 0)
@@ -347,13 +351,13 @@ public class STDVariantImport extends AbstractGenotypeImport {
                 variant.setType(Type.SNP.toString());
             }
             else
-                for (Integer assemblyId : variant.getReferencePositions().keySet()) {
-                    ReferencePosition rp = variant.getReferencePositions().get(assemblyId);
+            	for (Integer anAssemblyId : affectedSequencesByAssembly.keySet()) {
+                    ReferencePosition rp = variant.getPositions().get(anAssemblyId);
                     if (rp != null) {
-                        TreeSet<String> affectedSequencesForAssembly = affectedSequencesByAssembly.get(assemblyId);
+                        TreeSet<String> affectedSequencesForAssembly = affectedSequencesByAssembly.get(anAssemblyId);
                         if (affectedSequencesForAssembly == null) {
                             affectedSequencesForAssembly = new TreeSet<>();
-                            affectedSequencesByAssembly.put(assemblyId, affectedSequencesForAssembly);
+                            affectedSequencesByAssembly.put(anAssemblyId, affectedSequencesForAssembly);
                         }
                         affectedSequencesForAssembly.add(rp.getSequence());
                     }
@@ -444,7 +448,7 @@ public class STDVariantImport extends AbstractGenotypeImport {
                 }
 
                 vrd.setKnownAlleles(variant.getKnownAlleles());
-                vrd.setReferencePositions(variant.getReferencePositions());
+                vrd.setPositions(variant.getPositions());
                 vrd.setType(Type.SNP.toString());
                 vrd.setSynonyms(variant.getSynonyms());
                 mongoTemplate.save(vrd);

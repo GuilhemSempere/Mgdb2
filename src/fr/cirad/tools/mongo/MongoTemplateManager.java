@@ -32,6 +32,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.MissingResourceException;
+import java.util.NoSuchElementException;
 import java.util.Properties;
 import java.util.Set;
 import java.util.TreeMap;
@@ -698,7 +699,10 @@ public class MongoTemplateManager implements ApplicationContextAware {
 	}
 
 	public static void unlockProjectForWriting(String sModule, String sProject) {
-		currentlyImportedProjects.get(sModule).remove(sProject);
+		Set<String> moduleLockedProjects = currentlyImportedProjects.get(sModule);
+		if (moduleLockedProjects == null)
+			throw new NoSuchElementException("There are currently no locked projects in database " + sModule);
+		moduleLockedProjects.remove(sProject);
 	}
 
 	public static void lockModuleForWriting(String sModule) {

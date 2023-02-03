@@ -143,7 +143,7 @@ public class ExportManager
         String varCollName = varColl.getNamespace().getCollectionName();
         fWorkingOnTempColl = varCollName.startsWith(MongoTemplateManager.TEMP_COLL_PREFIX);
 
-        String refPosPath = AbstractVariantData.FIELDNAME_REFERENCE_POSITION + (this.nAssemblyId != null ? "." + nAssemblyId : "");
+        String refPosPath = nAssemblyId != null ? AbstractVariantData.FIELDNAME_POSITIONS + "." + nAssemblyId : AbstractVariantData.FIELDNAME_REFERENCE_POSITION;
         sortStage = new BasicDBObject("$sort", new Document(refPosPath  + "." + ReferencePosition.FIELDNAME_SEQUENCE, 1).append(refPosPath + "." + ReferencePosition.FIELDNAME_START_SITE, 1));
 
         // optimization 1: filling in involvedProjectRuns will provide means to apply filtering on project and/or run fields when exporting from temporary collection

@@ -20,6 +20,7 @@ import java.io.File;
 import java.net.URL;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -303,6 +304,8 @@ public class VcfImport extends AbstractGenotypeImport {
 
             BlockingQueue<Runnable> saveServiceQueue = new LinkedBlockingQueue<Runnable>(saveServiceQueueLength(nNConcurrentThreads));
             ExecutorService saveService = new ThreadPoolExecutor(1, saveServiceThreads(nNConcurrentThreads), 30, TimeUnit.SECONDS, saveServiceQueue, new ThreadPoolExecutor.CallerRunsPolicy());
+            final Collection<Assembly> assemblies = mongoTemplate.findAll(Assembly.class);
+            
             List<VariantContextHologram> vcChunk = new ArrayList<>();
             HashMap<String /*individual*/, Comparable> phasingGroups = new HashMap<String /*individual*/, Comparable>();
             final ConcurrentLinkedDeque<Thread> importThreads = new ConcurrentLinkedDeque<>();
@@ -393,7 +396,12 @@ public class VcfImport extends AbstractGenotypeImport {
 
                                     finalProject.getAlleleCounts().add(variant.getKnownAlleles().size());    // it's a Set so it will only be added if it's not already present
                                     finalProject.getVariantTypes().add(vcfEntry.getType().toString());   // it's a Set so it will only be added if it's not already present
-                                    finalProject.getSequences(nAssemblyId).add(vcfEntry.getContig());  // it's a Set so it will only be added if it's not already present
+
+                                    for (Assembly assembly : assemblies) {
+                                        ReferencePosition rp = variant.getReferencePosition(assembly.getId());
+                                        if (rp != null)
+                                        	finalProject.getContigs(assembly.getId()).add(rp.getSequence());
+                                    }
                                 }
 
                                 saveChunk(unsavedVariants, unsavedRuns, existingVariantIDs, finalMongoTemplate, progress, saveService);
@@ -481,7 +489,7 @@ public class VcfImport extends AbstractGenotypeImport {
     {
         if (variantToFeed.getType() == null || Type.NO_VARIATION.toString().equals(variantToFeed.getType()))
             variantToFeed.setType(vc.getType().toString());
-        else if (Type.NO_VARIATION != vc.getType() && !variantToFeed.getType().equals(vc.getType().toString()))
+        else if (null != vc.getType() && Type.NO_VARIATION != vc.getType() && !variantToFeed.getType().equals(vc.getType().toString()))
             throw new Exception("Variant type mismatch between existing data and data to import: " + variantToFeed.getId());
 
         List<String> knownAlleleList = new ArrayList<String>();
@@ -632,7 +640,7 @@ public class VcfImport extends AbstractGenotypeImport {
         }
 
         vrd.setKnownAlleles(variantToFeed.getKnownAlleles());
-        vrd.setReferencePositions(variantToFeed.getReferencePositions());
+        vrd.setPositions(variantToFeed.getPositions());
         vrd.setType(variantToFeed.getType());
         vrd.setSynonyms(variantToFeed.getSynonyms());
         return vrd;

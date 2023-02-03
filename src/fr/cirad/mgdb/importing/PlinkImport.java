@@ -220,19 +220,20 @@ public class PlinkImport extends AbstractGenotypeImport {
             if (mongoTemplate == null)
                 throw new Exception("DATASOURCE '" + sModule + "' is not supported!");
         }
+
+        fImportUnknownVariants = doesDatabaseSupportImportingUnknownVariants(sModule);
+
+        if (m_processID == null)
+            m_processID = "IMPORT__" + sModule + "__" + sProject + "__" + sRun + "__" + System.currentTimeMillis();
+
+        GenotypingProject project = mongoTemplate.findOne(new Query(Criteria.where(GenotypingProject.FIELDNAME_NAME).is(sProject)), GenotypingProject.class);
+        if (importMode == 0 && project != null && project.getPloidyLevel() != 2)
+            throw new Exception("Ploidy levels differ between existing (" + project.getPloidyLevel() + ") and provided (" + 2 + ") data!");
+
+        MongoTemplateManager.lockProjectForWriting(sModule, sProject);
+
         try
         {
-            fImportUnknownVariants = doesDatabaseSupportImportingUnknownVariants(sModule);
-
-            if (m_processID == null)
-                m_processID = "IMPORT__" + sModule + "__" + sProject + "__" + sRun + "__" + System.currentTimeMillis();
-
-            GenotypingProject project = mongoTemplate.findOne(new Query(Criteria.where(GenotypingProject.FIELDNAME_NAME).is(sProject)), GenotypingProject.class);
-            if (importMode == 0 && project != null && project.getPloidyLevel() != 2)
-                throw new Exception("Ploidy levels differ between existing (" + project.getPloidyLevel() + ") and provided (" + 2 + ") data!");
-
-            MongoTemplateManager.lockProjectForWriting(sModule, sProject);
-
             cleanupBeforeImport(mongoTemplate, sModule, project, importMode, sRun);
 
             Integer createdProject = null;
@@ -406,7 +407,8 @@ public class PlinkImport extends AbstractGenotypeImport {
             Thread[] importThreads = new Thread[nImportThreads];
             BlockingQueue<Runnable> saveServiceQueue = new LinkedBlockingQueue<Runnable>(saveServiceQueueLength(nNConcurrentThreads));
             ExecutorService saveService = new ThreadPoolExecutor(1, saveServiceThreads(nNConcurrentThreads), 30, TimeUnit.SECONDS, saveServiceQueue, new ThreadPoolExecutor.CallerRunsPolicy());
-            final TreeSet<String> contigs = project.getContigs(nAssemblyId);
+            
+            final Collection<Assembly> assemblies = mongoTemplate.findAll(Assembly.class);
 
             for (int threadIndex = 0; threadIndex < nImportThreads; threadIndex++) {
                 importThreads[threadIndex] = new Thread() {
@@ -492,9 +494,12 @@ public class PlinkImport extends AbstractGenotypeImport {
 
                                     VariantRunData runToSave = addPlinkDataToVariant(mongoTemplate, variant, nAssemblyId, sequence, bpPosition, userIndividualToPopulationMap, nonSnpVariantTypeMap, alleles, project, sRun, providedIdToSampleMap, fImportUnknownVariants);
 
-                                    ReferencePosition rp = variant.getReferencePosition(nAssemblyId);
-                                    if (rp != null)
-                                    	contigs.add(rp.getSequence());
+                                    for (Assembly assembly : assemblies) {
+                                        ReferencePosition rp = variant.getReferencePosition(assembly.getId());
+                                        if (rp != null)
+                                        	project.getContigs(assembly.getId()).add(rp.getSequence());
+                                  }
+
                                     project.getAlleleCounts().add(variant.getKnownAlleles().size()); // it's a TreeSet so it will only be added if it's not already present
                                     if (variant.getKnownAlleles().size() > 2)
                                         LOG.warn("Variant " + variant.getId() + " (" + providedVariantId + ") has more than 2 alleles!");
@@ -505,8 +510,10 @@ public class PlinkImport extends AbstractGenotypeImport {
                                         if (!unsavedRuns.contains(runToSave))
                                             unsavedRuns.add(runToSave);
                                     }
-                                    else
-                                    	LOG.warn("Skipping variant " + variant.getId() + (rp != null ? " positioned at " + variant.getReferencePosition(nAssemblyId).getSequence() + ":" + variant.getReferencePosition(nAssemblyId).getStartSite() : "") + " because its alleles are not known");
+                                    else {
+                                    	ReferencePosition rp = variant.getReferencePosition(nAssemblyId);
+                                    	LOG.warn("Skipping variant " + variant.getId() + (rp != null ? " positioned at " + rp.getSequence() + ":" + rp.getStartSite() : "") + " because its alleles are not known");
+                                    }
 
                                     if (processedVariants % nNumberOfVariantsToSaveAtOnce == 0) {
                                         saveChunk(unsavedVariants, unsavedRuns, existingVariantIDs, mongoTemplate, progress, saveService);
@@ -885,7 +892,7 @@ public class PlinkImport extends AbstractGenotypeImport {
                 variantToFeed.setType(sVariantType);
                 project.getVariantTypes().add(sVariantType);
             }
-            else if (Type.NO_VARIATION != variantType && !variantToFeed.getType().equals(sVariantType))
+            else if (null != variantType && Type.NO_VARIATION != variantType && !variantToFeed.getType().equals(sVariantType))
                 throw new Exception("Variant type mismatch between existing data and data to import: " + variantToFeed.getId());
         }
 
