@@ -439,6 +439,15 @@ abstract public class AbstractVariantData
     }
     
     /**
+     * Gets the default reference position.
+     *
+     * @return the default reference position
+     */
+    public ReferencePosition getDefaultReferencePosition() {
+        return referencePosition != null ? referencePosition : (positions.isEmpty() ? null : positions.entrySet().iterator().next().getValue());
+    }
+    
+    /**
      * Gets the reference position for a given assembly ID.
      *
      * @return the reference position
