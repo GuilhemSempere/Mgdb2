@@ -33,42 +33,43 @@ import org.apache.log4j.Logger;
 public class ProgressIndicator
 {
 	
-	/** The Constant LOG. */
 	private static final Logger LOG = Logger.getLogger(ProgressIndicator.class);
 	
-	/** The Constant progressIndicators. */
 	static private final HashMap<String, ProgressIndicator> progressIndicators = new HashMap<String, ProgressIndicator>();
 	
 	/** The m_process id. */
 	private String m_processId;
 	
-	/** The m_current step progress. */
+	/** The current step progress. */
 	private long m_currentStepProgress = 0;
 	
-	/** The m_current step number. */
+	/** The current step number. */
 	private short m_currentStepNumber = 0;
 	
-	/** The m_step labels. */
+	/** The step labels. */
 	private List<String> m_stepLabels = new ArrayList<String>();
 	
-	/** The m_error. */
+	/** The error message if any. */
 	private String m_error = null;
 	
-	/** The m_notification email. */
+	/** The notification email. */
 	private String m_notificationEmail = null;
 	
-	/** The m_description. */
+	/** The description. */
 	private String m_description = null;
 	
-	/** The m_f aborted. */
+	/** whether it was aborted. */
 	private boolean m_fAborted = false;
 	
-	/** The m_f complete. */
+	/** whether it is complete. */
 	private boolean m_fComplete = false;
 	
-	/** The m_f supports percentage. */
+	/** Whether it supports percentage. */
 	private boolean m_fSupportsPercentage = true;
-	
+
+	/** The final message if any. */
+	private String m_finalMessage;
+
 	/** The us number format. */
 	static private NumberFormat usNumberFormat = NumberFormat.getNumberInstance(Locale.US);
 
@@ -249,7 +250,7 @@ public class ProgressIndicator
 		    	progressIndicators.remove(m_processId);
 //		    	LOG.debug("removed " + (hashCode()  + ": " + getProgressDescription()) + " for process " + m_processId);
 		    }
-		}, 1500);
+		}, 5000);
 	}
 	
 	/**
@@ -264,8 +265,16 @@ public class ProgressIndicator
 	/**
 	 * Mark as complete.
 	 */
-	public void markAsComplete() {
+	public void markAsComplete(String sFinalMessage) {
+		this.m_finalMessage = sFinalMessage;
 		setComplete(true);
+	}
+	
+	/**
+	 * Mark as complete.
+	 */
+	public void markAsComplete() {
+		markAsComplete(null);
 	}
 	
 	/**
@@ -283,6 +292,14 @@ public class ProgressIndicator
 	
 	protected void setComplete(boolean fComplete) {
 		m_fComplete = fComplete;
+	}
+
+	protected void setFinalMessage(String finalMessage) {
+		m_finalMessage = finalMessage;
+	}
+
+	public String getFinalMessage() {
+		return m_finalMessage;
 	}
 	
 	/**

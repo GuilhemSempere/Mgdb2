@@ -17,8 +17,6 @@
 package fr.cirad.mgdb.importing.base;
 
 import java.io.File;
-import java.io.FileNotFoundException;
-import java.net.URISyntaxException;
 import java.net.URL;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -26,6 +24,7 @@ import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Scanner;
 import java.util.concurrent.ExecutorService;
 import java.util.stream.Collectors;
@@ -65,6 +64,8 @@ public class AbstractGenotypeImport {
 	protected static final int nMaxChunkSize = 20000;
 
 	private boolean m_fAllowDbDropIfNoGenotypingData = true;
+	protected boolean m_fSamplesPersisted = false;
+	protected Map<String /* individual or sample name */, GenotypingSample> m_providedIdToSampleMap = null;
 
 	public static ArrayList<String> getIdentificationStrings(String sType, String sSeq, Long nStartPos, Collection<String> idAndSynonyms) throws Exception
 	{
@@ -111,7 +112,10 @@ public class AbstractGenotypeImport {
 		return sampleToIndividualMap;
 	}
 
-
+	public boolean haveSamplesBeenPersisted() {
+		return m_fSamplesPersisted;
+	}
+	
 //	public static void buildSynonymMappings(MongoTemplate mongoTemplate) throws Exception
 //	{
 //		DBCollection collection = mongoTemplate.getCollection(COLLECTION_NAME_SYNONYM_MAPPINGS);

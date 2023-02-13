@@ -23,6 +23,7 @@ import java.io.IOException;
 import java.net.URL;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -52,6 +53,7 @@ import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.data.mongodb.core.query.Update;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.exc.UnrecognizedPropertyException;
 import com.fasterxml.jackson.databind.module.SimpleModule;
 import com.mongodb.bulk.BulkWriteResult;
 
@@ -113,11 +115,23 @@ public class IndividualMetadataImport {
 
         importIndividualOrSampleMetadata(args[0], null, new File(args[1]).toURI().toURL(), args[2], args.length > 3 ? args[3] : null, null);
     }
+    
+    public static HashMap<Integer, String> readMetadataFileHeader(String headerLine, Collection<String> fieldsToImport) {
+    	HashMap<Integer, String> columnLabels = new HashMap<Integer, String>();
+        if (columnLabels.isEmpty() && headerLine.startsWith("\uFEFF"))
+        	headerLine = headerLine.substring(1);
+
+        List<String> cells = Helper.split(headerLine, "\t");
+
+        for (int i = 0; i < cells.size(); i++) {
+            String cell = cells.get(i);
+            if (!cell.isEmpty() && (fieldsToImport == null || fieldsToImport.contains(cell.toLowerCase())))
+                columnLabels.put(i, cell);
+        }
+    	return columnLabels;
+    }
 
     public static int importIndividualOrSampleMetadata(String sModule, HttpSession session, URL metadataFileURL, String targetTypeColName, String csvFieldListToImport, String username) throws Exception {
-        List<String> fieldsToImport = csvFieldListToImport != null ? Arrays.asList(csvFieldListToImport.toLowerCase().split(",")) : null;
-        Scanner scanner = new Scanner(metadataFileURL.openStream());
-
         GenericXmlApplicationContext ctx = null;
         MongoTemplate mongoTemplate = MongoTemplateManager.get(sModule);
         if (mongoTemplate == null) { // we are probably being invoked offline
@@ -137,11 +151,9 @@ public class IndividualMetadataImport {
             session.setAttribute(targetTypeColName + "s_metadata_" + sModule, sessionObject);
         }
         
-        boolean fFlapjackFormat = metadataFileURL.getFile().toLowerCase().endsWith(".phenotype");
-
-        try {
-            HashMap<Integer, String> columnLabels = new HashMap<Integer, String>();
-            int idColumn = -1;
+        boolean fFlapjackFormat = false;
+        Scanner scanner = new Scanner(metadataFileURL.openStream());
+        try {            	
             String sLine = null;
             
             BulkOperations bulkOperations;
@@ -150,35 +162,32 @@ public class IndividualMetadataImport {
             else
                 bulkOperations = mongoTemplate.bulkOps(BulkOperations.BulkMode.ORDERED, username == null ? GenotypingSample.class : CustomSampleMetadata.class);
             
+            HashMap<Integer, String> columnLabels = null;
+            Integer idColumn = null;
             List<String> targetEntityList = new ArrayList<>();
             while (scanner.hasNextLine()) {
                 sLine = scanner.nextLine();
-                if (sLine.length() == 0 || (fFlapjackFormat && sLine.replaceAll("\\s+", "").equals("#fjFile=PHENOTYPE")))
-                    continue;
-
-                if (columnLabels.isEmpty() && sLine.startsWith("\uFEFF"))
-                    sLine = sLine.substring(1);
-
-                List<String> cells = Helper.split(sLine, "\t");
-
-                if (columnLabels.isEmpty()) { // it's the header line
-                    for (int i = 0; i < cells.size(); i++) {
-                        String cell = cells.get(i);
-                        if (cell.equalsIgnoreCase(targetTypeColName))
-                            idColumn = i;
-                        else if (!cell.isEmpty() && (fieldsToImport == null || fieldsToImport.contains(cell.toLowerCase())))
-                            columnLabels.put(i, cell);
-                    }
-                    if (idColumn == -1) {
-                    	if (!fFlapjackFormat || columnLabels.containsKey(0))
-                            throw new Exception(cells.size() <= 1 ? "Provided file does not seem to be tab-delimited!" : "Unable to find individual name column \"" + targetTypeColName + "\" in file header!");
-
-                    	idColumn = 0;	// FJ .phenotype file's field-name line starts with an empty string 
-                    }
-                    continue;
+                if (sLine.isEmpty() || sLine.replaceAll("\\s+", "").equals("#fjFile=PHENOTYPE")) {
+                	if (!sLine.isEmpty())
+                		fFlapjackFormat = true;
+                	continue;
                 }
 
-                // now deal with actual data rows
+            	if (columnLabels == null) {
+            		columnLabels = readMetadataFileHeader(sLine, csvFieldListToImport != null ? Arrays.asList(csvFieldListToImport.toLowerCase().split(",")) : null);
+	                idColumn = columnLabels.entrySet().stream().filter(e -> e.getValue().equals(targetTypeColName)).map(Map.Entry::getKey).findFirst().orElse(null);
+	                if (idColumn == null) {
+	                	if (!fFlapjackFormat || columnLabels.containsKey(0))
+	                        throw new Exception(columnLabels.size() <= 1 ? "Provided file does not seem to be tab-delimited!" : "Unable to find column named \"" + targetTypeColName + "\" in metadata file header!");
+	
+	                	idColumn = 0;	// FJ phenotype file's field-name line starts with an empty string
+	                }
+                	continue;
+            	}
+                
+                List<String> cells = Helper.split(sLine, "\t");
+
+                // deal with actual data rows
                 LinkedHashMap<String, Object> additionalInfo = new LinkedHashMap<>();
                 for (int col : columnLabels.keySet())
                     if (col != idColumn)
@@ -229,9 +238,9 @@ public class IndividualMetadataImport {
                 	sessionObject.clear();
             } else {	// first check if all referred objects actually exist in the DB
                 if (targetTypeColName.equals("sample")) {
-                    Query query = new Query(Criteria.where(GenotypingSample.FIELDNAME_NAME).in(targetEntityList));
-                    List<String> foundSamples = mongoTemplate.find(query, GenotypingSample.class).stream().map(s -> s.getSampleName()).collect(Collectors.toList());
-  
+                    Query verificationQuery = new Query(Criteria.where(GenotypingSample.FIELDNAME_NAME).in(targetEntityList));
+                    verificationQuery.fields().include(GenotypingSample.FIELDNAME_NAME);
+                    List<String> foundSamples = mongoTemplate.find(verificationQuery, GenotypingSample.class).stream().map(s -> s.getSampleName()).collect(Collectors.toList());
                     if (foundSamples.size() < targetEntityList.size())
                         throw new Exception("The following samples do not exist in the selected database: " + StringUtils.join(CollectionUtils.disjunction(targetEntityList, foundSamples), ", "));
                 } else {
@@ -239,7 +248,7 @@ public class IndividualMetadataImport {
                     verificationQuery.fields().include("_id");
                     List<String> foundIndList = mongoTemplate.find(verificationQuery, Individual.class).stream().map(ind -> ind.getId()).collect(Collectors.toList());
                     if (foundIndList.size() < targetEntityList.size())
-                        throw new Exception("The following individuals do not exist in the selected database: " + StringUtils.join(CollectionUtils.disjunction(targetEntityList, foundIndList), ", "));
+                        throw new Exception("The following individuals do not exist in this dataset: " + StringUtils.join(CollectionUtils.disjunction(targetEntityList, foundIndList), ", "));
                 }
             }
             if (!fIsAnonymous) {
@@ -253,9 +262,9 @@ public class IndividualMetadataImport {
                 return wr.getModifiedCount() + wr.getUpserts().size() + wr.getDeletedCount();
             } else {
             	if (targetEntityList.size() == 0)
-            		LOG.info("Database " + sModule + ": " + targetTypeColName + " metadata was deleted from session for anonymous user");
+            		LOG.info("Database " + sModule + ": " + targetTypeColName + " metadata was deleted from session " + session.getId() + " for anonymous user");
             	else
-            		LOG.info("Database " + sModule + ": " + targetTypeColName + " metadata was persisted into session for anonymous user");
+            		LOG.info("Database " + sModule + ": " + targetTypeColName + " metadata was persisted into session " + session.getId() + " for anonymous user");
                 return 1;
             }
         } finally {
@@ -368,10 +377,13 @@ public class IndividualMetadataImport {
         }
 
         boolean fIsAnonymous = "anonymousUser".equals(username);
-        LinkedHashMap<Comparable /*individual*/, LinkedHashMap<String, Object>> sessionObject = (LinkedHashMap<Comparable, LinkedHashMap<String, Object>>) session.getAttribute("individuals_metadata_" + sModule);
-        if (fIsAnonymous && sessionObject == null) {
-            sessionObject = new LinkedHashMap<>();
-            session.setAttribute("individuals_metadata_" + sModule, sessionObject);
+        LinkedHashMap<Comparable /*individual*/, LinkedHashMap<String, Object>> sessionObject = null;
+        if (fIsAnonymous) {	// metadata goes into the session for anonymous users
+        	sessionObject = (LinkedHashMap<Comparable, LinkedHashMap<String, Object>>) session.getAttribute("individuals_metadata_" + sModule);
+        	if (sessionObject == null) {
+	            sessionObject = new LinkedHashMap<>();
+	            session.setAttribute("individuals_metadata_" + sModule, sessionObject);
+        	}
         }
 
         // Inserting germplasm and attributes information in DB as additional info
@@ -393,9 +405,13 @@ public class IndividualMetadataImport {
             Update update = new Update();
             if (username == null) { // global metadata
                 aiMap.forEach((k, v) -> update.set(Individual.SECTION_ADDITIONAL_INFO + "." + k, v));
+                update.unset(Individual.SECTION_ADDITIONAL_INFO + "." + BrapiService.BRAPI_FIELD_externalReferenceId);
+                update.unset(Individual.SECTION_ADDITIONAL_INFO + "." + BrapiService.BRAPI_FIELD_externalReferenceSource);
                 bulkOperations.updateMulti(new Query(Criteria.where("_id").is(indName)), update);
             } else if (!fIsAnonymous) { // persistent user-level metadata
                 aiMap.forEach((k, v) -> update.set(CustomIndividualMetadata.SECTION_ADDITIONAL_INFO + "." + k, v));
+                update.unset(CustomIndividualMetadata.SECTION_ADDITIONAL_INFO + "." + BrapiService.BRAPI_FIELD_externalReferenceId);
+                update.unset(CustomIndividualMetadata.SECTION_ADDITIONAL_INFO + "." + BrapiService.BRAPI_FIELD_externalReferenceSource);
                 bulkOperations.upsert(new Query(Criteria.where("_id").is(new CustomIndividualMetadata.CustomIndividualMetadataId(indName, username))), update);
             } else {
             	LinkedHashMap<String, Object> existingEntityMetadata = sessionObject.get(indName);
@@ -404,6 +420,8 @@ public class IndividualMetadataImport {
             		sessionObject.put(indName, existingEntityMetadata);
             	}
             	existingEntityMetadata.putAll(aiMap);
+            	existingEntityMetadata.remove(BrapiService.BRAPI_FIELD_externalReferenceId);
+            	existingEntityMetadata.remove(BrapiService.BRAPI_FIELD_externalReferenceSource);
             }
         }
 
@@ -414,7 +432,7 @@ public class IndividualMetadataImport {
             BulkWriteResult wr = bulkOperations.execute();
             return wr.getModifiedCount() + wr.getUpserts().size();
         } else {
-            LOG.info("Database " + sModule + ": metadata was persisted into session for anonymous user");
+            LOG.info("Database " + sModule + ": individual metadata was persisted into session for anonymous user");
             return 1;
         }
     }
@@ -448,10 +466,13 @@ public class IndividualMetadataImport {
         }
 
         boolean fIsAnonymous = "anonymousUser".equals(username);
-        LinkedHashMap<Comparable /*individual*/, LinkedHashMap<String, Object>> sessionObject = (LinkedHashMap<Comparable, LinkedHashMap<String, Object>>) session.getAttribute("individuals_metadata_" + sModule);
-        if (fIsAnonymous && sessionObject == null) {
-            sessionObject = new LinkedHashMap<>();
-            session.setAttribute("individuals_metadata_" + sModule, sessionObject);
+        LinkedHashMap<Comparable /*individual*/, LinkedHashMap<String, Object>> sessionObject = null;
+        if (fIsAnonymous) {	// metadata goes into the session for anonymous users
+        	sessionObject = (LinkedHashMap<Comparable, LinkedHashMap<String, Object>>) session.getAttribute("individuals_metadata_" + sModule);
+        	if (sessionObject == null) {
+	            sessionObject = new LinkedHashMap<>();
+	            session.setAttribute("individuals_metadata_" + sModule, sessionObject);
+        	}
         }
 
         // Inserting germplasm and attributes information in DB as additional info
@@ -473,9 +494,13 @@ public class IndividualMetadataImport {
             Update update = new Update();
             if (username == null) { // global metadata
                 aiMap.forEach((k, v) -> update.set(Individual.SECTION_ADDITIONAL_INFO + "." + k, v));
+                update.unset(Individual.SECTION_ADDITIONAL_INFO + "." + BrapiService.BRAPI_FIELD_externalReferenceId);
+                update.unset(Individual.SECTION_ADDITIONAL_INFO + "." + BrapiService.BRAPI_FIELD_externalReferenceSource);
                 bulkOperations.updateMulti(new Query(Criteria.where("_id").is(indName)), update);
             } else if (!fIsAnonymous) { // persistent user-level metadata
                 aiMap.forEach((k, v) -> update.set(CustomIndividualMetadata.SECTION_ADDITIONAL_INFO + "." + k, v));
+                update.unset(CustomIndividualMetadata.SECTION_ADDITIONAL_INFO + "." + BrapiService.BRAPI_FIELD_externalReferenceId);
+                update.unset(CustomIndividualMetadata.SECTION_ADDITIONAL_INFO + "." + BrapiService.BRAPI_FIELD_externalReferenceSource);
                 bulkOperations.upsert(new Query(Criteria.where("_id").is(new CustomIndividualMetadata.CustomIndividualMetadataId(indName, username))), update);
             } else {
             	LinkedHashMap<String, Object> existingEntityMetadata = sessionObject.get(indName);
@@ -484,6 +509,8 @@ public class IndividualMetadataImport {
             		sessionObject.put(indName, existingEntityMetadata);
             	}
             	existingEntityMetadata.putAll(aiMap);
+            	existingEntityMetadata.remove(BrapiService.BRAPI_FIELD_externalReferenceId);
+            	existingEntityMetadata.remove(BrapiService.BRAPI_FIELD_externalReferenceSource);
             }
         }
 
@@ -494,7 +521,7 @@ public class IndividualMetadataImport {
             BulkWriteResult wr = bulkOperations.execute();
             return wr.getModifiedCount() + wr.getUpserts().size();
         } else {
-            LOG.info("Database " + sModule + ": metadata was persisted into session for anonymous user");
+            LOG.info("Database " + sModule + ": individual metadata was persisted into session for anonymous user");
             return 1;
         }
     }
@@ -568,10 +595,13 @@ public class IndividualMetadataImport {
         }
 
         boolean fIsAnonymous = "anonymousUser".equals(username);
-        LinkedHashMap<Comparable /*sample*/, LinkedHashMap<String, Object>> sessionObject = (LinkedHashMap<Comparable, LinkedHashMap<String, Object>>) session.getAttribute("samples_metadata_" + sModule);
-        if (fIsAnonymous && sessionObject == null) {
-            sessionObject = new LinkedHashMap<>();
-            session.setAttribute("samples_metadata_" + sModule, sessionObject);
+        LinkedHashMap<Comparable /*sample*/, LinkedHashMap<String, Object>> sessionObject = null;
+        if (fIsAnonymous) {	// metadata goes into the session for anonymous users
+        	sessionObject = (LinkedHashMap<Comparable, LinkedHashMap<String, Object>>) session.getAttribute("samples_metadata_" + sModule);
+        	if (sessionObject == null) {
+	            sessionObject = new LinkedHashMap<>();
+	            session.setAttribute("samples_metadata_" + sModule, sessionObject);
+        	}
         }
 
         // Inserting samples (also germplasm and attributes) information in DB as additional info
@@ -604,8 +634,12 @@ public class IndividualMetadataImport {
             if (username == null) { // global metadata
                 aiMap.forEach((k, v) -> update.set(GenotypingSample.SECTION_ADDITIONAL_INFO + "." + k, v));
                 bulkOperations.updateMulti(new Query(Criteria.where(GenotypingSample.FIELDNAME_NAME).is(internalId)), update);
+                update.unset(GenotypingSample.SECTION_ADDITIONAL_INFO + "." + BrapiService.BRAPI_FIELD_externalReferenceId);
+                update.unset(GenotypingSample.SECTION_ADDITIONAL_INFO + "." + BrapiService.BRAPI_FIELD_externalReferenceSource);
             } else if (!fIsAnonymous) { // persistent user-level metadata
                 aiMap.forEach((k, v) -> update.set(CustomSampleMetadata.SECTION_ADDITIONAL_INFO + "." + k, v));
+                update.unset(CustomSampleMetadata.SECTION_ADDITIONAL_INFO + "." + BrapiService.BRAPI_FIELD_externalReferenceId);
+                update.unset(CustomSampleMetadata.SECTION_ADDITIONAL_INFO + "." + BrapiService.BRAPI_FIELD_externalReferenceSource);
            		bulkOperations.upsert(new Query(new Criteria().andOperator(Criteria.where("_id." + CustomSampleMetadataId.FIELDNAME_USER).is(username), new Criteria().andOperator(Criteria.where("_id." + CustomSampleMetadataId.FIELDNAME_SAMPLE_ID).is(spId)))), update);
             } else {
             	LinkedHashMap<String, Object> existingEntityMetadata = sessionObject.get(spId);
@@ -614,6 +648,8 @@ public class IndividualMetadataImport {
             		sessionObject.put(spId, existingEntityMetadata);
             	}
             	existingEntityMetadata.putAll(aiMap);
+            	existingEntityMetadata.remove(BrapiService.BRAPI_FIELD_externalReferenceId);
+            	existingEntityMetadata.remove(BrapiService.BRAPI_FIELD_externalReferenceSource);
             }
         }
 
@@ -624,7 +660,7 @@ public class IndividualMetadataImport {
             BulkWriteResult wr = bulkOperations.execute();
             return wr.getModifiedCount() + wr.getUpserts().size();
         } else {
-            LOG.info("Database " + sModule + ": metadata was persisted into session for anonymous user");
+            LOG.info("Database " + sModule + ": sample metadata was persisted into session for anonymous user");
             return 1;
         }
     }
@@ -668,7 +704,7 @@ public class IndividualMetadataImport {
                     sampleList.addAll(br.getResult().getData());
                     samplePager.paginate(br.getMetadata());
                 }
-            } catch (Exception e) {    // we did not get a searchResultDbId: see if we actually got results straight away
+            } catch (UnrecognizedPropertyException e) {    // we did not get a searchResultDbId: see if we actually got results straight away
                 try {
                     Response<SampleListResponse> response = service.searchSamplesDirectResult(reqBody).execute();
                     handleErrorCode(response.code());
@@ -686,9 +722,12 @@ public class IndividualMetadataImport {
                     return 0;
                 }
             }
+            catch (Throwable t) {
+            	progress.setError(endpointUrl + " - " + t.getMessage());
+            }
         }
 
-        progress.addStep("Getting germplasm information from " + endpointUrl);
+        progress.addStep("Getting sample information from " + endpointUrl);
         progress.moveToNextStep();
 
         //fill map with germplasmDbIds to get linked information
@@ -714,10 +753,13 @@ public class IndividualMetadataImport {
         }
 
         boolean fIsAnonymous = "anonymousUser".equals(username);
-        LinkedHashMap<Comparable /*sample*/, LinkedHashMap<String, Object>> sessionObject = (LinkedHashMap<Comparable, LinkedHashMap<String, Object>>) session.getAttribute("samples_metadata_" + sModule);
-        if (fIsAnonymous && sessionObject == null) {
-            sessionObject = new LinkedHashMap<>();
-            session.setAttribute("samples_metadata_" + sModule, sessionObject);
+        LinkedHashMap<Comparable /*sample*/, LinkedHashMap<String, Object>> sessionObject = null;
+        if (fIsAnonymous) {	// metadata goes into the session for anonymous users
+        	sessionObject = (LinkedHashMap<Comparable, LinkedHashMap<String, Object>>) session.getAttribute("samples_metadata_" + sModule);
+        	if (sessionObject == null) {
+	            sessionObject = new LinkedHashMap<>();
+	            session.setAttribute("samples_metadata_" + sModule, sessionObject);
+        	}
         }
 
         // Inserting sample information in DB as additional info
@@ -750,9 +792,13 @@ public class IndividualMetadataImport {
             Update update = new Update();
             if (username == null) { // global metadata
                 aiMap.forEach((k, v) -> update.set(GenotypingSample.SECTION_ADDITIONAL_INFO + "." + k, v));
+                update.unset(GenotypingSample.SECTION_ADDITIONAL_INFO + "." + BrapiService.BRAPI_FIELD_externalReferenceId);
+                update.unset(GenotypingSample.SECTION_ADDITIONAL_INFO + "." + BrapiService.BRAPI_FIELD_externalReferenceSource);
                 bulkOperations.updateMulti(new Query(Criteria.where(GenotypingSample.FIELDNAME_NAME).is(internalId)), update);
             } else if (!fIsAnonymous) { // persistent user-level metadata
                 aiMap.forEach((k, v) -> update.set(CustomSampleMetadata.SECTION_ADDITIONAL_INFO + "." + k, v));
+                update.unset(CustomSampleMetadata.SECTION_ADDITIONAL_INFO + "." + BrapiService.BRAPI_FIELD_externalReferenceId);
+                update.unset(CustomSampleMetadata.SECTION_ADDITIONAL_INFO + "." + BrapiService.BRAPI_FIELD_externalReferenceSource);
            		bulkOperations.upsert(new Query(new Criteria().andOperator(Criteria.where("_id." + CustomSampleMetadataId.FIELDNAME_USER).is(username), new Criteria().andOperator(Criteria.where("_id." + CustomSampleMetadataId.FIELDNAME_SAMPLE_ID).is(spId)))), update);
             } else {
             	LinkedHashMap<String, Object> existingEntityMetadata = sessionObject.get(spId);
@@ -761,6 +807,8 @@ public class IndividualMetadataImport {
             		sessionObject.put(spId, existingEntityMetadata);
             	}
             	existingEntityMetadata.putAll(aiMap);
+            	existingEntityMetadata.remove(BrapiService.BRAPI_FIELD_externalReferenceId);
+            	existingEntityMetadata.remove(BrapiService.BRAPI_FIELD_externalReferenceSource);
             }
         }
 
@@ -772,7 +820,7 @@ public class IndividualMetadataImport {
             return wr.getModifiedCount() + wr.getUpserts().size();
         }
         else {
-            LOG.info("Database " + sModule + ": metadata was persisted into session for anonymous user");
+            LOG.info("Database " + sModule + ": sample metadata was persisted into session for anonymous user");
             return 1;
         }
     }
@@ -812,7 +860,7 @@ public class IndividualMetadataImport {
                 germplasmList.addAll(br.getResult().getData());
                 germplasmPager.paginate(br.getMetadata());
             }
-        } catch (Exception e1) {    // we did not get a searchResultDbId: see if we actually got results straight away
+        } catch (UnrecognizedPropertyException e1) {    // we did not get a searchResultDbId: see if we actually got results straight away
             try {
                 Response<GermplasmListResponse> response = service.searchGermplasmDirectResult(reqBody).execute();
                 handleErrorCode(response.code());
@@ -828,8 +876,10 @@ public class IndividualMetadataImport {
                 LOG.error(e1);
                 LOG.error(progress.getError(), e2);
                 return new ArrayList<>();
-
             }
+        }
+        catch (Throwable t) {
+        	progress.setError(endPointUrl + " - " + t.getMessage());
         }
 
         return germplasmList;

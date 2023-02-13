@@ -556,6 +556,16 @@ public class MongoTemplateManager implements ApplicationContextAware {
     static public boolean isModuleHidden(String sModule) {
         return hiddenDatabases.contains(sModule);
     }
+    
+    /**
+     * Checks if is module temporary.
+     *
+     * @param sModule the module
+     * @return true, if is module temporary
+     */
+    static public boolean isModuleTemporary(String sModule) {
+        return get(sModule).getDb().getName().contains(EXPIRY_PREFIX);
+    }
 
 //	public void saveRunsIntoProjectRecords()
 //	{
@@ -698,7 +708,9 @@ public class MongoTemplateManager implements ApplicationContextAware {
 	}
 
 	public static void unlockProjectForWriting(String sModule, String sProject) {
-		currentlyImportedProjects.get(sModule).remove(sProject);
+		Set<String> projects = currentlyImportedProjects.get(sModule);
+		if (projects != null)
+			projects.remove(sProject);
 	}
 
 	public static void lockModuleForWriting(String sModule) {

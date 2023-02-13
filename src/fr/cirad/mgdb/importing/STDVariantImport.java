@@ -67,7 +67,7 @@ public class STDVariantImport extends AbstractGenotypeImport {
 	private boolean fImportUnknownVariants = false;
 	private boolean m_fTryAndMatchRandomObjectIDs = false;
 
-	private HashMap<String, String> individualToSampleMap = null;
+	private HashMap<String, String> individualToSampleIdMap = null;
 	
 	public STDVariantImport()
 	{
@@ -215,7 +215,7 @@ public class STDVariantImport extends AbstractGenotypeImport {
 			long lineCount = 0;
 			String sPreviousVariant = null, sVariantName = null;
 			ArrayList<String> linesForVariant = new ArrayList<String>(), unsavedVariants = new ArrayList<String>();
-			TreeMap<String /* individual name */, GenotypingSample> previouslyCreatedSamples = new TreeMap<>();	// will auto-magically remove all duplicates, and sort data, cool eh?
+			m_providedIdToSampleMap = new TreeMap<>();	// will auto-magically remove all duplicates, and sort data
 			TreeSet<String> affectedSequences = new TreeSet<String>();	// will contain all sequences containing variants for which we are going to add genotypes 
 			do
 			{
@@ -233,7 +233,7 @@ public class STDVariantImport extends AbstractGenotypeImport {
 								LOG.warn("Skipping unknown variant: " + mgdbVariantId);
 							else if (mgdbVariantId != null && mgdbVariantId.toString().startsWith("*"))
 								LOG.warn("Skipping deprecated variant data: " + sPreviousVariant);
-							else if (saveWithOptimisticLock(mongoTemplate, project, sRun, mgdbVariantId != null ? mgdbVariantId : sPreviousVariant, individualPopulations, inconsistencies, linesForVariant, 3, previouslyCreatedSamples, affectedSequences))
+							else if (saveWithOptimisticLock(mongoTemplate, project, sRun, mgdbVariantId != null ? mgdbVariantId : sPreviousVariant, individualPopulations, inconsistencies, linesForVariant, 3, affectedSequences))
 								nVariantSaveCount++;
 							else
 								unsavedVariants.add(sVariantName);
@@ -261,12 +261,16 @@ public class STDVariantImport extends AbstractGenotypeImport {
 				LOG.warn("Skipping unknown variant: " + mgdbVariantId);
 			else if (mgdbVariantId != null && mgdbVariantId.toString().startsWith("*"))
 				LOG.warn("Skipping deprecated variant data: " + sPreviousVariant);
-			else if (saveWithOptimisticLock(mongoTemplate, project, sRun, mgdbVariantId != null ? mgdbVariantId : sPreviousVariant, individualPopulations, inconsistencies, linesForVariant, 3, previouslyCreatedSamples, affectedSequences))
+			else if (saveWithOptimisticLock(mongoTemplate, project, sRun, mgdbVariantId != null ? mgdbVariantId : sPreviousVariant, individualPopulations, inconsistencies, linesForVariant, 3, affectedSequences))
 				nVariantSaveCount++;
 			else
 				unsavedVariants.add(sVariantName);
 	
 			in.close();
+			
+			// we only know for sure the entire list of individuals / samples at the end of the process (one genotype per line means we may find out some new individuals along with the very last variant)
+            mongoTemplate.insert(m_providedIdToSampleMap.values(), GenotypingSample.class);
+			m_fSamplesPersisted = true;
 							
 			// save project data
             if (!project.getVariantTypes().contains(Type.SNP.toString())) {
@@ -277,17 +281,11 @@ public class STDVariantImport extends AbstractGenotypeImport {
                 project.getRuns().add(sRun);
             if (project.getPloidyLevel() == 0)
             	project.setPloidyLevel(m_ploidy);
-			mongoTemplate.save(project);	// always save project before samples otherwise the sample cleaning procedure in MgdbDao.prepareDatabaseForSearches may remove them if called in the meantime
-			mongoTemplate.insert(previouslyCreatedSamples.values(), GenotypingSample.class);
+			mongoTemplate.save(project);
 	
 	    	LOG.info("Import took " + (System.currentTimeMillis() - before)/1000 + "s for " + lineCount + " CSV lines (" + nVariantSaveCount + " variants were saved)");
 	    	if (unsavedVariants.size() > 0)
 	    	   	LOG.warn("The following variants could not be saved because of concurrent writing: " + StringUtils.join(unsavedVariants, ", "));
-	    	
-			progress.addStep("Preparing database for searches");
-			progress.moveToNextStep();
-			MgdbDao.prepareDatabaseForSearches(mongoTemplate);
-			progress.markAsComplete();
 		}
 		finally
 		{
@@ -303,10 +301,15 @@ public class STDVariantImport extends AbstractGenotypeImport {
 				ctx.close();
 			
 			MongoTemplateManager.unlockProjectForWriting(sModule, sProject);
+            if (progress.getError() == null && !progress.isAborted()) {
+                progress.addStep("Preparing database for searches");
+                progress.moveToNextStep();
+                MgdbDao.prepareDatabaseForSearches(sModule);
+            }
 		}
 	}
 	
-	private boolean saveWithOptimisticLock(MongoTemplate mongoTemplate, GenotypingProject project, String runName, String mgdbVariantId, HashMap<String, String> individualPopulations, HashMap<String, ArrayList<String>> inconsistencies, ArrayList<String> linesForVariant, int nNumberOfRetries, Map<String, GenotypingSample> usedSamples, TreeSet<String> affectedSequences) throws Exception
+	private boolean saveWithOptimisticLock(MongoTemplate mongoTemplate, GenotypingProject project, String runName, String mgdbVariantId, HashMap<String, String> individualPopulations, HashMap<String, ArrayList<String>> inconsistencies, ArrayList<String> linesForVariant, int nNumberOfRetries, TreeSet<String> affectedSequences) throws Exception
 	{
 		if (linesForVariant.size() == 0)
 			return false;
@@ -338,12 +341,12 @@ public class STDVariantImport extends AbstractGenotypeImport {
     			VariantRunData vrd = new VariantRunData(new VariantRunData.VariantRunDataId(project.getId(), runName, mgdbVariantId));
     			
     			ArrayList<String> inconsistentIndividuals = inconsistencies.get(mgdbVariantId);
-    			for (String individualLine : linesForVariant)
-    			{				
+    			for (String individualLine : linesForVariant) {
     				String[] cells = individualLine.trim().split(" ");
     				String sIndividual = cells[1];
-    						
-    				if (!usedSamples.containsKey(sIndividual))	// we don't want to persist each sample several times
+    					
+    				GenotypingSample sample = m_providedIdToSampleMap.get(sIndividual);
+    				if (sample == null)	// we don't want to persist each sample several times
     				{
     	                Individual ind = mongoTemplate.findById(sIndividual, Individual.class);
                     	String sPop = individualPopulations.get(sIndividual);
@@ -361,8 +364,8 @@ public class STDVariantImport extends AbstractGenotypeImport {
                     	}
     					if (fNeedToSave)
     	                    mongoTemplate.save(ind);
-    	                int sampleId = AutoIncrementCounter.getNextSequence(mongoTemplate, MongoTemplateManager.getMongoCollectionName(GenotypingSample.class));
-    	                usedSamples.put(sIndividual, new GenotypingSample(sampleId, project.getId(), vrd.getRunName(), sIndividual, individualToSampleMap == null ? null : individualToSampleMap.get(sIndividual)));	// add a sample for this individual to the project
+    					sample = new GenotypingSample(AutoIncrementCounter.getNextSequence(mongoTemplate, MongoTemplateManager.getMongoCollectionName(GenotypingSample.class)), project.getId(), vrd.getRunName(), sIndividual, individualToSampleIdMap == null ? null : individualToSampleIdMap.get(sIndividual));
+    	                m_providedIdToSampleMap.put(sIndividual, sample);	// add a sample for this individual to the project
     	            }
     
     				String gtCode = null;
@@ -396,10 +399,11 @@ public class STDVariantImport extends AbstractGenotypeImport {
     					continue;	// we don't add missing genotypes
     				
     				SampleGenotype genotype = new SampleGenotype(gtCode);
-    				vrd.getSampleGenotypes().put(usedSamples.get(sIndividual).getId(), genotype);
+    				vrd.getSampleGenotypes().put(sample.getId(), genotype);
     			}
+
                 project.getAlleleCounts().add(variant.getKnownAlleles().size());	// it's a TreeSet so it will only be added if it's not already present
-    			
+
     			try
     			{
     				if (update == null)
@@ -509,7 +513,7 @@ public class STDVariantImport extends AbstractGenotypeImport {
 		m_ploidy = ploidy;
 	}
 
-	public void setIndividualToSampleMap(HashMap<String, String> individualToSampleMap) {
-		this.individualToSampleMap  = individualToSampleMap;
+	public void setIndividualToSampleIdMap(HashMap<String, String> individualToSampleIdMap) {
+		this.individualToSampleIdMap  = individualToSampleIdMap;
 	}
 }
