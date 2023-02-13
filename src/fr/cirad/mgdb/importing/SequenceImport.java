@@ -128,7 +128,7 @@ public class SequenceImport {
     {
         String lcFile = args[1].toLowerCase();
         InputStream is;
-        if (lcFile.startsWith("ftp://") | lcFile.startsWith("http://"))
+        if (lcFile.startsWith("ftp://") || lcFile.startsWith("http://") || lcFile.startsWith("https://"))
         	is = new URL(args[1]).openStream();	// import from an URL
         else
             is = new BufferedInputStream(new FileInputStream(args[1]));	// import from a local file

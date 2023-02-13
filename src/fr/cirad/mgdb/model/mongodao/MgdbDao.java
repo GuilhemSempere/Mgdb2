@@ -53,7 +53,6 @@ import com.mongodb.client.model.IndexOptions;
 import com.mongodb.client.result.DeleteResult;
 
 import fr.cirad.mgdb.exporting.IExportHandler;
-import fr.cirad.mgdb.exporting.IExportHandler.SessionAttributeAwareExportThread;
 import fr.cirad.mgdb.model.mongo.maintypes.CachedCount;
 import fr.cirad.mgdb.model.mongo.maintypes.CustomIndividualMetadata;
 import fr.cirad.mgdb.model.mongo.maintypes.CustomIndividualMetadata.CustomIndividualMetadataId;
@@ -68,6 +67,7 @@ import fr.cirad.mgdb.model.mongo.maintypes.VariantData;
 import fr.cirad.mgdb.model.mongo.maintypes.VariantRunData;
 import fr.cirad.mgdb.model.mongo.maintypes.VariantRunData.VariantRunDataId;
 import fr.cirad.mgdb.model.mongo.subtypes.ReferencePosition;
+import fr.cirad.tools.SessionAttributeAwareThread;
 import fr.cirad.tools.mongo.MongoTemplateManager;
 import fr.cirad.tools.security.base.AbstractTokenManager;
 import htsjdk.variant.vcf.VCFConstants;
@@ -113,18 +113,21 @@ public class MgdbDao {
     /**
      * Prepare database for searches.
      *
-     * @param mongoTemplate the mongo template
+     * @param sModule the database name
      * @return the list
      * @throws Exception
      */
-    public static List<String> prepareDatabaseForSearches(MongoTemplate mongoTemplate) throws Exception {
-        // cleanup unused sample that eventually got persisted during a failed import
+    public static List<String> prepareDatabaseForSearches(String sModule) throws Exception {
+    	MongoTemplate mongoTemplate = MongoTemplateManager.get(sModule);
+    	if (!MongoTemplateManager.isModuleAvailableForWriting(sModule)) 
+    		throw new Exception("prepareDatabaseForSearches may only be called when database is unlocked");
+    	
+    	// cleanup unused samples that possibly got persisted during a failed import
         Collection<Integer> validProjIDs = (Collection<Integer>) mongoTemplate.getCollection(MongoTemplateManager.getMongoCollectionName(GenotypingProject.class)).distinct("_id", Integer.class).into(new ArrayList<>());
         DeleteResult dr = mongoTemplate.remove(new Query(Criteria.where(GenotypingSample.FIELDNAME_PROJECT_ID).not().in(validProjIDs)), GenotypingSample.class);
-        if (dr.getDeletedCount() > 0) {
+        if (dr.getDeletedCount() > 0)
             LOG.info(dr.getDeletedCount() + " unused samples were removed");
-        }
-
+    
         // empty count cache
         mongoTemplate.dropCollection(mongoTemplate.getCollectionName(CachedCount.class));
 
@@ -560,8 +563,8 @@ public class MgdbDao {
             result.put(indId, indMap.get(indId));
         }
 
-        boolean fGrabSessionAttributesFromThread = SessionAttributeAwareExportThread.class.isAssignableFrom(Thread.currentThread().getClass());
-        LinkedHashMap<String, LinkedHashMap<String, Object>> sessionMetaData = (LinkedHashMap<String, LinkedHashMap<String, Object>>) (fGrabSessionAttributesFromThread ? ((SessionAttributeAwareExportThread) Thread.currentThread()).getSessionAttributes().get("individuals_metadata_" + module) : httpSessionFactory.getObject().getAttribute("individuals_metadata_" + module));
+        boolean fGrabSessionAttributesFromThread = SessionAttributeAwareThread.class.isAssignableFrom(Thread.currentThread().getClass());
+        LinkedHashMap<String, LinkedHashMap<String, Object>> sessionMetaData = (LinkedHashMap<String, LinkedHashMap<String, Object>>) (fGrabSessionAttributesFromThread ? ((SessionAttributeAwareThread) Thread.currentThread()).getSessionAttributes().get("individuals_metadata_" + module) : httpSessionFactory.getObject().getAttribute("individuals_metadata_" + module));
         if (sCurrentUser != null) {	// merge with custom metadata if available
             if ("anonymousUser".equals(sCurrentUser)) {
             	if (sessionMetaData != null)
@@ -603,8 +606,8 @@ public class MgdbDao {
             result.put(spId, indMap.get(spId));
         }
 
-        boolean fGrabSessionAttributesFromThread = SessionAttributeAwareExportThread.class.isAssignableFrom(Thread.currentThread().getClass());
-        LinkedHashMap<String, LinkedHashMap<String, Object>> sessionMetaData = (LinkedHashMap<String, LinkedHashMap<String, Object>>) (fGrabSessionAttributesFromThread ? ((SessionAttributeAwareExportThread) Thread.currentThread()).getSessionAttributes().get("samples_metadata_" + module) : httpSessionFactory.getObject().getAttribute("samples_metadata_" + module));
+        boolean fGrabSessionAttributesFromThread = SessionAttributeAwareThread.class.isAssignableFrom(Thread.currentThread().getClass());
+        LinkedHashMap<String, LinkedHashMap<String, Object>> sessionMetaData = (LinkedHashMap<String, LinkedHashMap<String, Object>>) (fGrabSessionAttributesFromThread ? ((SessionAttributeAwareThread) Thread.currentThread()).getSessionAttributes().get("samples_metadata_" + module) : httpSessionFactory.getObject().getAttribute("samples_metadata_" + module));
         if (sCurrentUser != null) {	// merge with custom metadata if available
             if ("anonymousUser".equals(sCurrentUser)) {
             	if (sessionMetaData != null)

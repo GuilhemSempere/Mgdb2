@@ -86,8 +86,8 @@ public class ServiceInfoUtils {
             if (implementedCall.startsWith("/")) {
                 implementedCall = implementedCall.substring(1);
             }
-            if (implementedCall.equals(signature) && service.getMethods().contains(method)
-                    && service.getDataTypes().contains(datatype)) {
+            if (implementedCall.equals(signature) && service.getMethods().contains(method) && ((service.getContentTypes() != null
+            		&& service.getContentTypes().contains(datatype)) || (service.getDataTypes() != null && service.getDataTypes().contains(datatype)))) {
                 return true;
             }
         }

@@ -177,6 +177,7 @@ public class FlapjackImport extends AbstractGenotypeImport {
         ProgressIndicator progress = ProgressIndicator.get(m_processID) != null ? ProgressIndicator.get(m_processID) : new ProgressIndicator(m_processID, new String[]{"Initializing import"}); // better to add it straight-away so the JSP doesn't get null in return when it checks for it (otherwise it will assume the process has ended)
 
         GenericXmlApplicationContext ctx = null;
+        File rotatedFile = File.createTempFile("fjImport-" + genotypeFile.getName() + "-", ".tsv");
         try
         {
             MongoTemplate mongoTemplate = MongoTemplateManager.get(sModule);
@@ -249,15 +250,14 @@ public class FlapjackImport extends AbstractGenotypeImport {
                 return 0;
             }
 
-            // rotate matrix using temporary files
+
+            // Rotate genotype matrix using temporary files
             info = "Reading and reorganizing genotypes";
             LOG.info(info);
             progress.addStep(info);
             progress.moveToNextStep();
             Map<String, Type> nonSnpVariantTypeMap = new HashMap<>();
             ArrayList<String> individualNames = new ArrayList<>();
-
-            File rotatedFile = File.createTempFile("fjImport-" + genotypeFile.getName() + "-", ".tsv");
             try {
                 m_nCurrentlyTransposingMatrixCount++;
                 nPloidy = transposeGenotypeFile(genotypeFile, rotatedFile, nPloidy, nonSnpVariantTypeMap, individualNames, fSkipMonomorphic, progress);
@@ -272,8 +272,9 @@ public class FlapjackImport extends AbstractGenotypeImport {
             if (progress.getError() != null && !progress.isAborted())
                 return createdProject;
             
+            
             // Create the necessary samples
-            HashMap<String /*individual*/, GenotypingSample> providedIdToSampleMap = new HashMap<String /*individual*/, GenotypingSample>();
+            m_providedIdToSampleMap = new HashMap<String /*individual*/, GenotypingSample>();
             HashSet<Individual> indsToAdd = new HashSet<>();
             boolean fDbAlreadyContainedIndividuals = mongoTemplate.findOne(new Query(), Individual.class) != null;
             for (String sIndOrSpId : individualNames) {
@@ -292,16 +293,20 @@ public class FlapjackImport extends AbstractGenotypeImport {
                 }
 
                 int sampleId = AutoIncrementCounter.getNextSequence(mongoTemplate, MongoTemplateManager.getMongoCollectionName(GenotypingSample.class));
-                providedIdToSampleMap.put(sIndOrSpId, new GenotypingSample(sampleId, project.getId(), sRun, sIndividual, sampleToIndividualMap == null ? null : sIndOrSpId));   // add a sample for this individual to the project
+                m_providedIdToSampleMap.put(sIndOrSpId, new GenotypingSample(sampleId, project.getId(), sRun, sIndividual, sampleToIndividualMap == null ? null : sIndOrSpId));   // add a sample for this individual to the project
             }
+            mongoTemplate.insert(m_providedIdToSampleMap.values(), GenotypingSample.class);
             if (!indsToAdd.isEmpty()) {
-            	mongoTemplate.insert(indsToAdd, Individual.class);
+                mongoTemplate.insert(indsToAdd, Individual.class);
                 indsToAdd = null;
             }
+            m_fSamplesPersisted = true;
 
+            
+            // Imported rotated data
             int nConcurrentThreads = Math.max(1, Runtime.getRuntime().availableProcessors());
             LOG.debug("Importing project '" + sProject + "' into " + sModule + " using " + nConcurrentThreads + " threads");
-            long count = importTempFileContents(progress, nConcurrentThreads, mongoTemplate, assembly.getId(), rotatedFile, variantsAndPositions, existingVariantIDs, project, sRun, providedIdToSampleMap, nonSnpVariantTypeMap, individualNames, fSkipMonomorphic);
+            long count = importTempFileContents(progress, nConcurrentThreads, mongoTemplate, assembly.getId(), rotatedFile, variantsAndPositions, existingVariantIDs, project, sRun, nonSnpVariantTypeMap, individualNames, fSkipMonomorphic);
 
             if (progress.getError() != null)
                 throw new Exception(progress.getError());
@@ -309,19 +314,20 @@ public class FlapjackImport extends AbstractGenotypeImport {
             if (progress.isAborted())
             	return createdProject;
 
-            progress.addStep("Preparing database for searches");
-            progress.moveToNextStep();
-            MgdbDao.prepareDatabaseForSearches(mongoTemplate);
-
             LOG.info("FlapjackImport took " + (System.currentTimeMillis() - before) / 1000 + "s for " + count + " records");
-            progress.markAsComplete();
             return createdProject;
         }
         finally
         {
+        	rotatedFile.delete();
             if (m_fCloseContextOpenAfterImport && ctx != null)
                 ctx.close();
             MongoTemplateManager.unlockProjectForWriting(sModule, sProject);
+            if (progress.getError() == null && !progress.isAborted()) {
+                progress.addStep("Preparing database for searches");
+                progress.moveToNextStep();
+                MgdbDao.prepareDatabaseForSearches(sModule);
+            }
         }
     }
 
@@ -350,7 +356,7 @@ public class FlapjackImport extends AbstractGenotypeImport {
     }
 
     // TODO : check inconsistent variant names between map and genotype
-    public long importTempFileContents(ProgressIndicator progress, int nNConcurrentThreads, MongoTemplate mongoTemplate, Integer nAssemblyId, File tempFile, Map<String, VariantMapPosition> variantsAndPositions, HashMap<String, String> existingVariantIDs, GenotypingProject project, String sRun, HashMap<String /*individual*/, GenotypingSample> providedIdToSampleMap, Map<String, Type> nonSnpVariantTypeMap, List<String> individuals, boolean fSkipMonomorphic) throws Exception
+    public long importTempFileContents(ProgressIndicator progress, int nNConcurrentThreads, MongoTemplate mongoTemplate, Integer nAssemblyId, File tempFile, Map<String, VariantMapPosition> variantsAndPositions, HashMap<String, String> existingVariantIDs, GenotypingProject project, String sRun, Map<String, Type> nonSnpVariantTypeMap, List<String> individuals, boolean fSkipMonomorphic) throws Exception
     {
         final AtomicInteger count = new AtomicInteger(0);
 
@@ -368,7 +374,7 @@ public class FlapjackImport extends AbstractGenotypeImport {
             LOG.info("Importing by chunks of size " + nNumberOfVariantsToSaveAtOnce);
 
             for (String sIndOrSpId : individuals) {
-            	GenotypingSample sample = providedIdToSampleMap.get(sIndOrSpId);
+            	GenotypingSample sample = m_providedIdToSampleMap.get(sIndOrSpId);
             	if (sample == null) {
             		progress.setError("Sample / individual mapping file contains no individual for sample " + sIndOrSpId);
             		return 0;
@@ -452,7 +458,7 @@ public class FlapjackImport extends AbstractGenotypeImport {
                                         nIndividualIndex++;
                                     }
 
-                                    VariantRunData runToSave = addFlapjackDataToVariant(mongoTemplate, variant, nAssemblyId, position, individuals, nonSnpVariantTypeMap, alleles, project, sRun, providedIdToSampleMap, fImportUnknownVariants);
+                                    VariantRunData runToSave = addFlapjackDataToVariant(mongoTemplate, variant, nAssemblyId, position, individuals, nonSnpVariantTypeMap, alleles, project, sRun, fImportUnknownVariants);
 
                                     for (Assembly assembly : assemblies) {
                                         ReferencePosition rp = variant.getReferencePosition(assembly.getId());
@@ -512,15 +518,12 @@ public class FlapjackImport extends AbstractGenotypeImport {
             // save project data
             if (!project.getRuns().contains(sRun))
                 project.getRuns().add(sRun);
-            mongoTemplate.save(project);    // always save project before samples otherwise the sample cleaning procedure in MgdbDao.prepareDatabaseForSearches may remove them if called in the meantime
-            mongoTemplate.insert(providedIdToSampleMap.values(), GenotypingSample.class);
+            mongoTemplate.save(project);
         }
         finally
         {
             if (reader != null)
                 reader.close();
-            if (tempFile != null)
-                tempFile.delete();
         }
         return count.get();
     }
@@ -854,7 +857,7 @@ public class FlapjackImport extends AbstractGenotypeImport {
      * @param samples 
      * @param fImportUnknownVariants
      */
-    static private VariantRunData addFlapjackDataToVariant(MongoTemplate mongoTemplate, VariantData variantToFeed, Integer nAssemblyId, VariantMapPosition position, List<String> individuals, Map<String, Type> nonSnpVariantTypeMap, String[][] alleles, GenotypingProject project, String runName, HashMap<String, GenotypingSample> samples, boolean fImportUnknownVariants) throws Exception
+    private VariantRunData addFlapjackDataToVariant(MongoTemplate mongoTemplate, VariantData variantToFeed, Integer nAssemblyId, VariantMapPosition position, List<String> individuals, Map<String, Type> nonSnpVariantTypeMap, String[][] alleles, GenotypingProject project, String runName, boolean fImportUnknownVariants) throws Exception
     {
         VariantRunData vrd = new VariantRunData(new VariantRunData.VariantRunDataId(project.getId(), runName, variantToFeed.getId()));
 
@@ -888,7 +891,7 @@ public class FlapjackImport extends AbstractGenotypeImport {
             }
 
             SampleGenotype aGT = new SampleGenotype(gtCode);
-            vrd.getSampleGenotypes().put(samples.get(sIndividual).getId(), aGT);
+            vrd.getSampleGenotypes().put(m_providedIdToSampleMap.get(sIndividual).getId(), aGT);
         }
         
         if (fImportUnknownVariants && variantToFeed.getReferencePosition(nAssemblyId) == null && position.getSequence() != null) // otherwise we leave it as it is (had some trouble with overridden end-sites)
@@ -912,7 +915,6 @@ public class FlapjackImport extends AbstractGenotypeImport {
         vrd.setSynonyms(variantToFeed.getSynonyms());
         return vrd;
     }
-
 
     private class VariantMapPosition {
     	private String sequence;
