@@ -22,28 +22,36 @@ import org.springframework.data.mongodb.core.index.Indexed;
 import org.springframework.data.mongodb.core.mapping.Document;
 import org.springframework.data.mongodb.core.mapping.Field;
 
+import fr.cirad.mgdb.model.mongo.subtypes.AbstractVariantData;
+
 /**
  * The Class Assembly.
  */
 @Document(collection = "assemblies")
 @TypeAlias("A")
 public class Assembly {
-
-//    public final static String FIELDNAME_DATABASE = "d";
     
 	public final static String FIELDNAME_NAME = "n";
 
+    private static ThreadLocal<Integer> threadAssembly = new ThreadLocal<Integer>();
+
+	public static Integer getThreadAssembly() {
+		return threadAssembly.get();
+	}
+
+	public static String getThreadRefPosPath() {
+		return threadAssembly.get() != null && threadAssembly.get() != 0 ? AbstractVariantData.FIELDNAME_POSITIONS + "." + threadAssembly.get() : AbstractVariantData.FIELDNAME_REFERENCE_POSITION;
+	}
+
+	public static void setThreadAssembly(Integer threadAssembly) {
+		Assembly.threadAssembly.set(threadAssembly);
+	}
+	
     /**
      * The id.
      */
     @Id
     private int id;
-
-//    /**
-//     * The type.
-//     */
-//    @Field(FIELDNAME_DATABASE)
-//    private String database;
 
     /**
      * The description.
@@ -89,12 +97,4 @@ public class Assembly {
         this.name = name;
     }
 
-//	public String getDatabase() {
-//		return database;
-//	}
-//
-//	public void setDatabase(String database) {
-//		this.database = database;
-//	}
-//
 }
