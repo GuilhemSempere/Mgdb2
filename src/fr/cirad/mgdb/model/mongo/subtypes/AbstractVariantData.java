@@ -70,9 +70,6 @@ abstract public class AbstractVariantData
     /** The Constant FIELDNAME_POSITIONS. */
     public final static String FIELDNAME_POSITIONS = "p";
     
-    /** The Constant FIELDNAME_PROJECT_DATA. */
-    public final static String FIELDNAME_PROJECT_DATA = "pj";
-    
     /** The Constant FIELDNAME_SYNONYM_TYPE_ID_ILLUMINA. */
     public final static String FIELDNAME_SYNONYM_TYPE_ID_ILLUMINA = "il";
     
