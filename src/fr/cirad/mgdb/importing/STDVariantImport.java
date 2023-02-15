@@ -324,9 +324,6 @@ public class STDVariantImport extends AbstractGenotypeImport {
             	for (File f : sortTempFiles)
             		if (f.exists())
             			f.delete();
-        	
-			if (ctx != null)
-				ctx.close();
 			
 			MongoTemplateManager.unlockProjectForWriting(sModule, sProject);
             if (progress.getError() == null && !progress.isAborted()) {
@@ -334,6 +331,9 @@ public class STDVariantImport extends AbstractGenotypeImport {
                 progress.moveToNextStep();
                 MgdbDao.prepareDatabaseForSearches(sModule);
             }
+
+			if (ctx != null)
+				ctx.close();
 		}
 	}
 
@@ -345,7 +345,7 @@ public class STDVariantImport extends AbstractGenotypeImport {
 	    for (int j=0; j<Math.max(1, nNumberOfRetries); j++)
 	    {           
 	        Query query = new Query(Criteria.where("_id").is(mgdbVariantId));
-	        query.fields().include(VariantData.FIELDNAME_REFERENCE_POSITION).include(VariantData.FIELDNAME_KNOWN_ALLELES).include(VariantData.FIELDNAME_PROJECT_DATA + "." + project.getId()).include(VariantData.FIELDNAME_VERSION);
+	        query.fields().include(VariantData.FIELDNAME_POSITIONS).include(VariantData.FIELDNAME_KNOWN_ALLELES).include(VariantData.FIELDNAME_VERSION);
 	        
 	        VariantData variant = mongoTemplate.findOne(query, VariantData.class);
 	        Update update = variant == null ? null : new Update();
@@ -447,7 +447,6 @@ public class STDVariantImport extends AbstractGenotypeImport {
 	            }
 	            else if (!update.getUpdateObject().keySet().isEmpty())
 	            {
-	//              update.set(VariantData.FIELDNAME_PROJECT_DATA + "." + project.getId(), projectData);
 	                mongoTemplate.upsert(new Query(Criteria.where("_id").is(mgdbVariantId)).addCriteria(Criteria.where(VariantData.FIELDNAME_VERSION).is(variant.getVersion())), update, VariantData.class);
 	//              System.out.println("updated: " + variant.getId());
 	            }

@@ -645,15 +645,16 @@ public class BrapiImport extends AbstractGenotypeImport {
 //				System.out.println("temp file size: " + tempFile.length());
 				tempFile.delete();
 			}
-			if (ctx != null)
-				ctx.close();
-			
+
 			MongoTemplateManager.unlockProjectForWriting(sModule, sProject);
             if (progress.getError() == null && !progress.isAborted()) {
                 progress.addStep("Preparing database for searches");
                 progress.moveToNextStep();
                 MgdbDao.prepareDatabaseForSearches(sModule);
             }
+
+			if (ctx != null)
+				ctx.close();
 		}
 	}
 	
@@ -797,8 +798,6 @@ public class BrapiImport extends AbstractGenotypeImport {
 		{
 			if (in != null)
 				in.close();
-			if (ctx != null)
-				ctx.close();
 		}
 	}
 	
@@ -807,7 +806,7 @@ public class BrapiImport extends AbstractGenotypeImport {
 		for (int j=0; j<Math.max(1, nNumberOfRetries); j++)
 		{			
 			Query query = new Query(Criteria.where("_id").is(mgdbVariantId));
-			query.fields().include(VariantData.FIELDNAME_TYPE).include(VariantData.FIELDNAME_REFERENCE_POSITION).include(VariantData.FIELDNAME_KNOWN_ALLELES).include(VariantData.FIELDNAME_PROJECT_DATA + "." + project.getId()).include(VariantData.FIELDNAME_VERSION);
+			query.fields().include(VariantData.FIELDNAME_TYPE).include(VariantData.FIELDNAME_REFERENCE_POSITION).include(VariantData.FIELDNAME_KNOWN_ALLELES).include(VariantData.FIELDNAME_VERSION);
 			
 			VariantData variant = mongoTemplate.findOne(query, VariantData.class);
 			Update update = variant == null ? null : new Update();
