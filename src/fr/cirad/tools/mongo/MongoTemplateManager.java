@@ -568,27 +568,6 @@ public class MongoTemplateManager implements ApplicationContextAware {
         return get(sModule).getDb().getName().contains(EXPIRY_PREFIX);
     }
 
-//	public void saveRunsIntoProjectRecords()
-//	{
-//		for (String module : getAvailableModules())
-//		{
-//			MongoTemplate mongoTemplate = MongoTemplateManager.get(module);
-//			for (GenotypingProject proj : mongoTemplate.findAll(GenotypingProject.class))
-//				if (proj.getRuns().size() == 0)
-//				{
-//					boolean fRunAdded = false;
-//					for (String run : (List<String>) mongoTemplate.getCollection(MongoTemplateManager.getMongoCollectionName(VariantData.class)).distinct(VariantData.FIELDNAME_PROJECT_DATA + "." + proj.getId() + "." + Run.RUNNAME))
-//						if (!proj.getRuns().contains(run))
-//						{
-//							proj.getRuns().add(run);
-//							LOG.info("run " + run + " added to project " + proj.getName() + " in module " + module);
-//							fRunAdded = true;
-//						}
-//					if (fRunAdded)
-//						mongoTemplate.save(proj);
-//				}
-//		}
-//	}
     /**
      * Gets the mongo collection name.
      *
