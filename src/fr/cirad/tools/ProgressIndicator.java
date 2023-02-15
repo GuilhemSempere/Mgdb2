@@ -248,9 +248,9 @@ public class ProgressIndicator
 		    @Override
 		    public void run() {
 		    	progressIndicators.remove(m_processId);
-//		    	LOG.debug("removed " + (hashCode()  + ": " + getProgressDescription()) + " for process " + m_processId);
+		    	LOG.debug("removed " + (hashCode()  + ": " + getProgressDescription()) + " for process " + m_processId);
 		    }
-		}, 5000);
+		}, 2500);
 	}
 	
 	/**
