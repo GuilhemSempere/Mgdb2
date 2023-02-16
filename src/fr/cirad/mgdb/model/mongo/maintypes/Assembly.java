@@ -39,8 +39,12 @@ public class Assembly {
 		return threadAssembly.get();
 	}
 
+	public static String getThreadRefPosPath(Integer nAssemblyId) {
+		return nAssemblyId != null && nAssemblyId != 0 ? AbstractVariantData.FIELDNAME_POSITIONS + "." + nAssemblyId : AbstractVariantData.FIELDNAME_REFERENCE_POSITION;
+	}
+
 	public static String getThreadRefPosPath() {
-		return threadAssembly.get() != null && threadAssembly.get() != 0 ? AbstractVariantData.FIELDNAME_POSITIONS + "." + threadAssembly.get() : AbstractVariantData.FIELDNAME_REFERENCE_POSITION;
+		return getThreadRefPosPath(threadAssembly.get());
 	}
 
 	public static void setThreadAssembly(Integer threadAssembly) {
