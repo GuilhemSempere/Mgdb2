@@ -53,6 +53,7 @@ import com.mongodb.client.model.IndexOptions;
 import com.mongodb.client.result.DeleteResult;
 
 import fr.cirad.mgdb.exporting.IExportHandler;
+import fr.cirad.mgdb.model.mongo.maintypes.Assembly;
 import fr.cirad.mgdb.model.mongo.maintypes.CachedCount;
 import fr.cirad.mgdb.model.mongo.maintypes.CustomIndividualMetadata;
 import fr.cirad.mgdb.model.mongo.maintypes.CustomIndividualMetadata.CustomIndividualMetadataId;
@@ -241,62 +242,66 @@ public class MgdbDao {
      */
     public static int ensurePositionIndexes(MongoTemplate mongoTemplate, Collection<MongoCollection<Document>> varColls) {
         int nResult = 0;
-        String rpPath = VariantData.FIELDNAME_REFERENCE_POSITION + ".";
-        BasicDBObject coumpoundIndexKeys = new BasicDBObject(rpPath + ReferencePosition.FIELDNAME_SEQUENCE, 1).append(rpPath + ReferencePosition.FIELDNAME_START_SITE, 1), ssIndexKeys = new BasicDBObject(rpPath + ReferencePosition.FIELDNAME_START_SITE, 1);
-
-        for (MongoCollection<Document> coll : varColls) {
-            boolean fIsTmpColl = coll.getNamespace().getCollectionName().startsWith(MongoTemplateManager.TEMP_COLL_PREFIX);
-            if (!fIsTmpColl && coll.estimatedDocumentCount() == 0) {
-                continue;	// database seems empty: indexes will be created after imports (faster this way) 
-            }
-            boolean fFoundCoumpoundIndex = false, fFoundCorrectCoumpoundIndex = false, fFoundStartSiteIndex = false;
-            MongoCursor<Document> indexCursor = coll.listIndexes().cursor();
-            while (indexCursor.hasNext()) {
-                Document doc = (Document) indexCursor.next();
-                Document keyDoc = ((Document) doc.get("key"));
-                Set<String> keyIndex = (Set<String>) keyDoc.keySet();
-                if (keyIndex.size() == 1) {
-                    if ((rpPath + ReferencePosition.FIELDNAME_START_SITE).equals(keyIndex.iterator().next())) {
-                        fFoundStartSiteIndex = true;
-                    }
-                } else if (keyIndex.size() == 2) {	// compound index
-                    String[] compoundIndexItems = keyIndex.toArray(new String[2]);
-                    if (compoundIndexItems[0].equals(rpPath + ReferencePosition.FIELDNAME_SEQUENCE) && compoundIndexItems[1].equals(rpPath + ReferencePosition.FIELDNAME_START_SITE)) {
-                        fFoundCoumpoundIndex = true;
-                        Document collation = (Document) doc.get("collation");
-                        fFoundCorrectCoumpoundIndex = collation != null && "en_US".equals(collation.get("locale")) && Boolean.TRUE.equals(collation.get("numericOrdering"));
-                    }
-                }
-            }
-            if (!fFoundStartSiteIndex) {
-                Thread ssIndexCreationThread = new Thread() {
-                    public void run() {
-                        LOG.log(fIsTmpColl ? Level.DEBUG : Level.INFO, "Creating index " + ssIndexKeys + " on collection " + coll.getNamespace());
-                        coll.createIndex(ssIndexKeys);
-                    }
-                };
-                ssIndexCreationThread.start();
-                nResult++;
-            }
-
-            if (!fFoundCoumpoundIndex || (fFoundCoumpoundIndex && !fFoundCorrectCoumpoundIndex)) {
-                final MongoCollection<Document> collToDropCompoundIndexOn = fFoundCoumpoundIndex ? coll : null;
-                Thread ssIndexCreationThread = new Thread() {
-                    public void run() {
-                        if (collToDropCompoundIndexOn != null) {
-                            LOG.log(fIsTmpColl ? Level.DEBUG : Level.INFO, "Dropping wrong index " + coumpoundIndexKeys + " on collection " + collToDropCompoundIndexOn.getNamespace());
-                            collToDropCompoundIndexOn.dropIndex(coumpoundIndexKeys);
-                        }
-
-                        LOG.log(fIsTmpColl ? Level.DEBUG : Level.INFO, "Creating index " + coumpoundIndexKeys + " on collection " + coll.getNamespace());
-                        coll.createIndex(coumpoundIndexKeys, new IndexOptions().collation(IExportHandler.collationObj));
-                    }
-                };
-                ssIndexCreationThread.start();
-
-                nResult++;
-
-            }
+        List<Assembly> assemblies = mongoTemplate.findAll(Assembly.class);
+        List<Integer> asmIDs = !assemblies.isEmpty() ? assemblies.stream().map(asm -> asm.getId()).collect(Collectors.toList()) : new ArrayList() {{ add(null); }};
+        for (Integer assemblyId : asmIDs) {
+	        String rpPath = Assembly.getThreadRefPosPath(assemblyId) + ".";
+	        BasicDBObject coumpoundIndexKeys = new BasicDBObject(rpPath + ReferencePosition.FIELDNAME_SEQUENCE, 1).append(rpPath + ReferencePosition.FIELDNAME_START_SITE, 1), ssIndexKeys = new BasicDBObject(rpPath + ReferencePosition.FIELDNAME_START_SITE, 1);
+	
+	        for (MongoCollection<Document> coll : varColls) {
+	            boolean fIsTmpColl = coll.getNamespace().getCollectionName().startsWith(MongoTemplateManager.TEMP_COLL_PREFIX);
+	            if (!fIsTmpColl && coll.estimatedDocumentCount() == 0) {
+	                continue;	// database seems empty: indexes will be created after imports (faster this way) 
+	            }
+	            boolean fFoundCoumpoundIndex = false, fFoundCorrectCoumpoundIndex = false, fFoundStartSiteIndex = false;
+	            MongoCursor<Document> indexCursor = coll.listIndexes().cursor();
+	            while (indexCursor.hasNext()) {
+	                Document doc = (Document) indexCursor.next();
+	                Document keyDoc = ((Document) doc.get("key"));
+	                Set<String> keyIndex = (Set<String>) keyDoc.keySet();
+	                if (keyIndex.size() == 1) {
+	                    if ((rpPath + ReferencePosition.FIELDNAME_START_SITE).equals(keyIndex.iterator().next())) {
+	                        fFoundStartSiteIndex = true;
+	                    }
+	                } else if (keyIndex.size() == 2) {	// compound index
+	                    String[] compoundIndexItems = keyIndex.toArray(new String[2]);
+	                    if (compoundIndexItems[0].equals(rpPath + ReferencePosition.FIELDNAME_SEQUENCE) && compoundIndexItems[1].equals(rpPath + ReferencePosition.FIELDNAME_START_SITE)) {
+	                        fFoundCoumpoundIndex = true;
+	                        Document collation = (Document) doc.get("collation");
+	                        fFoundCorrectCoumpoundIndex = collation != null && "en_US".equals(collation.get("locale")) && Boolean.TRUE.equals(collation.get("numericOrdering"));
+	                    }
+	                }
+	            }
+	            if (!fFoundStartSiteIndex) {
+	                Thread ssIndexCreationThread = new Thread() {
+	                    public void run() {
+	                        LOG.log(fIsTmpColl ? Level.DEBUG : Level.INFO, "Creating index " + ssIndexKeys + " on collection " + coll.getNamespace());
+	                        coll.createIndex(ssIndexKeys);
+	                    }
+	                };
+	                ssIndexCreationThread.start();
+	                nResult++;
+	            }
+	
+	            if (!fFoundCoumpoundIndex || (fFoundCoumpoundIndex && !fFoundCorrectCoumpoundIndex)) {
+	                final MongoCollection<Document> collToDropCompoundIndexOn = fFoundCoumpoundIndex ? coll : null;
+	                Thread ssIndexCreationThread = new Thread() {
+	                    public void run() {
+	                        if (collToDropCompoundIndexOn != null) {
+	                            LOG.log(fIsTmpColl ? Level.DEBUG : Level.INFO, "Dropping wrong index " + coumpoundIndexKeys + " on collection " + collToDropCompoundIndexOn.getNamespace());
+	                            collToDropCompoundIndexOn.dropIndex(coumpoundIndexKeys);
+	                        }
+	
+	                        LOG.log(fIsTmpColl ? Level.DEBUG : Level.INFO, "Creating index " + coumpoundIndexKeys + " on collection " + coll.getNamespace());
+	                        coll.createIndex(coumpoundIndexKeys, new IndexOptions().collation(IExportHandler.collationObj));
+	                    }
+	                };
+	                ssIndexCreationThread.start();
+	
+	                nResult++;
+	
+	            }
+	        }
         }
         return nResult;
     }
