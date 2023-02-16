@@ -167,6 +167,7 @@ public class InitialVariantImport {
                     assemblies.add(null);   // means default, unnamed assembly
                 }
                 
+                int idColIndex = header.indexOf("id"), typeColIndex = header.indexOf("type"), chipColIndex = header.indexOf("chip");
                 long count = 0;
                 int nNumberOfVariantsToSaveAtOnce = 50000;
                 ArrayList<VariantData> unsavedVariants = new ArrayList<VariantData>();
@@ -175,8 +176,10 @@ public class InitialVariantImport {
                     if (sLine.length() > 0)
                     {
                         List<String> cells = Helper.split(sLine, "\t");
-                        VariantData variant = new VariantData(cells.get(header.indexOf("id")));
-                        variant.setType(cells.get(header.indexOf("type")));
+                        if (cells.size() < 7)
+                        	LOG.warn("Skipping incomplete line: " + sLine);
+                        VariantData variant = new VariantData(cells.get(idColIndex));
+                        variant.setType(cells.get(typeColIndex));
                         for (Assembly assembly : assemblies) {
                             String[] seqAndPos = cells.get(header.indexOf(assembly == null ? "pos" : (ASSEMBLY_POSITION_PREFIX + assembly.getName()))).split(":");
                             if (seqAndPos.length == 2 && !seqAndPos[0].equals("0"))
@@ -185,7 +188,7 @@ public class InitialVariantImport {
                         
                         if (!variant.getId().toString().startsWith("*"))    // otherwise it's a deprecated variant that we don't want to appear
                         {
-                            String chipList = cells.get(header.indexOf("chip"));
+                            String chipList = cells.get(chipColIndex);
                             if (chipList.length() > 0)
                             {
                                 TreeSet<String> analysisMethods = new TreeSet<String>();
