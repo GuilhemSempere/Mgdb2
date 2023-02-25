@@ -158,14 +158,6 @@ abstract public class AbstractVariantData
 
 	static private HashSet<String> specificallyTreatedAdditionalInfoFields = new HashSet<String> () {{ add(FIELD_SOURCE); add(FIELD_FULLYDECODED); add(FIELD_FILTERS); add(FIELD_PHREDSCALEDQUAL); }};
 
-    public static Document projectionAndSortDoc(String assemblyPrefix) {
-        return new Document(AbstractVariantData.FIELDNAME_REFERENCE_POSITION + "." + assemblyPrefix + ReferencePosition.FIELDNAME_SEQUENCE, 1).append(AbstractVariantData.FIELDNAME_REFERENCE_POSITION + "." + assemblyPrefix + ReferencePosition.FIELDNAME_START_SITE, 1);   
-    }
-
-//    public static Document sortDoc(String assemblyPrefix) {
-//        return new Document(AbstractVariantData.FIELDNAME_REFERENCE_POSITION + "." + assemblyPrefix + ReferencePosition.FIELDNAME_SEQUENCE, 1).append(AbstractVariantData.FIELDNAME_REFERENCE_POSITION + "." + assemblyPrefix + ReferencePosition.FIELDNAME_START_SITE, 1);
-//    }
-
 	/**
 	 * Fixes AD array in the case where provided alleles are different from the order in which we have them in the DB
 	 * @param importedAD
@@ -447,6 +439,7 @@ abstract public class AbstractVariantData
     /**
      * Gets the reference position for a given assembly ID.
      *
+     * @param nAssemblyId the assembly id
      * @return the reference position
      */
     public ReferencePosition getReferencePosition(Integer nAssemblyId) {
@@ -456,15 +449,34 @@ abstract public class AbstractVariantData
     /**
      * Sets the reference positions.
      *
-     * @param positions the new reference position
+     * @param positions by assembly ID
      */
     public void setPositions(Map<Integer, ReferencePosition> positions) {
         this.positions = positions;
-    }    
+    }
+
+    /**
+     * Gets the reference position for the default, unnamed (old-style) assembly
+     *
+     * @return the default reference position
+     */
+    public ReferencePosition getReferencePosition() {
+        return referencePosition;
+    }
+
+    /**
+     * Sets the reference position for the default, unnamed (old-style) assembly
+     *
+     * @param referencePosition the new reference position
+     */
+    public void setReferencePosition(ReferencePosition referencePosition) {
+   		this.referencePosition = referencePosition;
+    }
 
     /**
      * Sets the reference position for a given assembly ID.
      *
+     * @param nAssemblyId the assembly id
      * @param referencePosition the new reference position
      */
     public void setReferencePosition(Integer nAssemblyId, ReferencePosition referencePosition) {
@@ -847,22 +859,20 @@ abstract public class AbstractVariantData
         String source = run == null ? null : (String) run.getAdditionalInfo().get(FIELD_SOURCE);
 
         ReferencePosition referencePosition = getReferencePosition(nAssemblyId);
-        Long start = referencePosition == null ? null : referencePosition.getStartSite();
-        Long stop = null;
-        if (referencePosition != null) {
-            if (referencePosition.getEndSite() != null)
-                stop = referencePosition.getEndSite();
-            else {
-                if (sRefAllele == null) {
-                    setKnownAlleles(mongoTemplate.findById(getVariantId(), VariantData.class).getKnownAlleles());
-                    mongoTemplate.save(this);
-                    sRefAllele = knownAlleles.iterator().next();
-                }
-                stop = start + sRefAllele.length() - 1;
+        long start = referencePosition != null ? referencePosition.getStartSite() : 0;
+        long stop;
+        if (referencePosition != null && referencePosition.getEndSite() != null)
+            stop = referencePosition.getEndSite();
+        else {
+            if (sRefAllele == null) {	// there should be one, let's fix that
+                setKnownAlleles(mongoTemplate.findById(getVariantId(), VariantData.class).getKnownAlleles());
+                mongoTemplate.save(this);
+                sRefAllele = knownAlleles.iterator().next();
             }
+            stop = start + sRefAllele.length() - 1;
         }
         String chr = referencePosition == null ? null : referencePosition.getSequence();
-        VariantContextBuilder vcb = new VariantContextBuilder(source != null ? source : FIELDVAL_SOURCE_MISSING, chr != null ? chr : "", start != null ? start : 0, stop != null ? stop : 0, variantAlleles);
+        VariantContextBuilder vcb = new VariantContextBuilder(source != null ? source : FIELDVAL_SOURCE_MISSING, chr != null ? chr : "", start, stop, variantAlleles);
         if (exportVariantIDs)
             vcb.id((synonym == null ? getVariantId() : synonym).toString());
         vcb.genotypes(genotypes);

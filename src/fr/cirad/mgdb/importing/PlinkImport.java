@@ -509,9 +509,10 @@ public class PlinkImport extends AbstractGenotypeImport {
                                         ReferencePosition rp = variant.getReferencePosition(assembly.getId());
                                         if (rp != null)
                                         	project.getContigs(assembly.getId()).add(rp.getSequence());
-                                  }
+                                    }
 
-                                    project.getAlleleCounts().add(variant.getKnownAlleles().size()); // it's a TreeSet so it will only be added if it's not already present
+                                    project.getVariantTypes().add(variant.getType());					// it's a TreeSet so it will only be added if it's not already present
+                                    project.getAlleleCounts().add(variant.getKnownAlleles().size());	// it's a TreeSet so it will only be added if it's not already present
                                     if (variant.getKnownAlleles().size() > 2)
                                         LOG.warn("Variant " + variant.getId() + " (" + providedVariantId + ") has more than 2 alleles!");
 
@@ -895,10 +896,8 @@ public class PlinkImport extends AbstractGenotypeImport {
         if (!alleleIndexMap.isEmpty()) {
             Type variantType = nonSnpVariantTypeMap.get(variantToFeed.getId());
             String sVariantType = variantType == null ? Type.SNP.toString() : variantType.toString();
-            if (variantToFeed.getType() == null || Type.NO_VARIATION.toString().equals(variantToFeed.getType())) {
+            if (variantToFeed.getType() == null || Type.NO_VARIATION.toString().equals(variantToFeed.getType()))
                 variantToFeed.setType(sVariantType);
-                project.getVariantTypes().add(sVariantType);
-            }
             else if (null != variantType && Type.NO_VARIATION != variantType && !variantToFeed.getType().equals(sVariantType))
                 throw new Exception("Variant type mismatch between existing data and data to import: " + variantToFeed.getId());
         }

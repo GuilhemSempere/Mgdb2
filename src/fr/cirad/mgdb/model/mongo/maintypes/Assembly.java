@@ -35,16 +35,24 @@ public class Assembly {
 
     private static ThreadLocal<Integer> threadAssembly = new ThreadLocal<Integer>();
 
-	public static Integer getThreadAssembly() {
+	public static Integer getThreadBoundAssembly() {
 		return threadAssembly.get();
 	}
 
-	public static String getThreadRefPosPath(Integer nAssemblyId) {
-		return nAssemblyId != null && nAssemblyId != 0 ? AbstractVariantData.FIELDNAME_POSITIONS + "." + nAssemblyId : AbstractVariantData.FIELDNAME_REFERENCE_POSITION;
+	public static String getVariantRefPosPath(Integer nAssemblyId) {
+		return nAssemblyId != null ? AbstractVariantData.FIELDNAME_POSITIONS + "." + nAssemblyId : AbstractVariantData.FIELDNAME_REFERENCE_POSITION;
 	}
 
-	public static String getThreadRefPosPath() {
-		return getThreadRefPosPath(threadAssembly.get());
+	public static String getThreadBoundVariantRefPosPath() {
+		return getVariantRefPosPath(threadAssembly.get());
+	}
+
+	public static String getProjectContigsPath(Integer nAssemblyId) {
+		return nAssemblyId != null ? GenotypingProject.FIELDNAME_CONTIGS + "." + nAssemblyId : GenotypingProject.FIELDNAME_SEQUENCES;
+	}
+
+	public static String getThreadBoundProjectContigsPath() {
+		return getProjectContigsPath(threadAssembly.get());
 	}
 
 	public static void setThreadAssembly(Integer threadAssembly) {
@@ -55,7 +63,7 @@ public class Assembly {
      * The id.
      */
     @Id
-    private int id;
+    private Integer id;
 
     /**
      * The description.
@@ -69,7 +77,7 @@ public class Assembly {
      *
      * @param id the id
      */
-    public Assembly(int id) {
+    public Assembly(Integer id) {
         super();
         this.id = id;
     }
@@ -79,7 +87,7 @@ public class Assembly {
      *
      * @return the id
      */
-    public int getId() {
+    public Integer getId() {
         return id;
     }
 

@@ -399,7 +399,7 @@ public class HapMapImport extends AbstractGenotypeImport {
                                             knownAlleles.add(Allele.create(allele, alleleIndexMapSize == 0));
                                         }
                                     }
-                
+
                 					VariantRunData runToSave = addHapMapDataToVariant(finalMongoTemplate, variant, finalAssembly.getId(), variantType, alleleIndexMap, hmFeature, finalProject, sRun, sampleIds);
 
                                     for (Assembly assembly : assemblies) {

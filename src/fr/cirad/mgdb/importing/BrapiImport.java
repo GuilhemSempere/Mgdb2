@@ -220,9 +220,7 @@ public class BrapiImport extends AbstractGenotypeImport {
 
 			Pager mapPager = new Pager();						
 			while (mapPager.isPaging()) {
-				BrapiListResource<BrapiGenomeMap> maps = service.getMaps(null, mapPager.getPageSize(), mapPager.getPage())
-						.execute()
-						.body();
+				BrapiListResource<BrapiGenomeMap> maps = service.getMaps(null, mapPager.getPageSize(), mapPager.getPage()).execute().body();
 				for (BrapiGenomeMap map : maps.data()) {
 					if (mapDbId.equals(map.getMapDbId())) {
 						markerPager.setPageSize("" + Math.min(map.getMarkerCount() / 10, fMustGuessVariantTypes || fMayPostMarkersSearch ? 200000 : (fMayGetMarkersSearch ? 500 : 1)));
@@ -281,7 +279,7 @@ public class BrapiImport extends AbstractGenotypeImport {
 					try {
 					    variant.setReferencePosition(assembly.getId(), new ReferencePosition(bmp.getLinkageGroupName(), (long) Double.parseDouble(bmp.getLocation())));
 					}
-					catch (NumberFormatException nfe) {
+					catch (NumberFormatException | NullPointerException e) {
 					    LOG.info("No location for marker " + bmp.getMarkerDbId());
 					}
 					variantsToCreate.put(bmp.getMarkerDbId(), variant);
@@ -806,7 +804,7 @@ public class BrapiImport extends AbstractGenotypeImport {
 		for (int j=0; j<Math.max(1, nNumberOfRetries); j++)
 		{			
 			Query query = new Query(Criteria.where("_id").is(mgdbVariantId));
-			query.fields().include(VariantData.FIELDNAME_TYPE).include(VariantData.FIELDNAME_REFERENCE_POSITION).include(VariantData.FIELDNAME_KNOWN_ALLELES).include(VariantData.FIELDNAME_VERSION);
+			query.fields().include(VariantData.FIELDNAME_TYPE).include(VariantData.FIELDNAME_POSITIONS).include(VariantData.FIELDNAME_KNOWN_ALLELES).include(VariantData.FIELDNAME_VERSION);
 			
 			VariantData variant = mongoTemplate.findOne(query, VariantData.class);
 			Update update = variant == null ? null : new Update();

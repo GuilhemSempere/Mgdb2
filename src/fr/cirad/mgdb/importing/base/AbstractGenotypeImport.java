@@ -42,6 +42,7 @@ import org.springframework.data.mongodb.core.query.Query;
 import com.mongodb.client.MongoCursor;
 import com.mongodb.client.result.DeleteResult;
 
+import fr.cirad.mgdb.model.mongo.maintypes.Assembly;
 import fr.cirad.mgdb.model.mongo.maintypes.DBVCFHeader;
 import fr.cirad.mgdb.model.mongo.maintypes.DBVCFHeader.VcfHeaderId;
 import fr.cirad.mgdb.model.mongo.maintypes.GenotypingProject;
@@ -120,70 +121,25 @@ public class AbstractGenotypeImport {
 		return m_fSamplesPersisted;
 	}
 	
-//	public static void buildSynonymMappings(MongoTemplate mongoTemplate) throws Exception
-//	{
-//		DBCollection collection = mongoTemplate.getCollection(COLLECTION_NAME_SYNONYM_MAPPINGS);
-//		collection.drop();
-//
-//		long variantCount = mongoTemplate.count(null, VariantData.class);
-//        if (variantCount > 0)
-//        {	// there are already variants in the database: build a list of all existing variants, finding them by ID is by far most efficient
-//            long beforeReadingAllVariants = System.currentTimeMillis();
-//            Query query = new Query();
-//            query.fields().include("_id").include(VariantData.FIELDNAME_REFERENCE_POSITION).include(VariantData.FIELDNAME_TYPE).include(VariantData.FIELDNAME_SYNONYMS);
-//            DBCursor variantIterator = mongoTemplate.getCollection(mongoTemplate.getCollectionName(VariantData.class)).find(query.getQueryObject(), query.getFieldsObject());
-//            int i = 0, nDups = 0;
-//			while (variantIterator.hasNext())
-//			{
-//				DBObject vd = variantIterator.next();
-//				boolean fGotChrPos = vd.get(VariantData.FIELDNAME_REFERENCE_POSITION) != null;
-//				ArrayList<String> idAndSynonyms = new ArrayList<>();
-//				idAndSynonyms.add(vd.get("_id").toString());
-//				DBObject synonymsByType = (DBObject) vd.get(VariantData.FIELDNAME_SYNONYMS);
-//				for (String synonymType : synonymsByType.keySet())
-//					for (Object syn : (BasicDBList) synonymsByType.get(synonymType))
-//						idAndSynonyms.add((String) syn.toString());
-//
-//				for (String variantDescForPos : getIdentificationStrings((String) vd.get(VariantData.FIELDNAME_TYPE), !fGotChrPos ? null : (String) Helper.readPossiblyNestedField(vd, VariantData.FIELDNAME_REFERENCE_POSITION + "." + assemblyPrefix + ReferencePosition.FIELDNAME_SEQUENCE), !fGotChrPos ? null : (long) Helper.readPossiblyNestedField(vd, VariantData.FIELDNAME_REFERENCE_POSITION + "." + assemblyPrefix + ReferencePosition.FIELDNAME_START_SITE), idAndSynonyms))
-//				{
-//					BasicDBObject synonymMapping = new BasicDBObject("_id", variantDescForPos);
-//					synonymMapping.put("id", vd.get("_id"));
-//					try
-//					{
-//						collection.insert(synonymMapping);
-//					}
-//					catch (DuplicateKeyException dke)
-//					{
-//						nDups++;
-//						LOG.error(dke.getMessage());
-//					}
-//				}
-//
-//				float nProgressPercentage = ++i * 100f / variantCount;
-//				if (nProgressPercentage % 10 == 0)
-//					LOG.debug("buildSynonymMappings: " + nProgressPercentage + "%");
-//			}
-//            LOG.info(mongoTemplate.count(null, VariantData.class) + " VariantData record IDs were scanned in " + (System.currentTimeMillis() - beforeReadingAllVariants) / 1000 + "s");
-//            if (nDups > 0)
-//            	LOG.warn(nDups + " duplicates found in database " + mongoTemplate.getDb().getName());
-//        }
-//	}
-	
     protected static HashMap<String, String> buildSynonymToIdMapForExistingVariants(MongoTemplate mongoTemplate, boolean fIncludeRandomObjectIDs, int assemblyId) throws Exception
     {
         HashMap<String, String> existingVariantIDs = new HashMap<>();
         long variantCount = Helper.estimDocCount(mongoTemplate,VariantData.class);
+        
+        List<Assembly> assemblies = mongoTemplate.findAll(Assembly.class);
+		Integer nAssemblyId = assemblies.size() == 0 ? null : assemblies.get(0).getId();
+		String refPosPath = Assembly.getVariantRefPosPath(nAssemblyId);
+        
         if (variantCount > 0)
         {   // there are already variants in the database: build a list of all existing variants, finding them by ID is by far most efficient
             long beforeReadingAllVariants = System.currentTimeMillis();
             Query query = new Query();
-            query.fields().include("_id").include(VariantData.FIELDNAME_REFERENCE_POSITION).include(VariantData.FIELDNAME_TYPE).include(VariantData.FIELDNAME_SYNONYMS);
+            query.fields().include("_id").include(refPosPath).include(VariantData.FIELDNAME_TYPE).include(VariantData.FIELDNAME_SYNONYMS);
             MongoCursor<Document> variantIterator = mongoTemplate.getCollection(mongoTemplate.getCollectionName(VariantData.class)).find(query.getQueryObject()).projection(query.getFieldsObject()).iterator();
             while (variantIterator.hasNext())
             {
                 Document vd = variantIterator.next();
                 String variantIdAsString = vd.get("_id").toString();
-//              boolean fGotChrPos = ((Document) vd.get(VariantData.FIELDNAME_REFERENCE_POSITION)).get("" + assemblyId) != null;
                 ArrayList<String> idAndSynonyms = new ArrayList<>();
                 if (fIncludeRandomObjectIDs || !MgdbDao.idLooksGenerated(variantIdAsString))    // most of the time we avoid taking into account randomly generated IDs
                     idAndSynonyms.add(variantIdAsString);
@@ -193,7 +149,7 @@ public class AbstractGenotypeImport {
                         for (Object syn : (List) synonymsByType.get(synonymType))
                             idAndSynonyms.add((String) syn.toString());
 
-                for (String variantDescForPos : getIdentificationStrings((String) vd.get(VariantData.FIELDNAME_TYPE), /*!fGotChrPos ? null : */(String) Helper.readPossiblyNestedField(vd, VariantData.FIELDNAME_REFERENCE_POSITION + "." + assemblyId + "." + ReferencePosition.FIELDNAME_SEQUENCE, ";", null), /*!fGotChrPos ? null :*/ (Long) Helper.readPossiblyNestedField(vd, VariantData.FIELDNAME_REFERENCE_POSITION + "." + assemblyId + "." + ReferencePosition.FIELDNAME_START_SITE, ";", null), idAndSynonyms)) {
+                for (String variantDescForPos : getIdentificationStrings((String) vd.get(VariantData.FIELDNAME_TYPE), (String) Helper.readPossiblyNestedField(vd, refPosPath + "." + ReferencePosition.FIELDNAME_SEQUENCE, ";", null), /*!fGotChrPos ? null :*/ (Long) Helper.readPossiblyNestedField(vd, refPosPath + "." + ReferencePosition.FIELDNAME_START_SITE, ";", null), idAndSynonyms)) {
                     if (existingVariantIDs.containsKey(variantDescForPos) && !variantIdAsString.startsWith("*"))
                         throw new Exception("This database seems to contain duplicate variants (check " + variantDescForPos.replaceAll("¤", ":") + "). Importing additional data will not be supported until this problem is fixed.");
 

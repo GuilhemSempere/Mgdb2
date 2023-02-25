@@ -245,7 +245,7 @@ public class MgdbDao {
         List<Assembly> assemblies = mongoTemplate.findAll(Assembly.class);
         List<Integer> asmIDs = !assemblies.isEmpty() ? assemblies.stream().map(asm -> asm.getId()).collect(Collectors.toList()) : new ArrayList() {{ add(null); }};
         for (Integer assemblyId : asmIDs) {
-	        String rpPath = Assembly.getThreadRefPosPath(assemblyId) + ".";
+	        String rpPath = Assembly.getVariantRefPosPath(assemblyId) + ".";
 	        BasicDBObject coumpoundIndexKeys = new BasicDBObject(rpPath + ReferencePosition.FIELDNAME_SEQUENCE, 1).append(rpPath + ReferencePosition.FIELDNAME_START_SITE, 1), ssIndexKeys = new BasicDBObject(rpPath + ReferencePosition.FIELDNAME_START_SITE, 1);
 	
 	        for (MongoCollection<Document> coll : varColls) {
@@ -334,14 +334,13 @@ public class MgdbDao {
      *
      * @param mongoTemplate the mongo template
      * @param variantFieldsToReturn the variant fields to return
-     * @param projectIdToReturnedRunFieldListMap the project id to returned run
-     * field list map
+     * @param projectIdToReturnedRunFieldListMap the project id to returned run field list map
      * @param variantIdListToRestrictTo the variant id list to restrict to
      * @param sort the sort
      * @return the sample genotypes
      * @throws Exception the exception
      */
-    private static LinkedHashMap<VariantData, Collection<VariantRunData>> getSampleGenotypes(MongoTemplate mongoTemplate, ArrayList<String> variantFieldsToReturn, HashMap<Integer, ArrayList<String>> projectIdToReturnedRunFieldListMap, List<Object> variantIdListToRestrictTo, Sort sort) throws Exception {
+    private static LinkedHashMap<VariantData, Collection<VariantRunData>> getSampleGenotypes(MongoTemplate mongoTemplate, ArrayList<String> variantFieldsToReturn, HashMap<Integer, ArrayList<String>> projectIdToReturnedRunFieldListMap, List<String> variantIdListToRestrictTo, Sort sort) throws Exception {
         Query variantQuery = new Query();
         if (sort != null) {
             variantQuery.with(sort);
@@ -422,7 +421,7 @@ public class MgdbDao {
      * @return the sample genotypes
      * @throws Exception the exception
      */
-    public static LinkedHashMap<VariantData, Collection<VariantRunData>> getSampleGenotypes(MongoTemplate mongoTemplate, Collection<GenotypingSample> samples, List<Object> variantIdListToRestrictTo, boolean fReturnVariantTypes, Sort sort) throws Exception {
+    public static LinkedHashMap<VariantData, Collection<VariantRunData>> getSampleGenotypes(MongoTemplate mongoTemplate, Collection<GenotypingSample> samples, List<String> variantIdListToRestrictTo, boolean fReturnVariantTypes, Sort sort) throws Exception {
         ArrayList<String> variantFieldsToReturn = new ArrayList<String>();
         variantFieldsToReturn.add(VariantData.FIELDNAME_KNOWN_ALLELES);
         variantFieldsToReturn.add(VariantData.FIELDNAME_REFERENCE_POSITION);

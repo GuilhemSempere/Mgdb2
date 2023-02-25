@@ -50,6 +50,7 @@ import com.mongodb.client.MongoCursor;
 
 import fr.cirad.mgdb.exporting.AbstractExportWritingThread;
 import fr.cirad.mgdb.exporting.IExportHandler;
+import fr.cirad.mgdb.model.mongo.maintypes.Assembly;
 import fr.cirad.mgdb.model.mongo.maintypes.GenotypingProject;
 import fr.cirad.mgdb.model.mongo.maintypes.GenotypingSample;
 import fr.cirad.mgdb.model.mongo.maintypes.VariantRunData;
@@ -73,9 +74,9 @@ public class ExportManager
     static public final AlphaNumericComparator<String> alphaNumericStringComparator = new AlphaNumericComparator<String>();
     
     static public final class VariantRunDataComparator implements Comparator<VariantRunData> {
-        private int nAssemblyId;
+        private Integer nAssemblyId;
         
-        public VariantRunDataComparator(int nAssemblyId) {
+        public VariantRunDataComparator(Integer nAssemblyId) {
             this.nAssemblyId = nAssemblyId;
         }
         
@@ -143,7 +144,7 @@ public class ExportManager
         String varCollName = varColl.getNamespace().getCollectionName();
         fWorkingOnTempColl = varCollName.startsWith(MongoTemplateManager.TEMP_COLL_PREFIX);
 
-        String refPosPath = nAssemblyId != null ? AbstractVariantData.FIELDNAME_POSITIONS + "." + nAssemblyId : AbstractVariantData.FIELDNAME_REFERENCE_POSITION;
+        String refPosPath = Assembly.getVariantRefPosPath(nAssemblyId);
         sortStage = new BasicDBObject("$sort", new Document(refPosPath  + "." + ReferencePosition.FIELDNAME_SEQUENCE, 1).append(refPosPath + "." + ReferencePosition.FIELDNAME_START_SITE, 1));
 
         // optimization 1: filling in involvedProjectRuns will provide means to apply filtering on project and/or run fields when exporting from temporary collection
@@ -205,7 +206,7 @@ public class ExportManager
 
     public void readAndWrite() throws IOException, InterruptedException, ExecutionException {        
         if (fWorkingOnTempColl)
-            exportFromTempColl(nAssemblyId);
+            exportFromTempColl();
         else
             exportDirectlyFromRuns();
     }
@@ -213,12 +214,11 @@ public class ExportManager
     /**
      * Exports by $match-ing successive chunks of variant IDs in VariantRunData. Would have thought using $lookup with a single cursor would be faster, but it's much slower
      * 
-     * @param nAssemblyId the assembly id
      * @throws IOException
      * @throws InterruptedException
      * @throws ExecutionException
      */
-    private void exportFromTempColl(int nAssemblyId) throws IOException, InterruptedException, ExecutionException {
+    private void exportFromTempColl() throws IOException, InterruptedException, ExecutionException {
         CompletableFuture<Void> future = null;        
         List<VariantRunData> currentMarkerRuns = new ArrayList<>(involvedRunCount);
         List<String> currentMarkerIDs = new ArrayList<>(nQueryChunkSize);
@@ -323,7 +323,7 @@ public class ExportManager
 
                 if (markerCount != null)
                     progress.setCurrentStepProgress(nWrittenmarkerCount * 100l / markerCount);
-                future = writingThread.writeChunkRuns(currentMarkerIDs, chunkMarkerRunsToWrite.values());
+                future = writingThread.writeChunkRuns(chunkMarkerRunsToWrite.values(), currentMarkerIDs);
                 chunkMarkerRunsToWrite = new LinkedHashMap<>(nQueryChunkSize);
                 
                 currentMarkerIDs = new ArrayList<>(nQueryChunkSize);
@@ -342,7 +342,8 @@ public class ExportManager
         Collection<Collection<VariantRunData>> tempMarkerRunsToWrite = new ArrayDeque<>(nQueryChunkSize);
         List<VariantRunData> currentMarkerRuns = new ArrayList<>();
         String varId = null, previousVarId = null;
-        int nWrittenmarkerCount = 0;
+        List<String> orderedVariantIds = new ArrayList<>();
+        int nTotalWrittenMarkerCount = 0;
         
         List<BasicDBObject> pipeline = new ArrayList<>();
         if (matchStage != null) {
@@ -390,16 +391,20 @@ public class ExportManager
             VariantRunData vrd = (VariantRunData) markerCursor.next();
             varId = vrd.getId().getVariantId();
 
-            if (previousVarId != null && !varId.equals(previousVarId)) {
+            if (previousVarId != null && !varId.equals(previousVarId)) {	// switching to the next variant
                 tempMarkerRunsToWrite.add(currentMarkerRuns);
+                orderedVariantIds.add(previousVarId);
                 currentMarkerRuns = new ArrayList<>();
-                nWrittenmarkerCount++;
             }
 
             currentMarkerRuns.add(vrd);
+            nTotalWrittenMarkerCount++;
 
-            if (!markerCursor.hasNext())
+            if (!markerCursor.hasNext()) {
                 tempMarkerRunsToWrite.add(currentMarkerRuns);    // special case, when the end of the cursor is being reached
+                orderedVariantIds.add(varId);
+                nTotalWrittenMarkerCount++;
+            }
 
             if (tempMarkerRunsToWrite.size() >= nQueryChunkSize || !markerCursor.hasNext()) {
                 nChunkIndex++;
@@ -433,9 +438,10 @@ public class ExportManager
                 }
 
                 if (markerCount != null && markerCount > 0)
-                    progress.setCurrentStepProgress(nWrittenmarkerCount * 100l / markerCount);
-                future = writingThread.writeChunkRuns(null /* FIXME*/, tempMarkerRunsToWrite);
-                tempMarkerRunsToWrite = new ArrayDeque<>(nQueryChunkSize); 
+                    progress.setCurrentStepProgress(nTotalWrittenMarkerCount * 100l / markerCount);
+                future = writingThread.writeChunkRuns(tempMarkerRunsToWrite, orderedVariantIds);
+                tempMarkerRunsToWrite = new ArrayDeque<>(nQueryChunkSize);
+                orderedVariantIds = new ArrayList<>();
             }
             previousVarId = varId;
         }
@@ -444,6 +450,6 @@ public class ExportManager
             future.get();
         markerCursor.close();
         if (markerCount != null && markerCount > 0)
-            progress.setCurrentStepProgress(nWrittenmarkerCount * 100l / markerCount);
+            progress.setCurrentStepProgress(nTotalWrittenMarkerCount * 100l / markerCount);
     }
 }

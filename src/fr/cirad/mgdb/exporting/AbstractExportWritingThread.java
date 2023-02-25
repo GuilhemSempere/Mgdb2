@@ -32,12 +32,12 @@ public abstract class AbstractExportWritingThread extends Thread
 	/** The Constant LOG. */
 	static final Logger LOG = Logger.getLogger(AbstractExportWritingThread.class);
 	
-	protected List<String> orderedMarkerIDs;
 	protected Collection<Collection<VariantRunData>> markerRunsToWrite;
+	protected List<String> orderedMarkerIDs;
 	
-	public CompletableFuture<Void> writeChunkRuns(List<String> orderedMarkerIDs, Collection<Collection<VariantRunData>> markerRunsToWrite) {
-		this.orderedMarkerIDs = orderedMarkerIDs;
+	public CompletableFuture<Void> writeChunkRuns(Collection<Collection<VariantRunData>> markerRunsToWrite, List<String> orderedMarkerIDs) {
 		this.markerRunsToWrite = markerRunsToWrite;
+		this.orderedMarkerIDs = orderedMarkerIDs;
 		return CompletableFuture.runAsync(this);
 	}
 	

@@ -33,9 +33,6 @@ import fr.cirad.mgdb.model.mongo.subtypes.AbstractVariantData;
  */
 @Document(collection = "variants")
 @TypeAlias("VD")
-//@CompoundIndexes({
-//    @CompoundIndex(def = "{'" + VariantData.FIELDNAME_REFERENCE_POSITION + "." + nAssemblyId + ReferencePosition.FIELDNAME_SEQUENCE + "': 1, '" + VariantData.FIELDNAME_REFERENCE_POSITION + "." + nAssemblyId + ReferencePosition.FIELDNAME_START_SITE + "': 1}")
-//})
 public class VariantData extends AbstractVariantData
 {
 	/** The Constant LOG. */
