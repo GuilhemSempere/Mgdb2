@@ -126,9 +126,7 @@ public class AbstractGenotypeImport {
         HashMap<String, String> existingVariantIDs = new HashMap<>();
         long variantCount = Helper.estimDocCount(mongoTemplate,VariantData.class);
         
-        List<Assembly> assemblies = mongoTemplate.findAll(Assembly.class);
-		Integer nAssemblyId = assemblies.size() == 0 ? null : assemblies.get(0).getId();
-		String refPosPath = Assembly.getVariantRefPosPath(nAssemblyId);
+		String refPosPath = Assembly.getVariantRefPosPath(assemblyId);
         
         if (variantCount > 0)
         {   // there are already variants in the database: build a list of all existing variants, finding them by ID is by far most efficient
