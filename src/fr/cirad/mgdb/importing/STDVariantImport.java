@@ -315,6 +315,10 @@ public class STDVariantImport extends AbstractGenotypeImport {
 	    	if (unsavedVariants.size() > 0)
 	    	   	LOG.warn("The following variants could not be saved because of concurrent writing: " + StringUtils.join(unsavedVariants, ", "));
 		}
+        catch (Exception e) {
+        	LOG.error("Error", e);
+        	progress.setError(e.getMessage());
+        }
 		finally
 		{
         	// let's cleanup
@@ -345,7 +349,7 @@ public class STDVariantImport extends AbstractGenotypeImport {
 	    for (int j=0; j<Math.max(1, nNumberOfRetries); j++)
 	    {           
 	        Query query = new Query(Criteria.where("_id").is(mgdbVariantId));
-	        query.fields().include(VariantData.FIELDNAME_POSITIONS).include(VariantData.FIELDNAME_KNOWN_ALLELES).include(VariantData.FIELDNAME_VERSION);
+	        query.fields().include(VariantData.FIELDNAME_POSITIONS).include(VariantData.FIELDNAME_SYNONYMS).include(VariantData.FIELDNAME_KNOWN_ALLELES).include(VariantData.FIELDNAME_VERSION);
 	        
 	        VariantData variant = mongoTemplate.findOne(query, VariantData.class);
 	        Update update = variant == null ? null : new Update();
