@@ -324,7 +324,10 @@ public class PlinkImport extends AbstractGenotypeImport {
             progress.addStep(info);
             progress.moveToNextStep();
 
-            HashMap<String, ArrayList<String>> inconsistencies = !fCheckConsistencyBetweenSynonyms ? null : checkSynonymGenotypeConsistency(rotatedFile, existingVariantIDs, userIndividualToPopulationMap.keySet(), pedFile.getParentFile() + File.separator + sModule + "_" + sProject + "_" + sRun);
+            HashMap<String, ArrayList<String>> inconsistencies = null;
+            HashSet<Integer> indexesOfLinesThatMustBeSkipped = new HashSet<>();
+            if (fCheckConsistencyBetweenSynonyms)
+            	checkSynonymGenotypeConsistency(rotatedFile, existingVariantIDs, userIndividualToPopulationMap.keySet(), pedFile.getParentFile() + File.separator + sModule + "_" + sProject + "_" + sRun, indexesOfLinesThatMustBeSkipped);
             if (progress.getError() != null || progress.isAborted())
                 return createdProject;
 
@@ -333,7 +336,7 @@ public class PlinkImport extends AbstractGenotypeImport {
             int nConcurrentThreads = Math.max(1, Runtime.getRuntime().availableProcessors());
             LOG.debug("Importing project '" + sProject + "' into " + sModule + " using " + nConcurrentThreads + " threads");
 
-            long count = importTempFileContents(progress, nConcurrentThreads, mongoTemplate, assembly.getId(), rotatedFile, variantsAndPositions, existingVariantIDs, project, sRun, inconsistencies, userIndividualToPopulationMap, nonSnpVariantTypeMap, fSkipMonomorphic);
+            long count = importTempFileContents(progress, nConcurrentThreads, mongoTemplate, assembly.getId(), rotatedFile, variantsAndPositions, existingVariantIDs, project, sRun, inconsistencies, userIndividualToPopulationMap, nonSnpVariantTypeMap, indexesOfLinesThatMustBeSkipped, fSkipMonomorphic);
 
             if (progress.getError() != null)
                 throw new Exception(progress.getError());
@@ -359,7 +362,7 @@ public class PlinkImport extends AbstractGenotypeImport {
         }
     }
 
-    public long importTempFileContents(ProgressIndicator progress, int nNConcurrentThreads, MongoTemplate mongoTemplate, Integer nAssemblyId, File tempFile, LinkedHashMap<String, String> variantsAndPositions, HashMap<String, String> existingVariantIDs, GenotypingProject project, String sRun, HashMap<String, ArrayList<String>> inconsistencies, Map<String, String> userIndividualToPopulationMap, Map<String, Type> nonSnpVariantTypeMap, boolean fSkipMonomorphic) throws Exception
+    public long importTempFileContents(ProgressIndicator progress, int nNConcurrentThreads, MongoTemplate mongoTemplate, Integer nAssemblyId, File tempFile, LinkedHashMap<String, String> variantsAndPositions, HashMap<String, String> existingVariantIDs, GenotypingProject project, String sRun, HashMap<String, ArrayList<String>> inconsistencies, Map<String, String> userIndividualToPopulationMap, Map<String, Type> nonSnpVariantTypeMap, HashSet<Integer> indexesOfLinesThatMustBeSkipped, boolean fSkipMonomorphic) throws Exception
     {
         String[] individuals = userIndividualToPopulationMap.keySet().toArray(new String[userIndividualToPopulationMap.size()]);
         final AtomicInteger count = new AtomicInteger(0);
@@ -420,6 +423,7 @@ public class PlinkImport extends AbstractGenotypeImport {
             ExecutorService saveService = new ThreadPoolExecutor(1, saveServiceThreads(nNConcurrentThreads), 30, TimeUnit.SECONDS, saveServiceQueue, new ThreadPoolExecutor.CallerRunsPolicy());
             
             final Collection<Assembly> assemblies = mongoTemplate.findAll(Assembly.class);
+            AtomicInteger nLineIndex = new AtomicInteger(-1);
 
             for (int threadIndex = 0; threadIndex < nImportThreads; threadIndex++) {
                 importThreads[threadIndex] = new Thread() {
@@ -433,11 +437,14 @@ public class PlinkImport extends AbstractGenotypeImport {
                                 String line;
                                 synchronized (finalReader) {
                                     line = finalReader.readLine();
+	                                if (indexesOfLinesThatMustBeSkipped.contains(nLineIndex.incrementAndGet()))
+	                                	continue;	// this is a line containing only missing data, which we don't want to persist because there is at least one non-empty line on a synonym variant, that we would lose if we did
                                 }
+
                                 if (line == null)
                                     break;
-                                String[] splitLine = line.split("\t");
 
+                                String[] splitLine = line.split("\t");
                                 if (fSkipMonomorphic && Arrays.stream(splitLine, 1, splitLine.length).filter(gt -> !"0/0".equals(gt)).distinct().count() < 2)
                                     continue; // skip non-variant positions
 
@@ -508,7 +515,12 @@ public class PlinkImport extends AbstractGenotypeImport {
                                     for (Assembly assembly : assemblies) {
                                         ReferencePosition rp = variant.getReferencePosition(assembly.getId());
                                         if (rp != null)
-                                        	project.getContigs(assembly.getId()).add(rp.getSequence());
+                                        	try {
+                                        		project.getContigs(assembly.getId()).add(rp.getSequence());
+                                        	}
+                                        	catch (java.lang.NullPointerException npe) {
+                                        		npe.printStackTrace();
+                                        	}
                                     }
 
                                     project.getVariantTypes().add(variant.getType());					// it's a TreeSet so it will only be added if it's not already present
@@ -524,7 +536,7 @@ public class PlinkImport extends AbstractGenotypeImport {
                                     }
                                     else {
                                     	ReferencePosition rp = variant.getReferencePosition(nAssemblyId);
-                                    	LOG.warn("Skipping variant " + variant.getId() + (rp != null ? " positioned at " + rp.getSequence() + ":" + rp.getStartSite() : "") + " because its alleles are not known");
+                                    	LOG.warn("Skipping variant " + providedVariantId + (rp != null ? " positioned at " + rp.getSequence() + ":" + rp.getStartSite() : "") + " because its alleles are not known (only missing data provided so far)");
                                     }
 
                                     if (processedVariants % nNumberOfVariantsToSaveAtOnce == 0) {
@@ -909,8 +921,8 @@ public class PlinkImport extends AbstractGenotypeImport {
         return vrd;
     }
 
-    /* FIXME: this mechanism could be improved to "fill holes" when genotypes are provided for some synonyms but not others (currently we import them all so the last encountered one "wins") */
-    private HashMap<String, ArrayList<String>> checkSynonymGenotypeConsistency(File rotatedFile, HashMap<String, String> existingVariantIDs, Collection<String> individualsInProvidedOrder, String outputPathAndPrefix) throws IOException
+    /* FIXME: this mechanism could be improved to "fill holes" when genotypes are provided for some synonyms but not others (currently we import them all so the last encountered one "wins", unless it's totally empty) */
+    private HashMap<String, ArrayList<String>> checkSynonymGenotypeConsistency(File rotatedFile, HashMap<String, String> existingVariantIDs, Collection<String> individualsInProvidedOrder, String outputPathAndPrefix, HashSet<Integer> emptyLineIndexesToFill) throws IOException
     {
         long b4 = System.currentTimeMillis();
         LOG.info("Checking genotype consistency between synonyms...");
@@ -963,21 +975,30 @@ public class PlinkImport extends AbstractGenotypeImport {
         for (String variantId : synonymLinePositions.keySet()) {
             HashMap<String /*genotype*/, HashSet<String> /*synonyms*/>[] individualGenotypeListArray = new HashMap[individualsInProvidedOrder.size()];
             List<Integer> linesToCompareForVariant = synonymLinePositions.get(variantId);
+            boolean fFoundAnyNonEmptyLineForThisVariant = false;
             for (int nLineNumber=0; nLineNumber<linesToCompareForVariant.size(); nLineNumber++) {
                 String[] synAndGenotypes = linesNeedingComparison.get(linesToCompareForVariant.get(nLineNumber)).split("\t");
+                boolean fFoundAnyGenotypeInThisLine = false;
                 for (int individualIndex = 0; individualIndex<individualGenotypeListArray.length; individualIndex++) {
                     if (individualGenotypeListArray[individualIndex] == null)
                         individualGenotypeListArray[individualIndex] = new HashMap<>();
                     String genotype = synAndGenotypes[1 + individualIndex];
                     if (genotype.equals("0/0"))
                         continue;   // if genotype is unknown this should not keep us from considering others
+                    
+                    fFoundAnyGenotypeInThisLine = true;
                     HashSet<String> synonymsWithThisGenotype = individualGenotypeListArray[individualIndex].get(genotype);
                     if (synonymsWithThisGenotype == null) {
                         synonymsWithThisGenotype = new HashSet<>();
                         individualGenotypeListArray[individualIndex].put(genotype, synonymsWithThisGenotype);
                     }
                     synonymsWithThisGenotype.add(synAndGenotypes[0]);
-                }
+                }                
+                
+                if (fFoundAnyGenotypeInThisLine)
+                	fFoundAnyNonEmptyLineForThisVariant = true;
+                else if (fFoundAnyNonEmptyLineForThisVariant)
+                	emptyLineIndexesToFill.add(linesToCompareForVariant.get(nLineNumber));	// keep track of this empty line because if we don't skip it, saving it would wipe out genotypes we've got on other synonyms
             }
 
             Iterator<String> indIt = individualsInProvidedOrder.iterator();
