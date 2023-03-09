@@ -998,7 +998,7 @@ public class PlinkImport extends AbstractGenotypeImport {
                 if (fFoundAnyGenotypeInThisLine)
                 	fFoundAnyNonEmptyLineForThisVariant = true;
                 else if (fFoundAnyNonEmptyLineForThisVariant)
-                	emptyLineIndexesToFill.add(linesToCompareForVariant.get(nLineNumber));	// keep track of this empty line because if we don't skip it, saving it would wipe out genotypes we've got on other synonyms
+                	emptyLineIndexesToFill.add(linesToCompareForVariant.get(nLineNumber)); // keep track of this empty line because if we don't skip it, saving it would wipe out genotypes we've got on other synonyms
             }
 
             Iterator<String> indIt = individualsInProvidedOrder.iterator();

@@ -27,6 +27,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Scanner;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 
 import org.apache.commons.lang3.StringUtils;
@@ -126,9 +127,7 @@ public class AbstractGenotypeImport {
         HashMap<String, String> existingVariantIDs = new HashMap<>();
         long variantCount = Helper.estimDocCount(mongoTemplate,VariantData.class);
         
-        List<Assembly> assemblies = mongoTemplate.findAll(Assembly.class);
-		Integer nAssemblyId = assemblies.size() == 0 ? null : assemblies.get(0).getId();
-		String refPosPath = Assembly.getVariantRefPosPath(nAssemblyId);
+		String refPosPath = Assembly.getVariantRefPosPath(assemblyId);
         
         if (variantCount > 0)
         {   // there are already variants in the database: build a list of all existing variants, finding them by ID is by far most efficient
@@ -238,14 +237,22 @@ public class AbstractGenotypeImport {
 			(i++ < unsavedRuns.size() / 2 ? syncList : asyncList).add(vrd);
 
 		try {
+			AtomicReference<DuplicateKeyException> asyncException = new AtomicReference<>();
 			Thread vrdAsyncThread = new Thread() {
 				public void run() {
-			    	mongoTemplate.insert(asyncList, VariantRunData.class);	// this should always work but fails when a same variant is provided several times (using different synonyms)
+					try {
+						mongoTemplate.insert(asyncList, VariantRunData.class);	// this should always work but fails when a same variant is provided several times (using different synonyms)
+					}
+					catch (DuplicateKeyException dke) {
+						asyncException.set(dke);
+					}
 				}
 			};
 			vrdAsyncThread.start();
 	    	mongoTemplate.insert(syncList, VariantRunData.class);	// this should always work but fails when a same variant is provided several times (using different synonyms)
 			vrdAsyncThread.join();
+			if (asyncException.get() != null)
+				throw asyncException.get();
 		}
 		catch (DuplicateKeyException dke)
 		{
