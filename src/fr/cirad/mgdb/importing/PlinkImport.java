@@ -300,8 +300,12 @@ public class PlinkImport extends SynonymAwareImport {
             LOG.info("PlinkImport took " + (System.currentTimeMillis() - before) / 1000 + "s for " + count + " records");
             return createdProject;
         }
-        finally
-        {
+        catch (Exception e) {
+        	LOG.error("Error", e);
+        	progress.setError(e.getMessage());
+        	return null;
+        }
+        finally  {
             if (m_fCloseContextOpenAfterImport && ctx != null)
                 ctx.close();
             if (rotatedFile != null)
