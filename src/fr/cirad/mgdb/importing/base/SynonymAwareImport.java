@@ -51,9 +51,9 @@ public abstract class SynonymAwareImport extends AbstractGenotypeImport {
     
     protected boolean fImportUnknownVariants = false;
     
-    public long importTempFileContents(ProgressIndicator progress, int nNConcurrentThreads, MongoTemplate mongoTemplate, Integer nAssemblyId, File tempFile, LinkedHashMap<String, String> providedVariantPositions, HashMap<String, String> existingVariantIDs, GenotypingProject project, String sRun, HashMap<String, ArrayList<String>> inconsistencies, LinkedHashMap<String, String> userIndividualToPopulationMap, Map<String, Type> nonSnpVariantTypeMap, HashSet<Integer> indexesOfLinesThatMustBeSkipped, boolean fSkipMonomorphic) throws Exception
+    public long importTempFileContents(ProgressIndicator progress, int nNConcurrentThreads, MongoTemplate mongoTemplate, Integer nAssemblyId, File tempFile, LinkedHashMap<String, String> providedVariantPositions, HashMap<String, String> existingVariantIDs, GenotypingProject project, String sRun, HashMap<String, ArrayList<String>> inconsistencies, LinkedHashMap<String, String> orderedIndividualToPopulationMap, Map<String, Type> nonSnpVariantTypeMap, HashSet<Integer> indexesOfLinesThatMustBeSkipped, boolean fSkipMonomorphic) throws Exception
     {
-        String[] individuals = userIndividualToPopulationMap.keySet().toArray(new String[userIndividualToPopulationMap.size()]);
+        String[] individuals = orderedIndividualToPopulationMap.keySet().toArray(new String[orderedIndividualToPopulationMap.size()]);
         final AtomicInteger count = new AtomicInteger(0);
 
         // loop over each variation and write to DB
@@ -70,7 +70,7 @@ public abstract class SynonymAwareImport extends AbstractGenotypeImport {
             LOG.info("Importing by chunks of size " + nNumberOfVariantsToSaveAtOnce);
 
             LinkedHashSet<String> individualsWithoutPopulation = new LinkedHashSet<>();
-            for (String sIndOrSpId : userIndividualToPopulationMap.keySet()) {
+            for (String sIndOrSpId : orderedIndividualToPopulationMap.keySet()) {
             	GenotypingSample sample = m_providedIdToSampleMap.get(sIndOrSpId);
             	if (sample == null) {
             		progress.setError("Sample / individual mapping file contains no individual for sample " + sIndOrSpId);
@@ -83,7 +83,7 @@ public abstract class SynonymAwareImport extends AbstractGenotypeImport {
                 boolean fNeedToSave = true;
                 if (!fAlreadyExists)
                     ind = new Individual(sIndividual);
-                String sPop = userIndividualToPopulationMap.get(sIndOrSpId);
+                String sPop = orderedIndividualToPopulationMap.get(sIndOrSpId);
                 if (!sPop.equals(".") && sPop.length() == 3)
                     ind.setPopulation(sPop);
                 else if (!sIndividual.substring(0, 3).matches(".*\\d+.*") && sIndividual.substring(3).matches("\\d+"))
@@ -184,7 +184,7 @@ public abstract class SynonymAwareImport extends AbstractGenotypeImport {
                                     int nIndividualIndex = 0;
                                     while (nIndividualIndex < individuals.length)
                                     {
-                                        String[] genotype = splitLine[nIndividualIndex + 1].split("/");
+                                        String[] genotype = (splitLine.length > nIndividualIndex + 1 ? splitLine[nIndividualIndex + 1] : "0/0").split("/");	// if some genotypes are missing at the end of the line we assume they're just missing data (may happen when discovering individual list while reorganizing genotypes from one-genotype-per-line formats where missing data is not explicitly mentioned) 
                                         if (inconsistencies != null && !inconsistencies.isEmpty()) {
                                             ArrayList<String> inconsistentIndividuals = inconsistencies.get(variant.getId());
                                             boolean fInconsistentData = inconsistencies != null && !inconsistencies.isEmpty() && inconsistentIndividuals != null && inconsistentIndividuals.contains(individuals[nIndividualIndex]);
@@ -200,7 +200,7 @@ public abstract class SynonymAwareImport extends AbstractGenotypeImport {
                                         }
                                     }
 
-                                    VariantRunData runToSave = addDataToVariant(mongoTemplate, variant, nAssemblyId, sequence, bpPosition, userIndividualToPopulationMap, nonSnpVariantTypeMap, alleles, project, sRun, fImportUnknownVariants);
+                                    VariantRunData runToSave = addDataToVariant(mongoTemplate, variant, nAssemblyId, sequence, bpPosition, orderedIndividualToPopulationMap, nonSnpVariantTypeMap, alleles, project, sRun, fImportUnknownVariants);
 
                                     for (Assembly assembly : assemblies) {
                                         ReferencePosition rp = variant.getReferencePosition(assembly.getId());
@@ -277,7 +277,7 @@ public abstract class SynonymAwareImport extends AbstractGenotypeImport {
         return count.get();
     }
 
-    protected VariantRunData addDataToVariant(MongoTemplate mongoTemplate, VariantData variantToFeed, Integer nAssemblyId, String sequence, Long bpPos, LinkedHashMap<String, String> userIndividualToPopulationMap, Map<String, Type> nonSnpVariantTypeMap, String[][] alleles, GenotypingProject project, String runName, boolean fImportUnknownVariants) throws Exception
+    protected VariantRunData addDataToVariant(MongoTemplate mongoTemplate, VariantData variantToFeed, Integer nAssemblyId, String sequence, Long bpPos, LinkedHashMap<String, String> orderedIndividualToPopulationMap, Map<String, Type> nonSnpVariantTypeMap, String[][] alleles, GenotypingProject project, String runName, boolean fImportUnknownVariants) throws Exception
     {
         VariantRunData vrd = new VariantRunData(new VariantRunData.VariantRunDataId(project.getId(), runName, variantToFeed.getId()));
 
@@ -285,7 +285,7 @@ public abstract class SynonymAwareImport extends AbstractGenotypeImport {
         AtomicInteger allIdx = new AtomicInteger(0);
         Map<String, Integer> alleleIndexMap = variantToFeed.getKnownAlleles().stream().collect(Collectors.toMap(Function.identity(), t -> allIdx.getAndIncrement()));  // should be more efficient not to call indexOf too often...
         int i = -1;
-        for (String sIndividual : userIndividualToPopulationMap.keySet()) {
+        for (String sIndividual : orderedIndividualToPopulationMap.keySet()) {
             i++;
 
             if ("0".equals(alleles[0][i]) || "0".equals(alleles[1][i]))
@@ -441,11 +441,11 @@ public abstract class SynonymAwareImport extends AbstractGenotypeImport {
         return result;
     }
     
-    protected void createSamples(MongoTemplate mongoTemplate, int projId, String sRun, HashMap<String, String> sampleToIndividualMap, LinkedHashMap<String, String> userIndividualToPopulationMap, ProgressIndicator progress) {
+    protected void createSamples(MongoTemplate mongoTemplate, int projId, String sRun, HashMap<String, String> sampleToIndividualMap, LinkedHashMap<String, String> orderedIndividualToPopulationMap, ProgressIndicator progress) {
         m_providedIdToSampleMap = new HashMap<String /*individual*/, GenotypingSample>();
         HashSet<Individual> indsToAdd = new HashSet<>();
         boolean fDbAlreadyContainedIndividuals = mongoTemplate.findOne(new Query(), Individual.class) != null;
-        for (String sIndOrSpId : userIndividualToPopulationMap.keySet()) {
+        for (String sIndOrSpId : orderedIndividualToPopulationMap.keySet()) {
         	String sIndividual = sampleToIndividualMap == null ? sIndOrSpId : sampleToIndividualMap.get(sIndOrSpId);
         	if (sIndividual == null) {
         		progress.setError("Sample / individual mapping file contains no individual for sample " + sIndOrSpId);
