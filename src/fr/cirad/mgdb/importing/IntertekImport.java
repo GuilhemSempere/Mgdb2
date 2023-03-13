@@ -307,7 +307,7 @@ public class IntertekImport extends AbstractGenotypeImport {
                                     
                                     String sIndividual = sampleToIndividualMap == null ? sIndOrSpId : sampleToIndividualMap.get(sIndOrSpId);
                                 	if (sIndividual == null) {
-                                		progress.setError("Sample / individual mapping file contains no individual for sample " + sIndOrSpId);
+                                		progress.setError("Sample / individual mapping contains no individual for sample " + sIndOrSpId);
                                 		break;
                                 	}
 

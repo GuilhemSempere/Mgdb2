@@ -319,7 +319,7 @@ public class VcfImport extends AbstractGenotypeImport {
             for (String sIndOrSpId : header.getSampleNamesInOrder()) {
             	String sIndividual = sampleToIndividualMap == null ? sIndOrSpId : sampleToIndividualMap.get(sIndOrSpId);
             	if (sIndividual == null) {
-            		progress.setError("Sample / individual mapping file contains no individual for sample " + sIndOrSpId);
+            		progress.setError("Sample / individual mapping contains no individual for sample " + sIndOrSpId);
             		return null;
             	}
             	

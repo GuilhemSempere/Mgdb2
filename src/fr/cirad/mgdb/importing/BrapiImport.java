@@ -561,7 +561,7 @@ public class BrapiImport extends AbstractGenotypeImport {
 							int ploidy = alleles.length;
 							if (maxPloidyFound < ploidy)
 								maxPloidyFound = ploidy;
-							tempFileWriter.write(". " + profileToGermplasmMap.get(row.get(1)) + " " + row.get(0) + " " + genotype.replaceAll(multipleGenotypeSeparatorRegex, " ") + "\n");
+							tempFileWriter.write(". " + row.get(1) + " " + row.get(0) + " " + genotype.replaceAll(multipleGenotypeSeparatorRegex, " ") + "\n");
 						}
 						
 						if (knownAllelesByVariant != null) {
@@ -599,10 +599,6 @@ public class BrapiImport extends AbstractGenotypeImport {
 				
                 if (progress.getError() != null || progress.isAborted())
                     return createdProject;
-				
-				HashMap<String, String> individualToSampleIdMap = new HashMap<>();	// in order to save sample names we got from BrAPI source
-				for (Entry<String, String> entry : profileToGermplasmMap.entrySet())
-					individualToSampleIdMap.put(entry.getValue(), entry.getKey());
 
 		        // STDVariantImport is convenient because it always sorts data by variants
 				STDVariantImport stdVariantImport = new STDVariantImport(progress.getProcessId());
@@ -610,8 +606,7 @@ public class BrapiImport extends AbstractGenotypeImport {
 				stdVariantImport.setPloidy(maxPloidyFound);
 				stdVariantImport.allowDbDropIfNoGenotypingData(false);
 				stdVariantImport.tryAndMatchRandomObjectIDs(true);
-				stdVariantImport.setIndividualToSampleIdMap(individualToSampleIdMap);
-				stdVariantImport.importToMongo(sModule, sProject, sRun, sTechnology, tempFile.getAbsolutePath(), unknownString, importMode);
+				stdVariantImport.importToMongo(sModule, sProject, sRun, sTechnology, profileToGermplasmMap, false, tempFile.getAbsolutePath(), unknownString, importMode);
 			}
 
             if (progress.getError() == null && !progress.isAborted())

@@ -330,7 +330,7 @@ public class HapMapImport extends AbstractGenotypeImport {
 	                                        for (String sIndOrSpId : sampleIds) {
 	                                        	String sIndividual = sampleToIndividualMap == null ? sIndOrSpId : sampleToIndividualMap.get(sIndOrSpId);
 	                                        	if (sIndividual == null) {
-	                                        		progress.setError("Sample / individual mapping file contains no individual for sample " + sIndOrSpId);
+	                                        		progress.setError("Sample / individual mapping contains no individual for sample " + sIndOrSpId);
 	                                        		return;
 	                                        	}
 	                                        	
@@ -551,7 +551,7 @@ public class HapMapImport extends AbstractGenotypeImport {
 	            SampleGenotype aGT = new SampleGenotype(alleles.stream().map(allele -> alleleIndexMap.get(allele)).sorted().map(index -> index.toString()).collect(Collectors.joining("/")));
 				GenotypingSample sample = m_providedIdToSampleMap.get(sIndOrSpId);
 	        	if (sample == null)
-	        		throw new Exception("Sample / individual mapping file contains no individual for sample " + sIndOrSpId);
+	        		throw new Exception("Sample / individual mapping contains no individual for sample " + sIndOrSpId);
 				vrd.getSampleGenotypes().put(sample.getId(), aGT);
             }
             catch (NullPointerException npe) {

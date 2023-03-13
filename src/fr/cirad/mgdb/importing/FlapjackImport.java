@@ -280,7 +280,7 @@ public class FlapjackImport extends AbstractGenotypeImport {
             for (String sIndOrSpId : individualNames) {
             	String sIndividual = sampleToIndividualMap == null ? sIndOrSpId : sampleToIndividualMap.get(sIndOrSpId);
             	if (sIndividual == null) {
-            		progress.setError("Sample / individual mapping file contains no individual for sample " + sIndOrSpId);
+            		progress.setError("Sample / individual mapping contains no individual for sample " + sIndOrSpId);
             		return 0;
             	}
             	
@@ -376,7 +376,7 @@ public class FlapjackImport extends AbstractGenotypeImport {
             for (String sIndOrSpId : individuals) {
             	GenotypingSample sample = m_providedIdToSampleMap.get(sIndOrSpId);
             	if (sample == null) {
-            		progress.setError("Sample / individual mapping file contains no individual for sample " + sIndOrSpId);
+            		progress.setError("Sample / individual mapping contains no individual for sample " + sIndOrSpId);
             		return 0;
             	}
 

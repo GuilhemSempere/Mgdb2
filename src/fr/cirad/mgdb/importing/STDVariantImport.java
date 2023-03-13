@@ -249,7 +249,10 @@ public class STDVariantImport extends SynonymAwareImport {
 						}
 						sPreviousVariant = sVariantName;
 					}
-					genotypeLine.set(indPos, new StringBuilder().append("\t").append(splitInputLine[3]).append("/").append(splitInputLine[4]).toString());
+					StringBuilder gtBuilder = new StringBuilder();
+					for (int i=3; i<splitInputLine.length; i++)
+						gtBuilder.append(i == 3 ? "\t" : "/").append(splitInputLine[3]);
+					genotypeLine.set(indPos, gtBuilder.toString());
 				}
 				if (++lineCount%100000 == 0)
 					progress.setCurrentStepProgress(lineCount);

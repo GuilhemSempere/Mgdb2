@@ -73,7 +73,7 @@ public abstract class SynonymAwareImport extends AbstractGenotypeImport {
             for (String sIndOrSpId : orderedIndividualToPopulationMap.keySet()) {
             	GenotypingSample sample = m_providedIdToSampleMap.get(sIndOrSpId);
             	if (sample == null) {
-            		progress.setError("Sample / individual mapping file contains no individual for sample " + sIndOrSpId);
+            		progress.setError("Sample / individual mapping contains no individual for sample " + sIndOrSpId);
             		return 0;
             	}
 
@@ -448,7 +448,7 @@ public abstract class SynonymAwareImport extends AbstractGenotypeImport {
         for (String sIndOrSpId : orderedIndividualToPopulationMap.keySet()) {
         	String sIndividual = sampleToIndividualMap == null ? sIndOrSpId : sampleToIndividualMap.get(sIndOrSpId);
         	if (sIndividual == null) {
-        		progress.setError("Sample / individual mapping file contains no individual for sample " + sIndOrSpId);
+        		progress.setError("Sample / individual mapping contains no individual for sample " + sIndOrSpId);
         		return;
         	}
         	
