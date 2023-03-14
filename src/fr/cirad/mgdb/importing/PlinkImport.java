@@ -152,7 +152,9 @@ public class PlinkImport extends SynonymAwareImport {
         {
             LOG.warn("Unable to parse input mode. Using default (0): overwrite run if exists.");
         }
-        new PlinkImport().importToMongo(args[0], args[1], args[2], args[3], new File(args[4]).toURI().toURL(), new File(args[5]), null, false, true, args[6], mode);
+        PlinkImport instance = new PlinkImport();
+        instance.setMaxExpectedAlleleCount(2);
+        instance.importToMongo(args[0], args[1], args[2], args[3], new File(args[4]).toURI().toURL(), new File(args[5]), null, false, true, args[6], mode);
     }
 
     /**
@@ -200,7 +202,7 @@ public class PlinkImport extends SynonymAwareImport {
                 throw new Exception("DATASOURCE '" + sModule + "' is not supported!");
         }
 
-        fImportUnknownVariants = doesDatabaseSupportImportingUnknownVariants(sModule);
+        m_fImportUnknownVariants = doesDatabaseSupportImportingUnknownVariants(sModule);
 
         if (m_processID == null)
             m_processID = "IMPORT__" + sModule + "__" + sProject + "__" + sRun + "__" + System.currentTimeMillis();
@@ -479,9 +481,12 @@ public class PlinkImport extends SynonymAwareImport {
                                             int nCurrentPos = individualPositions.get(0) + 4*(blockStart + marker);
                                             StringBuilder builder = transposed.get(marker);
                                             builder.append("\t");
-                                            builder.append(lineBuffer.charAt(nCurrentPos));
-                                            builder.append("/");
-                                            builder.append(lineBuffer.charAt(nCurrentPos + 2));
+                                            char firstAllele = lineBuffer.charAt(nCurrentPos);
+                                            if (firstAllele != '0') {
+	                                            builder.append(firstAllele);
+	                                            builder.append("/");
+	                                            builder.append(lineBuffer.charAt(nCurrentPos + 2));
+                                            }
                                         }
                                     // Non-trivial case : INDELs and/or multi-characters separators
                                     } else {
@@ -510,10 +515,13 @@ public class PlinkImport extends SynonymAwareImport {
                                         for (int marker = 0; marker < blockSize; marker++) {
                                             StringBuilder builder = transposed.get(marker);
                                             builder.append("\t");
-                                            builder.append(matcher.group());
+                                            String sFirstAllele = matcher.group();
                                             matcher.find();
-                                            builder.append("/");
-                                            builder.append(matcher.group());
+                                            if (!"0".equals(sFirstAllele)) {
+                                            	builder.append(sFirstAllele);
+	                                            builder.append("/");
+	                                            builder.append(matcher.group());
+                                            }
                                             matcher.find();
                                         }
 
@@ -530,18 +538,17 @@ public class PlinkImport extends SynonymAwareImport {
                                     String variantLine = transposed.get(marker).substring(1);  // Skip the leading tab
 
                                     // if it's not a SNP, let's keep track of its type
-                                    List<Allele> alleleList =
-                                            outputFileSeparatorPattern.splitAsStream(variantLine)
-                                                .filter(allele -> !"0".equals(allele))
-                                                .distinct()
-                                                .map(allele -> {
-                                                					try {
-                                                						return Allele.create(allele);
-						                                            } catch (IllegalArgumentException e) {
-						                                            	throw new IllegalArgumentException("Variant " + variantName + " - " + e.getClass().getName() + ": " + e.getMessage());
-						                                            }
-                                                				})
-                                                .collect(Collectors.toList());
+                                    List<Allele> alleleList = outputFileSeparatorPattern.splitAsStream(variantLine)
+				                                                .filter(allele -> !allele.isEmpty())
+				                                                .distinct()
+				                                                .map(allele -> {
+				                                                					try {
+				                                                						return Allele.create(allele);
+										                                            } catch (IllegalArgumentException e) {
+										                                            	throw new IllegalArgumentException("Variant " + variantName + " - " + e.getClass().getName() + ": " + e.getMessage());
+										                                            }
+				                                                				})
+				                                                .collect(Collectors.toList());
 
                                     if (!alleleList.isEmpty()) {
                                         Type variantType = determineType(alleleList);

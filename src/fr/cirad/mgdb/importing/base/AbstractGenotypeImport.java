@@ -127,21 +127,20 @@ public class AbstractGenotypeImport {
         HashMap<String, String> existingVariantIDs = new HashMap<>();
         long variantCount = Helper.estimDocCount(mongoTemplate,VariantData.class);
         
-		String refPosPath = Assembly.getVariantRefPosPath(assemblyId);
-        
         if (variantCount > 0)
         {   // there are already variants in the database: build a list of all existing variants, finding them by ID is by far most efficient
             long beforeReadingAllVariants = System.currentTimeMillis();
             Query query = new Query();
+    		String refPosPath = Assembly.getVariantRefPosPath(assemblyId);
             query.fields().include("_id").include(refPosPath).include(VariantData.FIELDNAME_TYPE).include(VariantData.FIELDNAME_SYNONYMS);
             MongoCursor<Document> variantIterator = mongoTemplate.getCollection(mongoTemplate.getCollectionName(VariantData.class)).find(query.getQueryObject()).projection(query.getFieldsObject()).iterator();
             while (variantIterator.hasNext())
             {
                 Document vd = variantIterator.next();
-                String variantIdAsString = vd.get("_id").toString();
+                String variantId = vd.getString("_id");
                 ArrayList<String> idAndSynonyms = new ArrayList<>();
-                if (fIncludeRandomObjectIDs || !MgdbDao.idLooksGenerated(variantIdAsString))    // most of the time we avoid taking into account randomly generated IDs
-                    idAndSynonyms.add(variantIdAsString);
+                if (fIncludeRandomObjectIDs || !MgdbDao.idLooksGenerated(variantId))    // most of the time we avoid taking into account randomly generated IDs
+                    idAndSynonyms.add(variantId);
                 Document synonymsByType = (Document) vd.get(VariantData.FIELDNAME_SYNONYMS);
                 if (synonymsByType != null)
                     for (String synonymType : synonymsByType.keySet())
@@ -149,7 +148,7 @@ public class AbstractGenotypeImport {
                             idAndSynonyms.add((String) syn.toString());
 
                 for (String variantDescForPos : getIdentificationStrings((String) vd.get(VariantData.FIELDNAME_TYPE), (String) Helper.readPossiblyNestedField(vd, refPosPath + "." + ReferencePosition.FIELDNAME_SEQUENCE, ";", null), /*!fGotChrPos ? null :*/ (Long) Helper.readPossiblyNestedField(vd, refPosPath + "." + ReferencePosition.FIELDNAME_START_SITE, ";", null), idAndSynonyms)) {
-                    if (existingVariantIDs.containsKey(variantDescForPos) && !variantIdAsString.startsWith("*"))
+                    if (existingVariantIDs.containsKey(variantDescForPos) && !variantId.startsWith("*"))
                         throw new Exception("This database seems to contain duplicate variants (check " + variantDescForPos.replaceAll("¤", ":") + "). Importing additional data will not be supported until this problem is fixed.");
 
                     existingVariantIDs.put(variantDescForPos, vd.get("_id").toString());

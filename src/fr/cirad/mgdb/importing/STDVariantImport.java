@@ -52,7 +52,6 @@ public class STDVariantImport extends SynonymAwareImport {
 	
 	private static final Logger LOG = Logger.getLogger(STDVariantImport.class);
 	
-	private int m_ploidy = 2;
 	private String m_processID;
 	private boolean m_fTryAndMatchRandomObjectIDs = false;
 	
@@ -92,7 +91,9 @@ public class STDVariantImport extends SynonymAwareImport {
         {
             LOG.warn("Unable to parse input mode. Using default (0): overwrite run if exists.");
         }
-        new STDVariantImport().importToMongo(args[0], args[1], args[2], args[3], null, true, args[4], args[5], mode);
+        STDVariantImport instance = new STDVariantImport();
+        instance.setMaxExpectedAlleleCount(2);
+        instance.importToMongo(args[0], args[1], args[2], args[3], null, true, args[4], args[5], mode);
     }
 	
 	public Integer importToMongo(String sModule, String sProject, String sRun, String sTechnology, HashMap<String, String> sampleToIndividualMap, boolean fCheckConsistencyBetweenSynonyms, String mainFilePath, String assemblyName, int importMode) throws Exception
@@ -106,10 +107,6 @@ public class STDVariantImport extends SynonymAwareImport {
 		}
 		
 		GenericXmlApplicationContext ctx = null;
-		File genotypeFile = new File(mainFilePath);
-		List<File> sortTempFiles = null;
-		File sortedFile = new File("sortedImportFile_" + genotypeFile.getName());
-
 		MongoTemplate mongoTemplate = MongoTemplateManager.get(sModule);
 		if (mongoTemplate == null) { // we are probably being invoked offline
 			ctx = new GenericXmlApplicationContext("applicationContext-data.xml");
@@ -126,6 +123,11 @@ public class STDVariantImport extends SynonymAwareImport {
 					throw new Exception("DATASOURCE '" + sModule + "' is not supported!");
 			}
 		}
+
+		File genotypeFile = new File(mainFilePath);
+		List<File> sortedTempFiles = null;
+        File sortedFile = File.createTempFile("sortedImportFile_-" + genotypeFile.getName() + "-", ".std");
+		File variantOrientedFile = File.createTempFile("variantOrientedImportFile_-" + genotypeFile.getName() + "-", ".tsv");
 
 		try
 		{
@@ -152,7 +154,7 @@ public class STDVariantImport extends SynonymAwareImport {
             if (importMode == 0 && project != null && project.getPloidyLevel() > 0 && project.getPloidyLevel() != m_ploidy)
             	throw new Exception("Ploidy levels differ between existing (" + project.getPloidyLevel() + ") and provided (" + m_ploidy + ") data!");
             
-			fImportUnknownVariants = doesDatabaseSupportImportingUnknownVariants(sModule);
+			m_fImportUnknownVariants = doesDatabaseSupportImportingUnknownVariants(sModule);
 			
 			MongoTemplateManager.lockProjectForWriting(sModule, sProject);
 			cleanupBeforeImport(mongoTemplate, sModule, project, importMode, sRun);
@@ -168,7 +170,7 @@ public class STDVariantImport extends SynonymAwareImport {
                 	createdProject = project.getId();
             }
             project.setPloidyLevel(m_ploidy);
-			
+			LOG.info("variant-oriented file file will be " + variantOrientedFile.getAbsolutePath());
 			
 			// sort genotyping data file by marker name 
 			BufferedReader in = new BufferedReader(new FileReader(genotypeFile));			
@@ -180,13 +182,12 @@ public class STDVariantImport extends SynonymAwareImport {
 					return (splitted1[finalMarkerFieldIndex] + "_" + splitted1[finalSampleFieldIndex]).compareTo(splitted2[finalMarkerFieldIndex] + "_" + splitted2[finalSampleFieldIndex]);
 				}
 			};
-			LOG.info("Sorted file will be " + sortedFile.getAbsolutePath());
 			
 			try
 			{
 				progress.addStep("Creating temp files to sort in batch");
 				progress.moveToNextStep();			
-				sortTempFiles = ExternalSort.sortInBatch(in, genotypeFile.length(), comparator, ExternalSort.DEFAULTMAXTEMPFILES, Charset.defaultCharset(), sortedFile.getParentFile(), false, 0, true, progress);
+				sortedTempFiles = ExternalSort.sortInBatch(in, genotypeFile.length(), comparator, ExternalSort.DEFAULTMAXTEMPFILES, Charset.defaultCharset(), sortedFile.getParentFile(), false, 0, true, progress);
 	            if (progress.getError() != null || progress.isAborted())
 	                return createdProject;
 
@@ -195,7 +196,7 @@ public class STDVariantImport extends SynonymAwareImport {
 				
 				progress.addStep("Merging temp files");
 				progress.moveToNextStep();
-				ExternalSort.mergeSortedFiles(sortTempFiles, sortedFile, comparator, Charset.defaultCharset(), false, false, true, progress, genotypeFile.length());
+				ExternalSort.mergeSortedFiles(sortedTempFiles, sortedFile, comparator, Charset.defaultCharset(), false, false, true, progress, genotypeFile.length());
 	            if (progress.getError() != null || progress.isAborted())
 	            	return createdProject;
 
@@ -212,7 +213,6 @@ public class STDVariantImport extends SynonymAwareImport {
 			progress.addStep("Grouping genotyping data lines into one per variant");
 			progress.moveToNextStep();
 			progress.setPercentageEnabled(false);
-			File variantOrientedFile = new File("variantOrientedImportFile_" + genotypeFile.getName());
 			FileWriter fw = new FileWriter(variantOrientedFile);
 			Scanner scanner = new Scanner(sortedFile);
 			String sInputLine;
@@ -241,7 +241,7 @@ public class STDVariantImport extends SynonymAwareImport {
 						if (sPreviousVariant != null) {
 							fw.write(sPreviousVariant);
 							for (String gt : genotypeLine)
-								fw.write(gt != null ? gt : ("\t0/0"));
+								fw.write(gt != null ? gt : ("\t"));
 							genotypeLine = new LinkedList<>();
 							for (int i=0; i<individualPositions.size(); i++)
 								genotypeLine.add(null);
@@ -251,7 +251,7 @@ public class STDVariantImport extends SynonymAwareImport {
 					}
 					StringBuilder gtBuilder = new StringBuilder();
 					for (int i=3; i<splitInputLine.length; i++)
-						gtBuilder.append(i == 3 ? "\t" : "/").append(splitInputLine[3]);
+						gtBuilder.append(i == 3 ? "\t" : "/").append(splitInputLine[i]);
 					genotypeLine.set(indPos, gtBuilder.toString());
 				}
 				if (++lineCount%100000 == 0)
@@ -260,7 +260,7 @@ public class STDVariantImport extends SynonymAwareImport {
 			if (sVariantName != null) {
 				fw.write(sVariantName);
 				for (String gt : genotypeLine)
-					fw.write(gt != null ? gt : ("\t0/0"));
+					fw.write(gt != null ? gt : ("\t"));
 			}
 			fw.close();
 			scanner.close();
@@ -308,8 +308,8 @@ public class STDVariantImport extends SynonymAwareImport {
         	// let's cleanup
         	if (sortedFile.exists())
         		sortedFile.delete();
-        	if (sortTempFiles != null)
-            	for (File f : sortTempFiles)
+        	if (sortedTempFiles != null)
+            	for (File f : sortedTempFiles)
             		if (f.exists())
             			f.delete();
 			
@@ -323,9 +323,5 @@ public class STDVariantImport extends SynonymAwareImport {
 			if (ctx != null)
 				ctx.close();
 		}
-	}
-
-	public void setPloidy(int ploidy) {
-		m_ploidy = ploidy;
 	}
 }

@@ -247,7 +247,7 @@ public class BrapiImport extends AbstractGenotypeImport {
                     throw new Exception("Assembly \"" + assemblyName + "\" not found in database. Supported assemblies are " + StringUtils.join(mongoTemplate.findDistinct(Assembly.FIELDNAME_NAME, Assembly.class, String.class), ", "));
             }
             else
-                existingVariantIDs = buildSynonymToIdMapForExistingVariants(mongoTemplate, false, assembly.getId());
+                existingVariantIDs = buildSynonymToIdMapForExistingVariants(mongoTemplate, true, assembly.getId());
 			
 			progress.addStep("Reading remote marker list");
 			progress.moveToNextStep();
@@ -490,7 +490,7 @@ public class BrapiImport extends AbstractGenotypeImport {
 						}
 				        FileUtils.copyInputStreamToFile(httpConn.getInputStream(), tempFile);
 
-                        if (assembly != null && existingVariantIDs.isEmpty())
+                        if (createdVariantCount > 0 && existingVariantIDs.isEmpty())
                             existingVariantIDs = buildSynonymToIdMapForExistingVariants(mongoTemplate, true, assembly.getId()); // update it
                         importTsvToMongo(sModule, project, sRun, sTechnology, tempFile.getAbsolutePath(), profileToGermplasmMap, importMode, existingVariantIDs);
 
