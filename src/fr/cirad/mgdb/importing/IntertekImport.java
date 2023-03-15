@@ -214,20 +214,10 @@ public class IntertekImport extends AbstractGenotypeImport {
                 	createdProject = project.getId();
             }
             
-            HashMap<String, String> existingVariantIDs;
-            Assembly assembly = mongoTemplate.findOne(new Query(Criteria.where(Assembly.FIELDNAME_NAME).is(assemblyName)), Assembly.class);
-            if (assembly == null) {
-                if ("".equals(assemblyName) || m_fAllowNewAssembly) {
-                    assembly = new Assembly("".equals(assemblyName) ? 0 : AutoIncrementCounter.getNextSequence(mongoTemplate, MongoTemplateManager.getMongoCollectionName(Assembly.class)));
-                    assembly.setName(assemblyName);
-                    mongoTemplate.save(assembly);
-                    existingVariantIDs = new HashMap<>();
-                }
-                else
-                    throw new Exception("Assembly \"" + assemblyName + "\" not found in database. Supported assemblies are " + StringUtils.join(mongoTemplate.findDistinct(Assembly.FIELDNAME_NAME, Assembly.class, String.class), ", "));
-            }
-            else
-                existingVariantIDs = buildSynonymToIdMapForExistingVariants(mongoTemplate, false, assembly.getId());
+			progress.addStep("Scanning existing marker IDs");
+			progress.moveToNextStep();
+			Assembly assembly = createAssemblyIfNeeded(mongoTemplate, assemblyName);
+			HashMap<String, String> existingVariantIDs = buildSynonymToIdMapForExistingVariants(mongoTemplate, true, assembly == null ? null : assembly.getId());
 
             // Reading csv file
             // Getting alleleX and alleleY for each SNP by reading lines between lines {"SNPID","SNPNum","AlleleY","AlleleX","Sequence"} and {"Scaling"};

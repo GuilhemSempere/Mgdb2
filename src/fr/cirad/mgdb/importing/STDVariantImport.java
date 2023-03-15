@@ -39,7 +39,7 @@ import org.springframework.data.mongodb.core.query.Query;
 
 import com.mongodb.BasicDBObject;
 
-import fr.cirad.mgdb.importing.base.SynonymAwareImport;
+import fr.cirad.mgdb.importing.base.RefactoredImport;
 import fr.cirad.mgdb.model.mongo.maintypes.Assembly;
 import fr.cirad.mgdb.model.mongo.maintypes.GenotypingProject;
 import fr.cirad.mgdb.model.mongodao.MgdbDao;
@@ -48,7 +48,7 @@ import fr.cirad.tools.ProgressIndicator;
 import fr.cirad.tools.mongo.AutoIncrementCounter;
 import fr.cirad.tools.mongo.MongoTemplateManager;
 
-public class STDVariantImport extends SynonymAwareImport {
+public class STDVariantImport extends RefactoredImport {
 	
 	private static final Logger LOG = Logger.getLogger(STDVariantImport.class);
 	
@@ -131,23 +131,10 @@ public class STDVariantImport extends SynonymAwareImport {
 
 		try
 		{
-            HashMap<String, String> existingVariantIDs;
-            Assembly assembly = mongoTemplate.findOne(new Query(Criteria.where(Assembly.FIELDNAME_NAME).is(assemblyName)), Assembly.class);
-            if (assembly == null) {
-                if ("".equals(assemblyName) || m_fAllowNewAssembly) {
-                    assembly = new Assembly("".equals(assemblyName) ? 0 : AutoIncrementCounter.getNextSequence(mongoTemplate, MongoTemplateManager.getMongoCollectionName(Assembly.class)));
-                    assembly.setName(assemblyName);
-                    mongoTemplate.save(assembly);
-                    existingVariantIDs = new HashMap<>();
-                }
-                else
-                    throw new Exception("Assembly \"" + assemblyName + "\" not found in database. Supported assemblies are " + StringUtils.join(mongoTemplate.findDistinct(Assembly.FIELDNAME_NAME, Assembly.class, String.class), ", "));
-            }
-            else {
-                progress.addStep("Reading marker IDs");
-                progress.moveToNextStep();
-                existingVariantIDs = buildSynonymToIdMapForExistingVariants(mongoTemplate, false, assembly.getId());
-            }
+			progress.addStep("Scanning existing marker IDs");
+			progress.moveToNextStep();
+			Assembly assembly = createAssemblyIfNeeded(mongoTemplate, assemblyName);
+			HashMap<String, String> existingVariantIDs = buildSynonymToIdMapForExistingVariants(mongoTemplate, true, assembly == null ? null : assembly.getId());
 
             mongoTemplate.getDb().runCommand(new BasicDBObject("profile", 0));	// disable profiling
 			GenotypingProject project = mongoTemplate.findOne(new Query(Criteria.where(GenotypingProject.FIELDNAME_NAME).is(sProject)), GenotypingProject.class);
