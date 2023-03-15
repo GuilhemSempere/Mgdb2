@@ -197,7 +197,7 @@ public abstract class AbstractIndividualOrientedExportHandler implements IExport
 				catch (Exception e)
 				{
 					if (progress.getError() == null)	// only log this once
-						LOG.debug("Error creating temp files", e);
+						LOG.error("Error creating temp files", e);
 					progress.setError("Error creating temp files: " + e.getMessage());
 				}
 			}
