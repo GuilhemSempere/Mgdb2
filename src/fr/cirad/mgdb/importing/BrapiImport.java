@@ -109,24 +109,33 @@ public class BrapiImport extends AbstractGenotypeImport {
 	private static String multipleGenotypeSeparatorRegex = Pattern.compile(Pattern.quote(phasedGenotypeSeparator) + "|" + Pattern.quote(unphasedGenotypeSeparator)).toString();
 		
 	/**
-	 * Instantiates a new hap map import.
+	 * Instantiates a new Brapi import.
 	 * @throws Exception 
 	 */
-	public BrapiImport() throws Exception
+	public BrapiImport()
 	{
 	}
 
 	/**
-	 * Instantiates a new hap map import.
+	 * Instantiates a new Brapi import.
 	 *
 	 * @param processID the process id
 	 * @throws Exception 
 	 */
-	public BrapiImport(String processID) throws Exception
+	public BrapiImport(String processID)
 	{
 		this();
 		m_processID = processID;
 	}
+	
+
+    /**
+     * Instantiates a new Brapi import.
+     */
+    public BrapiImport(String processID, boolean fAllowNewAssembly) {
+        this(processID);
+        m_fAllowNewAssembly = fAllowNewAssembly;
+    }
 
     /**
      * The main method.
@@ -147,7 +156,7 @@ public class BrapiImport extends AbstractGenotypeImport {
         {
             LOG.warn("Unable to parse input mode. Using default (0): overwrite run if exists.");
         }
-        new BrapiImport().importToMongo(args[0], args[1], args[2], args[3], args[4], args[5], args[6], args[7], null, mode);
+        new BrapiImport().importToMongo(args[0], args[1], args[2], args[3], args[4], args[5], args[6], null, args[7], mode);
 	}
 
 	/**
@@ -166,7 +175,7 @@ public class BrapiImport extends AbstractGenotypeImport {
 	 * @return a project ID if it was created by this method, otherwise null
 	 * @throws Exception the exception
 	 */
-	public Integer importToMongo(String sModule, String sProject, String sRun, String sTechnology, String endpointUrl, String studyDbId, String mapDbId, String assemblyName, String brapiToken, int importMode) throws Exception
+	public Integer importToMongo(String sModule, String sProject, String sRun, String sTechnology, String endpointUrl, String studyDbId, String mapDbId, String brapiToken, String assemblyName, int importMode) throws Exception
 	{
 		long before = System.currentTimeMillis();
 		final ProgressIndicator progress = ProgressIndicator.get(m_processID) != null ? ProgressIndicator.get(m_processID) : new ProgressIndicator(m_processID, new String[]{"Initializing import"});	// better to add it straight-away so the JSP doesn't get null in return when it checks for it (otherwise it will assume the process has ended)
@@ -233,25 +242,11 @@ public class BrapiImport extends AbstractGenotypeImport {
 			
 			progress.addStep("Scanning existing marker IDs");
 			progress.moveToNextStep();
-
-            HashMap<String, String> existingVariantIDs;
-            Assembly assembly = mongoTemplate.findOne(new Query(Criteria.where(Assembly.FIELDNAME_NAME).is(assemblyName)), Assembly.class);
-            if (assembly == null) {
-                if ("".equals(assemblyName) || m_fAllowNewAssembly) {
-                    assembly = new Assembly("".equals(assemblyName) ? 0 : AutoIncrementCounter.getNextSequence(mongoTemplate, MongoTemplateManager.getMongoCollectionName(Assembly.class)));
-                    assembly.setName(assemblyName);
-                    mongoTemplate.save(assembly);
-                    existingVariantIDs = new HashMap<>();
-                }
-                else
-                    throw new Exception("Assembly \"" + assemblyName + "\" not found in database. Supported assemblies are " + StringUtils.join(mongoTemplate.findDistinct(Assembly.FIELDNAME_NAME, Assembly.class, String.class), ", "));
-            }
-            else
-                existingVariantIDs = buildSynonymToIdMapForExistingVariants(mongoTemplate, true, assembly.getId());
-			
+			Assembly assembly = createAssemblyIfNeeded(mongoTemplate, assemblyName);
+			HashMap<String, String> existingVariantIDs = buildSynonymToIdMapForExistingVariants(mongoTemplate, true, assembly == null ? null : assembly.getId());
+            
 			progress.addStep("Reading remote marker list");
-			progress.moveToNextStep();
-			
+			progress.moveToNextStep();			
 			ArrayList<String> variantsToQueryGenotypesFor = new ArrayList<>();
 			Boolean fGotKnownAllelesWhenImportingVariants = null;	// value will be determined below
 			
@@ -272,6 +267,7 @@ public class BrapiImport extends AbstractGenotypeImport {
 				Map<String, VariantData> variantsToCreate = new HashMap<String, VariantData>();
 				for (BrapiMarkerPosition bmp : positions.data()) {
 					variantsToQueryGenotypesFor.add(bmp.getMarkerDbId());
+						
 					if (existingVariantIDs.get(bmp.getMarkerDbId().toUpperCase()) != null)
 						continue;	// we already have this one
 
@@ -490,7 +486,7 @@ public class BrapiImport extends AbstractGenotypeImport {
 						}
 				        FileUtils.copyInputStreamToFile(httpConn.getInputStream(), tempFile);
 
-                        if (createdVariantCount > 0 && existingVariantIDs.isEmpty())
+                        if (createdVariantCount > 0)
                             existingVariantIDs = buildSynonymToIdMapForExistingVariants(mongoTemplate, true, assembly.getId()); // update it
                         importTsvToMongo(sModule, project, sRun, sTechnology, tempFile.getAbsolutePath(), profileToGermplasmMap, importMode, existingVariantIDs);
 
@@ -541,10 +537,7 @@ public class BrapiImport extends AbstractGenotypeImport {
 						{
 							String genotype = row.get(2);
 							if (unknownString.equals(genotype) || "N".equals(genotype))
-							{
-//								System.out.print(row.get(0) + " ");
 								continue;
-							}
 
 							String[] alleles = genotype.split(multipleGenotypeSeparatorRegex);
 							if (knownAllelesByVariant != null)
@@ -650,7 +643,7 @@ public class BrapiImport extends AbstractGenotypeImport {
 				ctx.close();
 		}
 	}
-	
+
 	private void importTsvToMongo(String sModule, GenotypingProject project, String sRun, String sTechnology, String mainFilePath, Map<String, String> markerProfileToIndividualMap, int importMode, HashMap<String, String> existingVariantIDs) throws Exception
 	{
 		long before = System.currentTimeMillis();
@@ -742,6 +735,8 @@ public class BrapiImport extends AbstractGenotypeImport {
 			Map<String, GenotypingSample> previouslyCreatedSamples = new TreeMap<>();	// will auto-magically remove all duplicates, and sort data, cool eh?
             Map<Integer, TreeSet<String>> affectedSequencesByAssembly = new HashMap<>();    // will contain all sequences containing variants for which we are going to add genotypes
             mongoTemplate.findAll(Assembly.class).stream().forEach(asm -> affectedSequencesByAssembly.put(asm.getId(), null));
+            if (affectedSequencesByAssembly.isEmpty())
+            	affectedSequencesByAssembly.put(null, null);	// old-style, assembly-less DB
 
 			HashMap<String /*individual*/, String> phasingGroup = new HashMap<>();
 			do {
@@ -799,12 +794,12 @@ public class BrapiImport extends AbstractGenotypeImport {
 		for (int j=0; j<Math.max(1, nNumberOfRetries); j++)
 		{			
 			Query query = new Query(Criteria.where("_id").is(mgdbVariantId));
-			query.fields().include(VariantData.FIELDNAME_TYPE).include(VariantData.FIELDNAME_POSITIONS).include(VariantData.FIELDNAME_KNOWN_ALLELES).include(VariantData.FIELDNAME_VERSION);
+			query.fields().include(VariantData.FIELDNAME_TYPE).include(VariantData.FIELDNAME_POSITIONS).include(VariantData.FIELDNAME_REFERENCE_POSITION).include(VariantData.FIELDNAME_KNOWN_ALLELES).include(VariantData.FIELDNAME_VERSION);
 			
 			VariantData variant = mongoTemplate.findOne(query, VariantData.class);
 			Update update = variant == null ? null : new Update();
         	for (Integer anAssemblyId : affectedSequencesByAssembly.keySet()) {
-                ReferencePosition rp = variant.getPositions().get(anAssemblyId);
+                ReferencePosition rp = variant.getReferencePosition(anAssemblyId);
                 if (rp != null) {
                     TreeSet<String> affectedSequencesForAssembly = affectedSequencesByAssembly.get(anAssemblyId);
                     if (affectedSequencesForAssembly == null) {
@@ -884,11 +879,11 @@ public class BrapiImport extends AbstractGenotypeImport {
 			try
 			{
 				if (!update.getUpdateObject().keySet().isEmpty())
-				{
 					mongoTemplate.upsert(new Query(Criteria.where("_id").is(mgdbVariantId)).addCriteria(Criteria.where(VariantData.FIELDNAME_VERSION).is(variant.getVersion())), update, VariantData.class);
-				}
+
 		        vrd.setKnownAlleles(variant.getKnownAlleles());
 		        vrd.setPositions(variant.getPositions());
+		        vrd.setReferencePosition(variant.getReferencePosition());
 		        vrd.setType(variant.getType());
 		        vrd.setSynonyms(variant.getSynonyms());
 				mongoTemplate.save(vrd);

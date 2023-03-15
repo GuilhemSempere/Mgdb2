@@ -44,7 +44,7 @@ import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
 
 import fr.cirad.mgdb.importing.base.AbstractGenotypeImport;
-import fr.cirad.mgdb.importing.base.SynonymAwareImport;
+import fr.cirad.mgdb.importing.base.RefactoredImport;
 import fr.cirad.mgdb.model.mongo.maintypes.Assembly;
 import fr.cirad.mgdb.model.mongo.maintypes.GenotypingProject;
 import fr.cirad.mgdb.model.mongodao.MgdbDao;
@@ -58,7 +58,7 @@ import htsjdk.variant.variantcontext.VariantContext.Type;
 /**
  * The Class PlinkImport.
  */
-public class PlinkImport extends SynonymAwareImport {
+public class PlinkImport extends RefactoredImport {
 
     /** The Constant LOG. */
     private static final Logger LOG = Logger.getLogger(PlinkImport.class);
@@ -229,20 +229,10 @@ public class PlinkImport extends SynonymAwareImport {
             }
             project.setPloidyLevel(2);
 
-            HashMap<String, String> existingVariantIDs;
-            Assembly assembly = mongoTemplate.findOne(new Query(Criteria.where(Assembly.FIELDNAME_NAME).is(assemblyName)), Assembly.class);
-            if (assembly == null) {
-                if ("".equals(assemblyName) || m_fAllowNewAssembly) {
-                    assembly = new Assembly("".equals(assemblyName) ? 0 : AutoIncrementCounter.getNextSequence(mongoTemplate, MongoTemplateManager.getMongoCollectionName(Assembly.class)));
-                    assembly.setName(assemblyName);
-                    mongoTemplate.save(assembly);
-                    existingVariantIDs = new HashMap<>();
-                }
-                else
-                    throw new Exception("Assembly \"" + assemblyName + "\" not found in database. Supported assemblies are " + StringUtils.join(mongoTemplate.findDistinct(Assembly.FIELDNAME_NAME, Assembly.class, String.class), ", "));
-            }
-            else
-                existingVariantIDs = buildSynonymToIdMapForExistingVariants(mongoTemplate, false, assembly.getId());
+			progress.addStep("Scanning existing marker IDs");
+			progress.moveToNextStep();
+			Assembly assembly = createAssemblyIfNeeded(mongoTemplate, assemblyName);
+			HashMap<String, String> existingVariantIDs = buildSynonymToIdMapForExistingVariants(mongoTemplate, true, assembly == null ? null : assembly.getId());
 
             String info = "Loading variant list from MAP file";
             LOG.info(info);
@@ -259,10 +249,10 @@ public class PlinkImport extends SynonymAwareImport {
             progress.addStep(info);
             progress.moveToNextStep();
             Map<String, Type> nonSnpVariantTypeMap = new HashMap<>();
-            LinkedHashMap<String, String> userIndividualToPopulationMap = new LinkedHashMap<>();
+            LinkedHashMap<String, String> orderedIndOrSpToPopulationMap = new LinkedHashMap<>();
             try {
                 m_nCurrentlyTransposingMatrixCount++;
-                rotatedFile = transposePlinkPedFile(variants, pedFile, userIndividualToPopulationMap, nonSnpVariantTypeMap, fSkipMonomorphic, progress);
+                rotatedFile = transposePlinkPedFile(variants, pedFile, orderedIndOrSpToPopulationMap, nonSnpVariantTypeMap, fSkipMonomorphic, progress);
             }
             finally {
                 m_nCurrentlyTransposingMatrixCount--;
@@ -270,7 +260,7 @@ public class PlinkImport extends SynonymAwareImport {
             
             
             // Create the necessary samples
-            createSamples(mongoTemplate, project.getId(), sRun, sampleToIndividualMap, userIndividualToPopulationMap, progress);
+            createSamples(mongoTemplate, project.getId(), sRun, sampleToIndividualMap, orderedIndOrSpToPopulationMap, progress);
             if (progress.getError() != null || progress.isAborted())
                 return createdProject;
             
@@ -281,7 +271,7 @@ public class PlinkImport extends SynonymAwareImport {
             if (fCheckConsistencyBetweenSynonyms) {
                 progress.addStep("Checking genotype consistency between synonyms");
                 progress.moveToNextStep();
-                checkSynonymGenotypeConsistency(rotatedFile, existingVariantIDs, userIndividualToPopulationMap.keySet(), pedFile.getParentFile() + File.separator + sModule + "_" + sProject + "_" + sRun, indexesOfLinesThatMustBeSkipped);
+                checkSynonymGenotypeConsistency(rotatedFile, existingVariantIDs, orderedIndOrSpToPopulationMap.keySet(), pedFile.getParentFile() + File.separator + sModule + "_" + sProject + "_" + sRun, indexesOfLinesThatMustBeSkipped);
             }
             if (progress.getError() != null || progress.isAborted())
                 return createdProject;
@@ -291,7 +281,7 @@ public class PlinkImport extends SynonymAwareImport {
             int nConcurrentThreads = Math.max(1, Runtime.getRuntime().availableProcessors());
             LOG.debug("Importing project '" + sProject + "' into " + sModule + " using " + nConcurrentThreads + " threads");
 
-            long count = importTempFileContents(progress, nConcurrentThreads, mongoTemplate, assembly.getId(), rotatedFile, providedVariantPositions, existingVariantIDs, project, sRun, inconsistencies, userIndividualToPopulationMap, nonSnpVariantTypeMap, indexesOfLinesThatMustBeSkipped, fSkipMonomorphic);
+            long count = importTempFileContents(progress, nConcurrentThreads, mongoTemplate, assembly == null ? null : assembly.getId(), rotatedFile, providedVariantPositions, existingVariantIDs, project, sRun, inconsistencies, orderedIndOrSpToPopulationMap, nonSnpVariantTypeMap, indexesOfLinesThatMustBeSkipped, fSkipMonomorphic);
 
             if (progress.getError() != null)
                 throw new Exception(progress.getError());
@@ -327,7 +317,7 @@ public class PlinkImport extends SynonymAwareImport {
         return allocatableMemory;
     }
 
-    private File transposePlinkPedFile(String[] variants, File pedFile, Map<String, String> userIndividualToPopulationMapToFill, Map<String, Type> nonSnpVariantTypeMapToFill, boolean fSkipMonomorphic, ProgressIndicator progress) throws Exception {
+    private File transposePlinkPedFile(String[] variants, File pedFile, Map<String, String> orderedIndOrSpToPopulationMapToFill, Map<String, Type> nonSnpVariantTypeMapToFill, boolean fSkipMonomorphic, ProgressIndicator progress) throws Exception {
         long before = System.currentTimeMillis();
 
         StackTraceElement[] stacktrace = Thread.currentThread().getStackTrace();
@@ -354,7 +344,7 @@ public class PlinkImport extends SynonymAwareImport {
             String sPopulation = initMatcher.group();
             initMatcher.find();
             String sIndividual = initMatcher.group();
-            userIndividualToPopulationMapToFill.put(sIndividual, sPopulation);
+            orderedIndOrSpToPopulationMapToFill.put(sIndividual, sPopulation);
 
             // Skip the remaining header fields
             for (int i = 0; i < 4; i++)
@@ -586,7 +576,7 @@ public class PlinkImport extends SynonymAwareImport {
         outputWriter.close();
 
         if (progress.getError() == null && !progress.isAborted()) {
-        	LOG.info("PED matrix transposition took " + (System.currentTimeMillis() - before) + "ms for " + variants.length + " markers and " + userIndividualToPopulationMapToFill.size() + " individuals");
+        	LOG.info("PED matrix transposition took " + (System.currentTimeMillis() - before) + "ms for " + variants.length + " markers and " + orderedIndOrSpToPopulationMapToFill.size() + " individuals");
 
             // Fill the variant type map with the variant type array
             for (int i = 0; i < variants.length; i++)

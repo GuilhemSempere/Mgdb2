@@ -277,20 +277,10 @@ public class VcfImport extends AbstractGenotypeImport {
             progress.moveToNextStep();
             LOG.info(progress.getProgressDescription());
 
-            HashMap<String, String> existingVariantIDs;
-            Assembly assembly = mongoTemplate.findOne(new Query(Criteria.where(Assembly.FIELDNAME_NAME).is(assemblyName)), Assembly.class);
-            if (assembly == null) {
-                if ("".equals(assemblyName) || m_fAllowNewAssembly) {
-                    assembly = new Assembly("".equals(assemblyName) ? 0 : AutoIncrementCounter.getNextSequence(mongoTemplate, MongoTemplateManager.getMongoCollectionName(Assembly.class)));
-                    assembly.setName(assemblyName);
-                    mongoTemplate.save(assembly);
-                    existingVariantIDs = new HashMap<>();
-                }
-                else
-                    throw new Exception("Assembly \"" + assemblyName + "\" not found in database. Supported assemblies are " + StringUtils.join(mongoTemplate.findDistinct(Assembly.FIELDNAME_NAME, Assembly.class, String.class), ", "));
-            }
-            else
-                existingVariantIDs = buildSynonymToIdMapForExistingVariants(mongoTemplate, false, assembly.getId());
+			progress.addStep("Scanning existing marker IDs");
+			progress.moveToNextStep();
+			Assembly assembly = createAssemblyIfNeeded(mongoTemplate, assemblyName);
+			HashMap<String, String> existingVariantIDs = buildSynonymToIdMapForExistingVariants(mongoTemplate, true, assembly == null ? null : assembly.getId());
 
             int nNumberOfVariantsToSaveAtOnce = -1;
             variantIterator = reader.iterator();
@@ -304,7 +294,9 @@ public class VcfImport extends AbstractGenotypeImport {
 
             BlockingQueue<Runnable> saveServiceQueue = new LinkedBlockingQueue<Runnable>(saveServiceQueueLength(nNConcurrentThreads));
             ExecutorService saveService = new ThreadPoolExecutor(1, saveServiceThreads(nNConcurrentThreads), 30, TimeUnit.SECONDS, saveServiceQueue, new ThreadPoolExecutor.CallerRunsPolicy());
-            final Collection<Assembly> assemblies = mongoTemplate.findAll(Assembly.class);
+            final Collection<Integer> assemblyIDs = mongoTemplate.findDistinct(new Query(), "_id", Assembly.class, Integer.class);
+            if (assemblyIDs.isEmpty())
+            	assemblyIDs.add(null);	// old-style, assembly-less DB
             
             List<VariantContextHologram> vcChunk = new ArrayList<>();
             HashMap<String /*individual*/, Comparable> phasingGroups = new HashMap<String /*individual*/, Comparable>();
@@ -343,7 +335,7 @@ public class VcfImport extends AbstractGenotypeImport {
             m_fSamplesPersisted = true;
 
             // loop over each variation
-            final int nAssemblyId = assembly.getId();
+            final Integer nAssemblyId = assembly == null ? null : assembly.getId();
             while (variantIterator.hasNext()) {
                 if (progress.getError() != null || progress.isAborted())
                     break;
@@ -400,10 +392,10 @@ public class VcfImport extends AbstractGenotypeImport {
                                     finalProject.getAlleleCounts().add(variant.getKnownAlleles().size());    // it's a Set so it will only be added if it's not already present
                                     finalProject.getVariantTypes().add(vcfEntry.getType().toString());   // it's a Set so it will only be added if it's not already present
 
-                                    for (Assembly assembly : assemblies) {
-                                        ReferencePosition rp = variant.getReferencePosition(assembly.getId());
+                                    for (Integer asmId : assemblyIDs) {
+                                        ReferencePosition rp = variant.getReferencePosition(asmId);
                                         if (rp != null)
-                                        	finalProject.getContigs(assembly.getId()).add(rp.getSequence());
+                                        	finalProject.getContigs(asmId).add(rp.getSequence());
                                     }
                                 }
 
@@ -645,7 +637,8 @@ public class VcfImport extends AbstractGenotypeImport {
         }
 
         vrd.setKnownAlleles(variantToFeed.getKnownAlleles());
-        vrd.setPositions(variantToFeed.getPositions());
+//        vrd.setPositions(variantToFeed.getPositions());
+        vrd.setReferencePosition(nAssemblyId, variantToFeed.getReferencePosition());
         vrd.setType(variantToFeed.getType());
         vrd.setSynonyms(variantToFeed.getSynonyms());
         return vrd;

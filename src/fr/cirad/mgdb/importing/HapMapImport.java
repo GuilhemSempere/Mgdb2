@@ -257,20 +257,10 @@ public class HapMapImport extends AbstractGenotypeImport {
 					createdProject = project.getId();
 			}
 
-            HashMap<String, String> existingVariantIDs;
-            Assembly assembly = mongoTemplate.findOne(new Query(Criteria.where(Assembly.FIELDNAME_NAME).is(assemblyName)), Assembly.class);
-            if (assembly == null) {
-                if ("".equals(assemblyName) || m_fAllowNewAssembly) {
-                    assembly = new Assembly("".equals(assemblyName) ? 0 : AutoIncrementCounter.getNextSequence(mongoTemplate, MongoTemplateManager.getMongoCollectionName(Assembly.class)));
-                    assembly.setName(assemblyName);
-                    mongoTemplate.save(assembly);
-                    existingVariantIDs = new HashMap<>();
-                }
-                else
-                    throw new Exception("Assembly \"" + assemblyName + "\" not found in database. Supported assemblies are " + StringUtils.join(mongoTemplate.findDistinct(Assembly.FIELDNAME_NAME, Assembly.class, String.class), ", "));
-            }
-            else
-                existingVariantIDs = buildSynonymToIdMapForExistingVariants(mongoTemplate, false, assembly.getId());
+			progress.addStep("Scanning existing marker IDs");
+			progress.moveToNextStep();
+			Assembly assembly = createAssemblyIfNeeded(mongoTemplate, assemblyName);
+			HashMap<String, String> existingVariantIDs = buildSynonymToIdMapForExistingVariants(mongoTemplate, true, assembly == null ? null : assembly.getId());
 
 			if (!project.getVariantTypes().contains(Type.SNP.toString()))
 				project.getVariantTypes().add(Type.SNP.toString());
@@ -287,7 +277,9 @@ public class HapMapImport extends AbstractGenotypeImport {
             Iterator<RawHapMapFeature> it = reader.iterator();
             BlockingQueue<Runnable> saveServiceQueue = new LinkedBlockingQueue<Runnable>(saveServiceQueueLength(nNConcurrentThreads));
             ExecutorService saveService = new ThreadPoolExecutor(1, saveServiceThreads(nNConcurrentThreads), 30, TimeUnit.SECONDS, saveServiceQueue, new ThreadPoolExecutor.CallerRunsPolicy());
-            final Collection<Assembly> assemblies = mongoTemplate.findAll(Assembly.class);
+            final Collection<Integer> assemblyIDs = mongoTemplate.findDistinct(new Query(), "_id", Assembly.class, Integer.class);
+            if (assemblyIDs.isEmpty())
+            	assemblyIDs.add(null);	// old-style, assembly-less DB
 
             int nImportThreads = Math.max(1, nNConcurrentThreads - 1);
             Thread[] importThreads = new Thread[nImportThreads];
@@ -400,12 +392,12 @@ public class HapMapImport extends AbstractGenotypeImport {
                                         }
                                     }
 
-                					VariantRunData runToSave = addHapMapDataToVariant(finalMongoTemplate, variant, finalAssembly.getId(), variantType, alleleIndexMap, hmFeature, finalProject, sRun, sampleIds);
+                					VariantRunData runToSave = addHapMapDataToVariant(finalMongoTemplate, variant, finalAssembly == null ? null : finalAssembly.getId(), variantType, alleleIndexMap, hmFeature, finalProject, sRun, sampleIds);
 
-                                    for (Assembly assembly : assemblies) {
-                                        ReferencePosition rp = variant.getReferencePosition(assembly.getId());
+                                    for (Integer asmId : assemblyIDs) {
+                                        ReferencePosition rp = variant.getReferencePosition(asmId);
                                         if (rp != null)
-                                        	finalProject.getContigs(assembly.getId()).add(rp.getSequence());
+                                        	finalProject.getContigs(asmId).add(rp.getSequence());
                                     }
                 					
                 					finalProject.getAlleleCounts().add(variant.getKnownAlleles().size());	// it's a TreeSet so it will only be added if it's not already present
@@ -567,7 +559,8 @@ public class HapMapImport extends AbstractGenotypeImport {
 
 		project.getVariantTypes().add(variantType.toString());
         vrd.setKnownAlleles(variantToFeed.getKnownAlleles());
-        vrd.setPositions(variantToFeed.getPositions());
+//        vrd.setPositions(variantToFeed.getPositions());
+        vrd.setReferencePosition(nAssemblyId, variantToFeed.getReferencePosition());
         vrd.setType(variantToFeed.getType());
         vrd.setSynonyms(variantToFeed.getSynonyms());
 		return vrd;

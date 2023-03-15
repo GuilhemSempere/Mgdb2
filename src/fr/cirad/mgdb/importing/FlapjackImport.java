@@ -51,9 +51,8 @@ import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
 
-import com.mongodb.BasicDBObject;
-
 import fr.cirad.mgdb.importing.base.AbstractGenotypeImport;
+import fr.cirad.mgdb.importing.base.RefactoredImport;
 import fr.cirad.mgdb.model.mongo.maintypes.Assembly;
 import fr.cirad.mgdb.model.mongo.maintypes.GenotypingProject;
 import fr.cirad.mgdb.model.mongo.maintypes.GenotypingSample;
@@ -63,7 +62,6 @@ import fr.cirad.mgdb.model.mongo.maintypes.VariantRunData;
 import fr.cirad.mgdb.model.mongo.subtypes.ReferencePosition;
 import fr.cirad.mgdb.model.mongo.subtypes.SampleGenotype;
 import fr.cirad.mgdb.model.mongodao.MgdbDao;
-import fr.cirad.tools.Helper;
 import fr.cirad.tools.ProgressIndicator;
 import fr.cirad.tools.mongo.AutoIncrementCounter;
 import fr.cirad.tools.mongo.MongoTemplateManager;
@@ -73,15 +71,13 @@ import htsjdk.variant.variantcontext.VariantContext.Type;
 /**
  * The Class FlapjackImport.
  */
-public class FlapjackImport extends AbstractGenotypeImport {
+public class FlapjackImport extends RefactoredImport {
 
     /** The Constant LOG. */
     private static final Logger LOG = Logger.getLogger(VariantData.class);
 
     /** The m_process id. */
     private String m_processID;
-
-    private boolean fImportUnknownVariants = false;
 
     public boolean m_fCloseContextOpenAfterImport = false;
 
@@ -177,35 +173,34 @@ public class FlapjackImport extends AbstractGenotypeImport {
         ProgressIndicator progress = ProgressIndicator.get(m_processID) != null ? ProgressIndicator.get(m_processID) : new ProgressIndicator(m_processID, new String[]{"Initializing import"}); // better to add it straight-away so the JSP doesn't get null in return when it checks for it (otherwise it will assume the process has ended)
 
         GenericXmlApplicationContext ctx = null;
+        MongoTemplate mongoTemplate = MongoTemplateManager.get(sModule);
+        if (mongoTemplate == null)
+        {   // we are probably being invoked offline
+            try
+            {
+                ctx = new GenericXmlApplicationContext("applicationContext-data.xml");
+            }
+            catch (BeanDefinitionStoreException fnfe)
+            {
+                LOG.warn("Unable to find applicationContext-data.xml. Now looking for applicationContext.xml", fnfe);
+                ctx = new GenericXmlApplicationContext("applicationContext.xml");
+            }
+
+            MongoTemplateManager.initialize(ctx);
+            mongoTemplate = MongoTemplateManager.get(sModule);
+            if (mongoTemplate == null)
+                throw new Exception("DATASOURCE '" + sModule + "' is not supported!");
+        }
+
+        m_fImportUnknownVariants = doesDatabaseSupportImportingUnknownVariants(sModule);
+
+        if (m_processID == null)
+            m_processID = "IMPORT__" + sModule + "__" + sProject + "__" + sRun + "__" + System.currentTimeMillis();
+
+        GenotypingProject project = mongoTemplate.findOne(new Query(Criteria.where(GenotypingProject.FIELDNAME_NAME).is(sProject)), GenotypingProject.class);
         File rotatedFile = File.createTempFile("fjImport-" + genotypeFile.getName() + "-", ".tsv");
         try
         {
-            MongoTemplate mongoTemplate = MongoTemplateManager.get(sModule);
-            if (mongoTemplate == null)
-            {   // we are probably being invoked offline
-                try
-                {
-                    ctx = new GenericXmlApplicationContext("applicationContext-data.xml");
-                }
-                catch (BeanDefinitionStoreException fnfe)
-                {
-                    LOG.warn("Unable to find applicationContext-data.xml. Now looking for applicationContext.xml", fnfe);
-                    ctx = new GenericXmlApplicationContext("applicationContext.xml");
-                }
-
-                MongoTemplateManager.initialize(ctx);
-                mongoTemplate = MongoTemplateManager.get(sModule);
-                if (mongoTemplate == null)
-                    throw new Exception("DATASOURCE '" + sModule + "' is not supported!");
-            }
-
-            fImportUnknownVariants = doesDatabaseSupportImportingUnknownVariants(sModule);
-
-            if (m_processID == null)
-                m_processID = "IMPORT__" + sModule + "__" + sProject + "__" + sRun + "__" + System.currentTimeMillis();
-
-            GenotypingProject project = mongoTemplate.findOne(new Query(Criteria.where(GenotypingProject.FIELDNAME_NAME).is(sProject)), GenotypingProject.class);
-
             MongoTemplateManager.lockProjectForWriting(sModule, sProject);
             cleanupBeforeImport(mongoTemplate, sModule, project, importMode, sRun);
 
@@ -222,28 +217,34 @@ public class FlapjackImport extends AbstractGenotypeImport {
             else if (nPloidy != null && importMode == 0 && project.getPloidyLevel() != nPloidy)
                 throw new Exception("Ploidy levels differ between existing (" + project.getPloidyLevel() + ") and provided (" + nPloidy + ") data!");
 
-            HashMap<String, String> existingVariantIDs;
-            Assembly assembly = mongoTemplate.findOne(new Query(Criteria.where(Assembly.FIELDNAME_NAME).is(assemblyName)), Assembly.class);
-            if (assembly == null) {
-                if ("".equals(assemblyName) || m_fAllowNewAssembly) {
-                    assembly = new Assembly("".equals(assemblyName) ? 0 : AutoIncrementCounter.getNextSequence(mongoTemplate, MongoTemplateManager.getMongoCollectionName(Assembly.class)));
-                    assembly.setName(assemblyName);
-                    mongoTemplate.save(assembly);
-                    existingVariantIDs = new HashMap<>();
-                }
-                else
-                    throw new Exception("Assembly \"" + assemblyName + "\" not found in database. Supported assemblies are " + StringUtils.join(mongoTemplate.findDistinct(Assembly.FIELDNAME_NAME, Assembly.class, String.class), ", "));
-            }
-            else
-                existingVariantIDs = buildSynonymToIdMapForExistingVariants(mongoTemplate, false, assembly.getId());
+			progress.addStep("Scanning existing marker IDs");
+			progress.moveToNextStep();
+			Assembly assembly = createAssemblyIfNeeded(mongoTemplate, assemblyName);
+			HashMap<String, String> existingVariantIDs = buildSynonymToIdMapForExistingVariants(mongoTemplate, true, assembly == null ? null : assembly.getId());
 
             String info = "Loading variant list from MAP file";
             LOG.info(info);
             progress.addStep(info);
             progress.moveToNextStep();
-            Map<String, VariantMapPosition> variantsAndPositions = null;
+            LinkedHashMap<String, String> variantsAndPositions = new LinkedHashMap<>();
             try {
-                variantsAndPositions = getVariantsAndPositions(mapFileURL);
+                BufferedReader mapReader = new BufferedReader(new InputStreamReader(mapFileURL.openStream()));
+                int nCurrentLine = -1;
+                String line;
+                while ((line = mapReader.readLine()) != null) {
+                    line = line.trim();
+                    nCurrentLine++;
+
+                    if (line.length() == 0 || line.charAt(0) == '#')
+                        continue;
+
+                    String[] tokens = line.split("\\s+");
+                    if (tokens.length < 3)
+                        throw new Exception("Line " + nCurrentLine + " : invalid or unsupported data (less than 3 elements)");
+
+                    variantsAndPositions.put(tokens[0], tokens[1] + "\t" + tokens[2]);
+                }
+                mapReader.close();
             } catch (Exception exc) {
                 LOG.error(exc);
                 progress.setError("Map file parsing failed : " + exc.getMessage());
@@ -274,40 +275,18 @@ public class FlapjackImport extends AbstractGenotypeImport {
             
             
             // Create the necessary samples
-            m_providedIdToSampleMap = new HashMap<String /*individual*/, GenotypingSample>();
-            HashSet<Individual> indsToAdd = new HashSet<>();
-            boolean fDbAlreadyContainedIndividuals = mongoTemplate.findOne(new Query(), Individual.class) != null;
-            for (String sIndOrSpId : individualNames) {
-            	String sIndividual = sampleToIndividualMap == null ? sIndOrSpId : sampleToIndividualMap.get(sIndOrSpId);
-            	if (sIndividual == null) {
-            		progress.setError("Sample / individual mapping contains no individual for sample " + sIndOrSpId);
-            		return 0;
-            	}
-            	
-                if (!fDbAlreadyContainedIndividuals || mongoTemplate.findById(sIndividual, Individual.class) == null)  // we don't have any population data so we don't need to update the Individual if it already exists
-                    indsToAdd.add(new Individual(sIndividual));
-
-                if (!indsToAdd.isEmpty() && indsToAdd.size() % 1000 == 0) {
-                	mongoTemplate.insert(indsToAdd, Individual.class);
-                    indsToAdd = new HashSet<>();
-                }
-
-                int sampleId = AutoIncrementCounter.getNextSequence(mongoTemplate, MongoTemplateManager.getMongoCollectionName(GenotypingSample.class));
-                m_providedIdToSampleMap.put(sIndOrSpId, new GenotypingSample(sampleId, project.getId(), sRun, sIndividual, sampleToIndividualMap == null ? null : sIndOrSpId));   // add a sample for this individual to the project
-            }
-            mongoTemplate.insert(m_providedIdToSampleMap.values(), GenotypingSample.class);
-            if (!indsToAdd.isEmpty()) {
-                mongoTemplate.insert(indsToAdd, Individual.class);
-                indsToAdd = null;
-            }
-            m_fSamplesPersisted = true;
+            LinkedHashMap<String, String> orderedIndOrSpToPopulationMap = new LinkedHashMap<>();
+            for (String sInd : individualNames)
+            	orderedIndOrSpToPopulationMap.put(sInd, null);	// we have no population info
+            createSamples(mongoTemplate, project.getId(), sRun, sampleToIndividualMap, orderedIndOrSpToPopulationMap, progress);
+            if (progress.getError() != null || progress.isAborted())
+                return createdProject;
 
             
-            // Imported rotated data
+            // Rotated file import
             int nConcurrentThreads = Math.max(1, Runtime.getRuntime().availableProcessors());
             LOG.debug("Importing project '" + sProject + "' into " + sModule + " using " + nConcurrentThreads + " threads");
-            long count = importTempFileContents(progress, nConcurrentThreads, mongoTemplate, assembly.getId(), rotatedFile, variantsAndPositions, existingVariantIDs, project, sRun, nonSnpVariantTypeMap, individualNames, fSkipMonomorphic);
-
+            long count = importTempFileContents(progress, nConcurrentThreads, mongoTemplate, assembly == null ? null : assembly.getId(), rotatedFile, variantsAndPositions, existingVariantIDs, project, sRun, null, orderedIndOrSpToPopulationMap, nonSnpVariantTypeMap, null, fSkipMonomorphic);
             if (progress.getError() != null)
                 throw new Exception(progress.getError());
 
@@ -317,8 +296,12 @@ public class FlapjackImport extends AbstractGenotypeImport {
             LOG.info("FlapjackImport took " + (System.currentTimeMillis() - before) / 1000 + "s for " + count + " records");
             return createdProject;
         }
-        finally
-        {
+        catch (Exception e) {
+        	LOG.error("Error", e);
+        	progress.setError(e.getMessage());
+        	return null;
+        }
+        finally {
         	rotatedFile.delete();
             if (m_fCloseContextOpenAfterImport && ctx != null)
                 ctx.close();
@@ -330,203 +313,177 @@ public class FlapjackImport extends AbstractGenotypeImport {
             }
         }
     }
-
-    private Map<String, VariantMapPosition> getVariantsAndPositions(URL mapFileURL) throws Exception {
-        LinkedHashMap<String, VariantMapPosition> variantsAndPositions = new LinkedHashMap<>();
-        BufferedReader mapReader = new BufferedReader(new InputStreamReader(mapFileURL.openStream()));
-        int nCurrentLine = -1;
-        String line;
-        while ((line = mapReader.readLine()) != null) {
-            line = line.trim();
-            nCurrentLine++;
-
-            if (line.length() == 0 || line.charAt(0) == '#')
-                continue;
-
-            String[] tokens = line.split("\\s+");
-            if (tokens.length < 3)
-                throw new Exception("Line " + nCurrentLine + " : invalid or unsupported data (less than 3 elements)");
-
-            VariantMapPosition position = new VariantMapPosition(tokens[1], Integer.parseInt(tokens[2]));
-            variantsAndPositions.put(tokens[0], position);
-        }
-
-        mapReader.close();
-        return variantsAndPositions;
-    }
-
-    // TODO : check inconsistent variant names between map and genotype
-    public long importTempFileContents(ProgressIndicator progress, int nNConcurrentThreads, MongoTemplate mongoTemplate, Integer nAssemblyId, File tempFile, Map<String, VariantMapPosition> variantsAndPositions, HashMap<String, String> existingVariantIDs, GenotypingProject project, String sRun, Map<String, Type> nonSnpVariantTypeMap, List<String> individuals, boolean fSkipMonomorphic) throws Exception
-    {
-        final AtomicInteger count = new AtomicInteger(0);
-
-        // loop over each variation and write to DB
-        BufferedReader reader = null;
-        try
-        {
-            String info = "Importing genotypes";
-            LOG.info(info);
-            progress.addStep(info);
-            progress.moveToNextStep();
-            progress.setPercentageEnabled(true);
-
-            final int nNumberOfVariantsToSaveAtOnce = Math.max(1, nMaxChunkSize / individuals.size());
-            LOG.info("Importing by chunks of size " + nNumberOfVariantsToSaveAtOnce);
-
-            for (String sIndOrSpId : individuals) {
-            	GenotypingSample sample = m_providedIdToSampleMap.get(sIndOrSpId);
-            	if (sample == null) {
-            		progress.setError("Sample / individual mapping contains no individual for sample " + sIndOrSpId);
-            		return 0;
-            	}
-
-            	String sIndividual = sample.getIndividual();
-                Individual ind = mongoTemplate.findById(sIndividual, Individual.class);
-                boolean fAlreadyExists = ind != null;
-                boolean fNeedToSave = true;
-                if (!fAlreadyExists)
-                    ind = new Individual(sIndividual);
-
-                if (fNeedToSave)
-                    mongoTemplate.save(ind);
-            }
-
-            reader = new BufferedReader(new FileReader(tempFile));
-            final BufferedReader finalReader = reader;
-
-            // Leave one thread dedicated to the saveChunk service, it looks empirically faster that way
-            int nImportThreads = Math.max(1, nNConcurrentThreads - 1);
-            Thread[] importThreads = new Thread[nImportThreads];
-            BlockingQueue<Runnable> saveServiceQueue = new LinkedBlockingQueue<Runnable>(saveServiceQueueLength(nNConcurrentThreads));
-            ExecutorService saveService = new ThreadPoolExecutor(1, saveServiceThreads(nNConcurrentThreads), 30, TimeUnit.SECONDS, saveServiceQueue, new ThreadPoolExecutor.CallerRunsPolicy());
-            final Collection<Assembly> assemblies = mongoTemplate.findAll(Assembly.class);
-
-            for (int threadIndex = 0; threadIndex < nImportThreads; threadIndex++) {
-                importThreads[threadIndex] = new Thread() {
-                    @Override
-                    public void run() {
-                        try {
-                            long processedVariants = 0;
-                            HashSet<VariantData> unsavedVariants = new HashSet<VariantData>();  // HashSet allows no duplicates
-                            HashSet<VariantRunData> unsavedRuns = new HashSet<VariantRunData>();
-                            while (progress.getError() == null && !progress.isAborted()) {
-                                String line;
-                                synchronized (finalReader) {
-                                    line = finalReader.readLine();
-                                }
-                                if (line == null)
-                                    break;
-                                String[] splitLine = line.split("\t");
-
-                                if (fSkipMonomorphic && Arrays.stream(splitLine, 1, splitLine.length).filter(gt -> !"0".equals(gt)).distinct().count() < 2)
-                                    continue; // skip non-variant positions
-
-                                String providedVariantId = splitLine[0];
-
-                                VariantMapPosition position = variantsAndPositions.get(providedVariantId);
-
-                                String variantId = null;
-                                Type type = nonSnpVariantTypeMap.get(providedVariantId);    // SNP is the default type so we don't store it in nonSnpVariantTypeMap to make it as lightweight as possible
-                                for (String variantDescForPos : getIdentificationStrings(type == null ? Type.SNP.toString() : type.toString(), position.getSequence(), position.getPosition(), Arrays.asList(new String[] {providedVariantId}))) {
-                                    variantId = existingVariantIDs.get(variantDescForPos);
-                                    if (variantId != null) {
-                                        if (type != null && !variantId.equals(providedVariantId))
-                                            nonSnpVariantTypeMap.put(variantId, type);  // add the type to this existing variant ID so we don't miss it later on
-                                        break;
-                                    }
-                                }
-
-                                if (variantId == null && !fImportUnknownVariants)
-                                    LOG.warn("Skipping unknown variant: " + providedVariantId);
-                                else if (variantId != null && variantId.toString().startsWith("*"))
-                                {
-                                    LOG.warn("Skipping deprecated variant data: " + providedVariantId);
-                                    continue;
-                                }
-                                else
-                                {
-                                    VariantData variant = mongoTemplate.findById(variantId == null ? providedVariantId : variantId, VariantData.class);
-                                    if (variant == null)
-                                        variant = new VariantData((ObjectId.isValid(providedVariantId) ? "_" : "") + providedVariantId);
-
-                                    String[][] alleles = new String[individuals.size()][project.getPloidyLevel()];
-                                    int nIndividualIndex = 0;
-                                    while (nIndividualIndex < individuals.size()) {
-                                        String[] genotype = splitLine[nIndividualIndex + 1].split("/");
-                                        for (int i=0; i<project.getPloidyLevel(); i++)
-                                            alleles[nIndividualIndex][i] = genotype[genotype.length == 1 ? 0 : i];
-                                        nIndividualIndex++;
-                                    }
-
-                                    VariantRunData runToSave = addFlapjackDataToVariant(mongoTemplate, variant, nAssemblyId, position, individuals, nonSnpVariantTypeMap, alleles, project, sRun, fImportUnknownVariants);
-
-                                    for (Assembly assembly : assemblies) {
-                                        ReferencePosition rp = variant.getReferencePosition(assembly.getId());
-                                        if (rp != null)
-                                        	project.getContigs(assembly.getId()).add(rp.getSequence());
-                                    }
-
-                                    project.getAlleleCounts().add(variant.getKnownAlleles().size()); // it's a TreeSet so it will only be added if it's not already present
-                                    // FIXME ?
-                                    //if (variant.getKnownAlleles().size() > 2)
-                                    //    LOG.warn("Variant " + variant.getId() + " (" + providedVariantId + ") has more than 2 alleles!");
-
-                                    if (variant.getKnownAlleles().size() > 0) {   // we only import data related to a variant if we know its alleles
-                                        if (!unsavedVariants.contains(variant))
-                                            unsavedVariants.add(variant);
-                                        if (!unsavedRuns.contains(runToSave))
-                                            unsavedRuns.add(runToSave);
-                                    }
-                                    else
-                                    	LOG.warn("Skipping variant " + variant.getId() + " positioned at " + variant.getReferencePosition(nAssemblyId).getSequence() + ":" + variant.getReferencePosition(nAssemblyId).getStartSite() + " because its alleles are not known");
-
-                                    if (processedVariants % nNumberOfVariantsToSaveAtOnce == 0) {
-                                        saveChunk(unsavedVariants, unsavedRuns, existingVariantIDs, mongoTemplate, progress, saveService);
-                                        unsavedVariants = new HashSet<VariantData>();
-                                        unsavedRuns = new HashSet<VariantRunData>();
-
-                                        progress.setCurrentStepProgress(count.get() * 100 / variantsAndPositions.size());
-                                    }
-                                }
-                                int newCount = count.incrementAndGet();
-                                if (newCount % (nNumberOfVariantsToSaveAtOnce*50) == 0)
-                                    LOG.debug(newCount + " lines processed");
-                                processedVariants += 1;
-                            }
-
-                            persistVariantsAndGenotypes(!existingVariantIDs.isEmpty(), mongoTemplate, unsavedVariants, unsavedRuns);
-                        } catch (Throwable t) {
-                            progress.setError("Genotypes import failed with error: " + t.getMessage());
-                            LOG.error(progress.getError(), t);
-                            return;
-                        }
-
-                    }
-                };
-
-                importThreads[threadIndex].start();
-            }
-
-            for (int i = 0; i < nImportThreads; i++)
-                importThreads[i].join();
-            saveService.shutdown();
-            saveService.awaitTermination(Integer.MAX_VALUE, TimeUnit.DAYS);
-
-            if (progress.getError() != null || progress.isAborted())
-                return count.get();
-            
-            // save project data
-            if (!project.getRuns().contains(sRun))
-                project.getRuns().add(sRun);
-            mongoTemplate.save(project);
-        }
-        finally
-        {
-            if (reader != null)
-                reader.close();
-        }
-        return count.get();
-    }
+//    // TODO : check inconsistent variant names between map and genotype
+//    public long importTempFileContents(ProgressIndicator progress, int nNConcurrentThreads, MongoTemplate mongoTemplate, Integer nAssemblyId, File tempFile, Map<String, VariantMapPosition> variantsAndPositions, HashMap<String, String> existingVariantIDs, GenotypingProject project, String sRun, Map<String, Type> nonSnpVariantTypeMap, List<String> individuals, boolean fSkipMonomorphic) throws Exception
+//    {
+//        final AtomicInteger count = new AtomicInteger(0);
+//
+//        // loop over each variation and write to DB
+//        BufferedReader reader = null;
+//        try
+//        {
+//            String info = "Importing genotypes";
+//            LOG.info(info);
+//            progress.addStep(info);
+//            progress.moveToNextStep();
+//            progress.setPercentageEnabled(true);
+//
+//            final int nNumberOfVariantsToSaveAtOnce = Math.max(1, nMaxChunkSize / individuals.size());
+//            LOG.info("Importing by chunks of size " + nNumberOfVariantsToSaveAtOnce);
+//
+//            for (String sIndOrSpId : individuals) {
+//            	GenotypingSample sample = m_providedIdToSampleMap.get(sIndOrSpId);
+//            	if (sample == null) {
+//            		progress.setError("Sample / individual mapping contains no individual for sample " + sIndOrSpId);
+//            		return 0;
+//            	}
+//
+//            	String sIndividual = sample.getIndividual();
+//                Individual ind = mongoTemplate.findById(sIndividual, Individual.class);
+//                boolean fAlreadyExists = ind != null;
+//                boolean fNeedToSave = true;
+//                if (!fAlreadyExists)
+//                    ind = new Individual(sIndividual);
+//
+//                if (fNeedToSave)
+//                    mongoTemplate.save(ind);
+//            }
+//
+//            reader = new BufferedReader(new FileReader(tempFile));
+//            final BufferedReader finalReader = reader;
+//
+//            // Leave one thread dedicated to the saveChunk service, it looks empirically faster that way
+//            int nImportThreads = Math.max(1, nNConcurrentThreads - 1);
+//            Thread[] importThreads = new Thread[nImportThreads];
+//            BlockingQueue<Runnable> saveServiceQueue = new LinkedBlockingQueue<Runnable>(saveServiceQueueLength(nNConcurrentThreads));
+//            ExecutorService saveService = new ThreadPoolExecutor(1, saveServiceThreads(nNConcurrentThreads), 30, TimeUnit.SECONDS, saveServiceQueue, new ThreadPoolExecutor.CallerRunsPolicy());
+//            final Collection<Assembly> assemblies = mongoTemplate.findAll(Assembly.class);
+//
+//            for (int threadIndex = 0; threadIndex < nImportThreads; threadIndex++) {
+//                importThreads[threadIndex] = new Thread() {
+//                    @Override
+//                    public void run() {
+//                        try {
+//                            long processedVariants = 0;
+//                            HashSet<VariantData> unsavedVariants = new HashSet<VariantData>();  // HashSet allows no duplicates
+//                            HashSet<VariantRunData> unsavedRuns = new HashSet<VariantRunData>();
+//                            while (progress.getError() == null && !progress.isAborted()) {
+//                                String line;
+//                                synchronized (finalReader) {
+//                                    line = finalReader.readLine();
+//                                }
+//                                if (line == null)
+//                                    break;
+//                                String[] splitLine = line.split("\t");
+//
+//                                if (fSkipMonomorphic && Arrays.stream(splitLine, 1, splitLine.length).filter(gt -> !"0".equals(gt)).distinct().count() < 2)
+//                                    continue; // skip non-variant positions
+//
+//                                String providedVariantId = splitLine[0];
+//
+//                                VariantMapPosition position = variantsAndPositions.get(providedVariantId);
+//
+//                                String variantId = null;
+//                                Type type = nonSnpVariantTypeMap.get(providedVariantId);    // SNP is the default type so we don't store it in nonSnpVariantTypeMap to make it as lightweight as possible
+//                                for (String variantDescForPos : getIdentificationStrings(type == null ? Type.SNP.toString() : type.toString(), position.getSequence(), position.getPosition(), Arrays.asList(new String[] {providedVariantId}))) {
+//                                    variantId = existingVariantIDs.get(variantDescForPos);
+//                                    if (variantId != null) {
+//                                        if (type != null && !variantId.equals(providedVariantId))
+//                                            nonSnpVariantTypeMap.put(variantId, type);  // add the type to this existing variant ID so we don't miss it later on
+//                                        break;
+//                                    }
+//                                }
+//
+//                                if (variantId == null && !m_fImportUnknownVariants)
+//                                    LOG.warn("Skipping unknown variant: " + providedVariantId);
+//                                else if (variantId != null && variantId.toString().startsWith("*"))
+//                                {
+//                                    LOG.warn("Skipping deprecated variant data: " + providedVariantId);
+//                                    continue;
+//                                }
+//                                else
+//                                {
+//                                    VariantData variant = mongoTemplate.findById(variantId == null ? providedVariantId : variantId, VariantData.class);
+//                                    if (variant == null)
+//                                        variant = new VariantData((ObjectId.isValid(providedVariantId) ? "_" : "") + providedVariantId);
+//
+//                                    String[][] alleles = new String[individuals.size()][project.getPloidyLevel()];
+//                                    int nIndividualIndex = 0;
+//                                    while (nIndividualIndex < individuals.size()) {
+//                                        String[] genotype = splitLine[nIndividualIndex + 1].split("/");
+//                                        for (int i=0; i<project.getPloidyLevel(); i++)
+//                                            alleles[nIndividualIndex][i] = genotype[genotype.length == 1 ? 0 : i];
+//                                        nIndividualIndex++;
+//                                    }
+//
+//                                    LinkedHashMap<String, String> orderedIndOrSpToPopulationMap = new LinkedHashMap<>();
+//                                    for (String sInd : individuals)
+//                                    	orderedIndOrSpToPopulationMap.put(sInd, null);	// we have no population info
+//                                    VariantRunData runToSave = addDataToVariant(mongoTemplate, variant, nAssemblyId, position.getSequence(), position.getPosition(), orderedIndOrSpToPopulationMap, nonSnpVariantTypeMap, alleles, project, sRun, m_fImportUnknownVariants);
+//                                    for (Assembly assembly : assemblies) {
+//                                        ReferencePosition rp = variant.getReferencePosition(assembly.getId());
+//                                        if (rp != null)
+//                                        	project.getContigs(assembly.getId()).add(rp.getSequence());
+//                                    }
+//
+//                                    project.getAlleleCounts().add(variant.getKnownAlleles().size()); // it's a TreeSet so it will only be added if it's not already present
+//
+//                                    if (variant.getKnownAlleles().size() > 0) {   // we only import data related to a variant if we know its alleles
+//                                        if (!unsavedVariants.contains(variant))
+//                                            unsavedVariants.add(variant);
+//                                        if (!unsavedRuns.contains(runToSave))
+//                                            unsavedRuns.add(runToSave);
+//                                    }
+//                                    else
+//                                    	LOG.warn("Skipping variant " + variant.getId() + " positioned at " + variant.getReferencePosition(nAssemblyId).getSequence() + ":" + variant.getReferencePosition(nAssemblyId).getStartSite() + " because its alleles are not known");
+//
+//                                    if (processedVariants % nNumberOfVariantsToSaveAtOnce == 0) {
+//                                        saveChunk(unsavedVariants, unsavedRuns, existingVariantIDs, mongoTemplate, progress, saveService);
+//                                        unsavedVariants = new HashSet<VariantData>();
+//                                        unsavedRuns = new HashSet<VariantRunData>();
+//
+//                                        progress.setCurrentStepProgress(count.get() * 100 / variantsAndPositions.size());
+//                                    }
+//                                }
+//                                int newCount = count.incrementAndGet();
+//                                if (newCount % (nNumberOfVariantsToSaveAtOnce*50) == 0)
+//                                    LOG.debug(newCount + " lines processed");
+//                                processedVariants += 1;
+//                            }
+//
+//                            persistVariantsAndGenotypes(!existingVariantIDs.isEmpty(), mongoTemplate, unsavedVariants, unsavedRuns);
+//                        } catch (Throwable t) {
+//                            progress.setError("Genotypes import failed with error: " + t.getMessage());
+//                            LOG.error(progress.getError(), t);
+//                            return;
+//                        }
+//
+//                    }
+//                };
+//
+//                importThreads[threadIndex].start();
+//            }
+//
+//            for (int i = 0; i < nImportThreads; i++)
+//                importThreads[i].join();
+//            saveService.shutdown();
+//            saveService.awaitTermination(Integer.MAX_VALUE, TimeUnit.DAYS);
+//
+//            if (progress.getError() != null || progress.isAborted())
+//                return count.get();
+//            
+//            // save project data
+//            if (!project.getRuns().contains(sRun))
+//                project.getRuns().add(sRun);
+//            mongoTemplate.save(project);
+//        }
+//        finally
+//        {
+//            if (reader != null)
+//                reader.close();
+//        }
+//        return count.get();
+//    }
 
     private long getAllocatableMemory(boolean fCalledFromCommandLine) {
         Runtime rt = Runtime.getRuntime();
@@ -730,11 +687,12 @@ public class FlapjackImport extends AbstractGenotypeImport {
                                         for (int marker = 0; marker < blockSize; marker++) {
                                             int nCurrentPos = individualPositions.get(0) + 2*(blockStart + marker);
                                             char collapsedGenotype = lineBuffer.charAt(nCurrentPos);
-                                            if (collapsedGenotype == '-')
-                                                collapsedGenotype = '0';
+//                                            if (collapsedGenotype == '-')
+//                                                collapsedGenotype = '0';
                                             StringBuilder builder = transposed.get(marker);
                                             builder.append("\t");
-                                            builder.append(collapsedGenotype);
+                                            if (collapsedGenotype != '-')
+                                            	builder.append(collapsedGenotype);
                                             //builder.append("/");
                                             //builder.append(collapsedGenotype);
                                         }
@@ -765,10 +723,7 @@ public class FlapjackImport extends AbstractGenotypeImport {
                                             String genotype = matcher.group();
 
                                             builder.append("\t");                                            
-                                            if (genotype.length() == 0 || genotype.equals("-")) { // Missing data
-                                                builder.append("0");
-                                            }
-                                            else {
+                                            if (!genotype.isEmpty() && !genotype.equals("-")) { // missing data as empty string
                                                 if (nProvidedPloidy == null && genotype.contains("/")) {
                                                     int currentGtPloidy = genotype.split("/").length, currentProjectPloidy = ploidy.get();
                                                     if (currentProjectPloidy == 0) {
@@ -800,9 +755,15 @@ public class FlapjackImport extends AbstractGenotypeImport {
                                     // if it's not a SNP, let's keep track of its type
                                     List<Allele> alleleList =
                                             outputFileSeparatorPattern.splitAsStream(variantLine)
-                                                .filter(allele -> !"0".equals(allele))
+                                            	.filter(allele -> !allele.isEmpty())
                                                 .distinct()
-                                                .map(allele -> Allele.create(allele))
+                                                .map(allele -> {
+                                					try {
+                                						return Allele.create(allele);
+		                                            } catch (IllegalArgumentException e) {
+		                                            	throw new IllegalArgumentException("Variant " + variantName + " - allele " + allele + " - "+ e.getClass().getName() + ": " + e.getMessage());
+		                                            }
+                                				})
                                                 .collect(Collectors.toList());
 
                                     if (!alleleList.isEmpty()) {
@@ -852,85 +813,67 @@ public class FlapjackImport extends AbstractGenotypeImport {
         return nProvidedPloidy != null ? nProvidedPloidy : ploidy.get();
     }
 
-    /**
-     * Adds the FLAPJACK data to variant.
-     * @param samples 
-     * @param fImportUnknownVariants
-     */
-    private VariantRunData addFlapjackDataToVariant(MongoTemplate mongoTemplate, VariantData variantToFeed, Integer nAssemblyId, VariantMapPosition position, List<String> individuals, Map<String, Type> nonSnpVariantTypeMap, String[][] alleles, GenotypingProject project, String runName, boolean fImportUnknownVariants) throws Exception
-    {
-        VariantRunData vrd = new VariantRunData(new VariantRunData.VariantRunDataId(project.getId(), runName, variantToFeed.getId()));
-
-        // genotype fields
-        AtomicInteger allIdx = new AtomicInteger(0);
-        Map<String, Integer> alleleIndexMap = variantToFeed.getKnownAlleles().stream().collect(Collectors.toMap(Function.identity(), t -> allIdx.getAndIncrement()));  // should be more efficient not to call indexOf too often...
-        int i = -1;
-        for (String sIndividual : individuals)
-        {
-            i++;
-
-            if ("0".equals(alleles[i][0]))
-                continue;  // Do not add missing genotypes
-
-            for (int j = 0; j < project.getPloidyLevel(); j++) {
-                Integer alleleIndex = alleleIndexMap.get(alleles[i][j]);
-                if (alleleIndex == null && alleles[i][j].matches("[AaTtGgCc\\*]+")) { // New allele
-                    alleleIndex = variantToFeed.getKnownAlleles().size();
-                    variantToFeed.getKnownAlleles().add(alleles[i][j]);
-                    alleleIndexMap.put(alleles[i][j], alleleIndex);
-                }
-            }
-
-            String gtCode;
-            try {
-                gtCode = Arrays.stream(alleles[i]).map(allele -> alleleIndexMap.get(allele)).sorted().map(index -> index.toString()).collect(Collectors.joining("/"));
-            }
-            catch (Exception e) {
-                LOG.warn("Ignoring invalid Flapjack genotype \"" + alleles[i] + "\" for variant " + variantToFeed.getId() + " and individual " + sIndividual);
-                continue;
-            }
-
-            SampleGenotype aGT = new SampleGenotype(gtCode);
-            vrd.getSampleGenotypes().put(m_providedIdToSampleMap.get(sIndividual).getId(), aGT);
-        }
-        
-        if (fImportUnknownVariants && variantToFeed.getReferencePosition(nAssemblyId) == null && position.getSequence() != null) // otherwise we leave it as it is (had some trouble with overridden end-sites)
-        	variantToFeed.setReferencePosition(nAssemblyId, new ReferencePosition(position.getSequence(), position.getPosition(), !variantToFeed.getKnownAlleles().isEmpty() ? position.getPosition() + variantToFeed.getKnownAlleles().iterator().next().length() - 1 : null));
-
-        if (!alleleIndexMap.isEmpty()) {
-            Type variantType = nonSnpVariantTypeMap.get(variantToFeed.getId());
-            String sVariantType = variantType == null ? Type.SNP.toString() : variantType.toString();
-
-            if (variantToFeed.getType() == null || Type.NO_VARIATION.toString().equals(variantToFeed.getType())) {
-                variantToFeed.setType(sVariantType);
-                project.getVariantTypes().add(sVariantType);
-            }
-            else if (null != variantType && Type.NO_VARIATION != variantType && !variantToFeed.getType().equals(sVariantType))
-                throw new Exception("Variant type mismatch between existing data and data to import: " + variantToFeed.getId());
-        }
-
-        vrd.setKnownAlleles(variantToFeed.getKnownAlleles());
-        vrd.setPositions(variantToFeed.getPositions());
-        vrd.setType(variantToFeed.getType());
-        vrd.setSynonyms(variantToFeed.getSynonyms());
-        return vrd;
-    }
-
-    private class VariantMapPosition {
-    	private String sequence;
-    	private long position;
-
-    	public VariantMapPosition(String sequence, long position) {
-    		this.sequence = sequence;
-    		this.position = position;
-    	}
-
-    	public String getSequence() {
-    		return this.sequence;
-    	}
-
-    	public long getPosition() {
-    		return this.position;
-    	}
-    }
+//    /**
+//     * Adds the FLAPJACK data to variant.
+//     * @param samples 
+//     * @param m_fImportUnknownVariants
+//     */
+//    private VariantRunData addFlapjackDataToVariant(MongoTemplate mongoTemplate, VariantData variantToFeed, Integer nAssemblyId, VariantMapPosition position, List<String> individuals, Map<String, Type> nonSnpVariantTypeMap, String[][] alleles, GenotypingProject project, String runName, boolean m_fImportUnknownVariants) throws Exception
+//    {
+//        VariantRunData vrd = new VariantRunData(new VariantRunData.VariantRunDataId(project.getId(), runName, variantToFeed.getId()));
+//
+//        // genotype fields
+//        AtomicInteger allIdx = new AtomicInteger(0);
+//        Map<String, Integer> alleleIndexMap = variantToFeed.getKnownAlleles().stream().collect(Collectors.toMap(Function.identity(), t -> allIdx.getAndIncrement()));  // should be more efficient not to call indexOf too often...
+//        int i = -1;
+//        for (String sIndividual : individuals)
+//        {
+//            i++;
+//
+//            if ("0".equals(alleles[i][0]))
+//                continue;  // Do not add missing genotypes
+//
+//            for (int j = 0; j < project.getPloidyLevel(); j++) {
+//                Integer alleleIndex = alleleIndexMap.get(alleles[i][j]);
+//                if (alleleIndex == null && alleles[i][j].matches("[AaTtGgCc\\*]+")) { // New allele
+//                    alleleIndex = variantToFeed.getKnownAlleles().size();
+//                    variantToFeed.getKnownAlleles().add(alleles[i][j]);
+//                    alleleIndexMap.put(alleles[i][j], alleleIndex);
+//                }
+//            }
+//
+//            String gtCode;
+//            try {
+//                gtCode = Arrays.stream(alleles[i]).map(allele -> alleleIndexMap.get(allele)).sorted().map(index -> index.toString()).collect(Collectors.joining("/"));
+//            }
+//            catch (Exception e) {
+//                LOG.warn("Ignoring invalid Flapjack genotype \"" + alleles[i] + "\" for variant " + variantToFeed.getId() + " and individual " + sIndividual);
+//                continue;
+//            }
+//
+//            SampleGenotype aGT = new SampleGenotype(gtCode);
+//            vrd.getSampleGenotypes().put(m_providedIdToSampleMap.get(sIndividual).getId(), aGT);
+//        }
+//        
+//        if (m_fImportUnknownVariants && variantToFeed.getReferencePosition(nAssemblyId) == null && position.getSequence() != null) // otherwise we leave it as it is (had some trouble with overridden end-sites)
+//        	variantToFeed.setReferencePosition(nAssemblyId, new ReferencePosition(position.getSequence(), position.getPosition(), !variantToFeed.getKnownAlleles().isEmpty() ? position.getPosition() + variantToFeed.getKnownAlleles().iterator().next().length() - 1 : null));
+//
+//        if (!alleleIndexMap.isEmpty()) {
+//            Type variantType = nonSnpVariantTypeMap.get(variantToFeed.getId());
+//            String sVariantType = variantType == null ? Type.SNP.toString() : variantType.toString();
+//
+//            if (variantToFeed.getType() == null || Type.NO_VARIATION.toString().equals(variantToFeed.getType())) {
+//                variantToFeed.setType(sVariantType);
+//                project.getVariantTypes().add(sVariantType);
+//            }
+//            else if (null != variantType && Type.NO_VARIATION != variantType && !variantToFeed.getType().equals(sVariantType))
+//                throw new Exception("Variant type mismatch between existing data and data to import: " + variantToFeed.getId());
+//        }
+//
+//        vrd.setKnownAlleles(variantToFeed.getKnownAlleles());
+//        vrd.setPositions(variantToFeed.getPositions());
+//        vrd.setType(variantToFeed.getType());
+//        vrd.setSynonyms(variantToFeed.getSynonyms());
+//        return vrd;
+//    }
 }
