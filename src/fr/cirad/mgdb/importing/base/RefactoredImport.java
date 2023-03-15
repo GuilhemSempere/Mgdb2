@@ -13,6 +13,7 @@ import java.util.HashSet;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Scanner;
@@ -25,6 +26,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import org.apache.commons.lang3.StringUtils;
 import org.apache.log4j.Logger;
@@ -45,13 +47,19 @@ import fr.cirad.tools.mongo.AutoIncrementCounter;
 import fr.cirad.tools.mongo.MongoTemplateManager;
 import htsjdk.variant.variantcontext.VariantContext.Type;
 
-public abstract class SynonymAwareImport extends AbstractGenotypeImport {
+/**
+ * Base class for genotyping data import procedures that need refactoring provided files in a marker-oriented manner
+ * 
+ * @author sempere
+ */
+public abstract class RefactoredImport extends AbstractGenotypeImport {
 
-    private static final Logger LOG = Logger.getLogger(SynonymAwareImport.class);
+    private static final Logger LOG = Logger.getLogger(RefactoredImport.class);
     
     protected boolean m_fImportUnknownVariants = false;
     protected int m_ploidy = 2;
     protected Integer m_maxExpectedAlleleCount = null;	// if set, will issue warnings when exceeded
+    final static protected String validAlleleRegex = "[\\*AaTtGgCc]+".intern();
     
 	public void setMaxExpectedAlleleCount(Integer maxExpectedAlleleCount) {
 		m_maxExpectedAlleleCount = maxExpectedAlleleCount;
@@ -94,9 +102,9 @@ public abstract class SynonymAwareImport extends AbstractGenotypeImport {
                 if (!fAlreadyExists)
                     ind = new Individual(sIndividual);
                 String sPop = orderedIndividualToPopulationMap.get(sIndOrSpId);
-                if (!sPop.equals(".") && sPop.length() == 3)
+                if (sPop != null && sPop.length() == 3)
                     ind.setPopulation(sPop);
-                else if (!sIndividual.substring(0, 3).matches(".*\\d+.*") && sIndividual.substring(3).matches("\\d+"))
+                else if (sIndividual.length() > 3 && !sIndividual.substring(0, 3).matches(".*\\d+.*") && sIndividual.substring(3).matches("\\d+"))
                     ind.setPopulation(sIndividual.substring(0, 3));
                 else {
                     individualsWithoutPopulation.add(sIndividual);
@@ -121,7 +129,9 @@ public abstract class SynonymAwareImport extends AbstractGenotypeImport {
             BlockingQueue<Runnable> saveServiceQueue = new LinkedBlockingQueue<Runnable>(saveServiceQueueLength(nNConcurrentThreads));
             ExecutorService saveService = new ThreadPoolExecutor(1, saveServiceThreads(nNConcurrentThreads), 30, TimeUnit.SECONDS, saveServiceQueue, new ThreadPoolExecutor.CallerRunsPolicy());
             
-            final Collection<Assembly> assemblies = mongoTemplate.findAll(Assembly.class);
+            final Collection<Integer> assemblyIDs = mongoTemplate.findDistinct(new Query(), "_id", Assembly.class, Integer.class);
+            if (assemblyIDs.isEmpty())
+            	assemblyIDs.add(null);	// old-style, assembly-less DB
             AtomicInteger nLineIndex = new AtomicInteger(-1);
 
             for (int threadIndex = 0; threadIndex < nImportThreads; threadIndex++) {
@@ -136,7 +146,7 @@ public abstract class SynonymAwareImport extends AbstractGenotypeImport {
                                 String line;
                                 synchronized (finalReader) {
                                     line = finalReader.readLine();
-	                                if (indexesOfLinesThatMustBeSkipped.contains(nLineIndex.incrementAndGet()))
+	                                if (indexesOfLinesThatMustBeSkipped != null && indexesOfLinesThatMustBeSkipped.contains(nLineIndex.incrementAndGet()))
 	                                	continue;	// this is a line containing only missing data, which we don't want to persist because there is at least one non-empty line on a synonym variant, that we would lose if we did
                                 }
 
@@ -203,23 +213,18 @@ public abstract class SynonymAwareImport extends AbstractGenotypeImport {
 
                                             if (fInconsistentData)
                                                 LOG.warn("Not adding inconsistent data: " + providedVariantId + " / " + individuals[nIndividualIndex]);
-                                            else
+                                            else 
 	                                            alleles[nIndividualIndex] = genotype;
 	                                    }
                                         nIndividualIndex++;
                                     }
 
                                     VariantRunData runToSave = addDataToVariant(mongoTemplate, variant, nAssemblyId, sequence, bpPosition, orderedIndividualToPopulationMap, nonSnpVariantTypeMap, alleles, project, sRun, m_fImportUnknownVariants);
-
-                                    for (Assembly assembly : assemblies) {
-                                        ReferencePosition rp = variant.getReferencePosition(assembly.getId());
+                                    
+                                    for (Integer asmId : assemblyIDs) {
+                                        ReferencePosition rp = variant.getReferencePosition(asmId);
                                         if (rp != null)
-                                        	try {
-                                        		project.getContigs(assembly.getId()).add(rp.getSequence());
-                                        	}
-                                        	catch (java.lang.NullPointerException npe) {
-                                        		npe.printStackTrace();
-                                        	}
+                                        	project.getContigs(asmId).add(rp.getSequence());
                                     }
 
                                     project.getVariantTypes().add(variant.getType());					// it's a TreeSet so it will only be added if it's not already present
@@ -300,21 +305,35 @@ public abstract class SynonymAwareImport extends AbstractGenotypeImport {
             if (alleles[i][0] == null)
                 continue;  // Do not add missing genotypes
 
-            for (int j=0; j<m_ploidy; j++) {
-                Integer alleleIndex = alleleIndexMap.get(alleles[i][j]);
-                if (alleleIndex == null && alleles[i][j].matches("[AaTtGgCc]+")) { // New allele
+            for (String allele : alleles[i]) {
+                Integer alleleIndex = alleleIndexMap.get(allele);
+                if (alleleIndex != null)
+                	continue;	// we already have this one
+
+				if (allele.matches(validAlleleRegex )) {
                     alleleIndex = variantToFeed.getKnownAlleles().size();
-                    variantToFeed.getKnownAlleles().add(alleles[i][j]);
-                    alleleIndexMap.put(alleles[i][j], alleleIndex);
+                    variantToFeed.getKnownAlleles().add(allele);
+                    alleleIndexMap.put(allele, alleleIndex);
                 }
+                else
+                	throw new Exception("Invalid allele '" + allele + "' provided for " + sIndOrSp + " at variant" + variantToFeed.getId());
             }
 
             try {
-            	SampleGenotype aGT = new SampleGenotype(Arrays.stream(alleles[i]).map(allele -> alleleIndexMap.get(allele)).sorted().map(index -> index.toString()).collect(Collectors.joining("/")));
+            	Stream<String> alleleStream;
+            	if (alleles[i].length == 1 && m_ploidy > 1) {	// it's a collapsed homozygous that we need to expand
+            		LinkedList<String> alleleList = new LinkedList<>();
+            		while (alleleList.size() < m_ploidy)
+            			alleleList.add(alleles[i][0]);
+            		alleleStream = alleleList.stream();
+            	}
+            	else
+            		alleleStream = Arrays.stream(alleles[i]);
+            	SampleGenotype aGT = new SampleGenotype(alleleStream.map(allele -> alleleIndexMap.get(allele)).sorted().map(index -> index.toString()).collect(Collectors.joining("/")));
                 vrd.getSampleGenotypes().put(m_providedIdToSampleMap.get(sIndOrSp).getId(), aGT);
             }
             catch (Exception e) {
-                LOG.warn("Ignoring invalid genotype \"" + String.join("/", alleles[i]) + "\" for variant " + variantToFeed.getId() + " and individual " + sIndOrSp);
+                LOG.warn("Ignoring invalid genotype \"" + String.join("/", alleles[i]) + "\" for variant " + variantToFeed.getId() + " and individual " + sIndOrSp, e);
             }
         }
         
@@ -332,6 +351,7 @@ public abstract class SynonymAwareImport extends AbstractGenotypeImport {
 
         vrd.setKnownAlleles(variantToFeed.getKnownAlleles());
         vrd.setPositions(variantToFeed.getPositions());
+        vrd.setReferencePosition(variantToFeed.getReferencePosition());
         vrd.setType(variantToFeed.getType());
         vrd.setSynonyms(variantToFeed.getSynonyms());
         return vrd;
