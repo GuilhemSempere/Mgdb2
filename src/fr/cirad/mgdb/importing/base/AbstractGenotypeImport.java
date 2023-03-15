@@ -55,6 +55,7 @@ import fr.cirad.mgdb.model.mongo.subtypes.ReferencePosition;
 import fr.cirad.mgdb.model.mongodao.MgdbDao;
 import fr.cirad.tools.Helper;
 import fr.cirad.tools.ProgressIndicator;
+import fr.cirad.tools.mongo.AutoIncrementCounter;
 import fr.cirad.tools.mongo.MongoTemplateManager;
 import htsjdk.variant.variantcontext.Allele;
 import htsjdk.variant.variantcontext.VariantContext.Type;
@@ -122,7 +123,28 @@ public class AbstractGenotypeImport {
 		return m_fSamplesPersisted;
 	}
 	
-    protected static HashMap<String, String> buildSynonymToIdMapForExistingVariants(MongoTemplate mongoTemplate, boolean fIncludeRandomObjectIDs, int assemblyId) throws Exception
+	protected Assembly createAssemblyIfNeeded(MongoTemplate mongoTemplate, String assemblyName) throws Exception {
+        Assembly assembly = null;
+        if (!mongoTemplate.findDistinct(new Query(), GenotypingProject.FIELDNAME_SEQUENCES, GenotypingProject.class, String.class).isEmpty()) {	// working on an existing old-style (assembly-less) database
+        	if (assemblyName != null)
+        		throw new Exception("This database does not support assemblies.");
+        }
+        else {	// DB is either empty or new-style (assembly-aware)
+        	assembly = mongoTemplate.findOne(new Query(Criteria.where(Assembly.FIELDNAME_NAME).is(assemblyName)), Assembly.class);
+            if (assembly == null) {
+            	if ("".equals(assemblyName) || m_fAllowNewAssembly) {
+                    assembly = new Assembly(assemblyName == null || "".equals(assemblyName) ? 0 : AutoIncrementCounter.getNextSequence(mongoTemplate, MongoTemplateManager.getMongoCollectionName(Assembly.class)));
+                    assembly.setName(assemblyName);
+                    mongoTemplate.save(assembly);
+                }
+                else
+                    throw new Exception("Assembly \"" + assemblyName + "\" not found in database. Supported assemblies are " + StringUtils.join(mongoTemplate.findDistinct(Assembly.FIELDNAME_NAME, Assembly.class, String.class), ", "));
+            }
+        }
+        return assembly;
+	}
+	
+    protected static HashMap<String, String> buildSynonymToIdMapForExistingVariants(MongoTemplate mongoTemplate, boolean fIncludeRandomObjectIDs, Integer assemblyId) throws Exception
     {
         HashMap<String, String> existingVariantIDs = new HashMap<>();
         long variantCount = Helper.estimDocCount(mongoTemplate,VariantData.class);
