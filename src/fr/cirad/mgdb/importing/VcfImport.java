@@ -637,8 +637,8 @@ public class VcfImport extends AbstractGenotypeImport {
         }
 
         vrd.setKnownAlleles(variantToFeed.getKnownAlleles());
-//        vrd.setPositions(variantToFeed.getPositions());
-        vrd.setReferencePosition(nAssemblyId, variantToFeed.getReferencePosition());
+        vrd.setPositions(variantToFeed.getPositions());
+        vrd.setReferencePosition(variantToFeed.getReferencePosition());
         vrd.setType(variantToFeed.getType());
         vrd.setSynonyms(variantToFeed.getSynonyms());
         return vrd;
