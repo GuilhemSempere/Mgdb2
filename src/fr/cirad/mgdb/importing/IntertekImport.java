@@ -23,9 +23,9 @@ import java.io.InputStreamReader;
 import java.net.URL;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -35,7 +35,6 @@ import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 
-import org.apache.commons.lang.StringUtils;
 import org.apache.log4j.Logger;
 import org.springframework.beans.factory.BeanDefinitionStoreException;
 import org.springframework.context.support.GenericXmlApplicationContext;
@@ -53,6 +52,7 @@ import fr.cirad.mgdb.model.mongo.maintypes.GenotypingSample;
 import fr.cirad.mgdb.model.mongo.maintypes.Individual;
 import fr.cirad.mgdb.model.mongo.maintypes.VariantData;
 import fr.cirad.mgdb.model.mongo.maintypes.VariantRunData;
+import fr.cirad.mgdb.model.mongo.subtypes.ReferencePosition;
 import fr.cirad.mgdb.model.mongo.subtypes.SampleGenotype;
 import fr.cirad.mgdb.model.mongodao.MgdbDao;
 import fr.cirad.tools.ProgressIndicator;
@@ -219,6 +219,12 @@ public class IntertekImport extends AbstractGenotypeImport {
 			Assembly assembly = createAssemblyIfNeeded(mongoTemplate, assemblyName);
 			HashMap<String, String> existingVariantIDs = buildSynonymToIdMapForExistingVariants(mongoTemplate, true, assembly == null ? null : assembly.getId());
 
+			
+            final Collection<Integer> assemblyIDs = mongoTemplate.findDistinct(new Query(), "_id", Assembly.class, Integer.class);
+            if (assemblyIDs.isEmpty())
+            	assemblyIDs.add(null);	// old-style, assembly-less DB
+            
+            
             // Reading csv file
             // Getting alleleX and alleleY for each SNP by reading lines between lines {"SNPID","SNPNum","AlleleY","AlleleX","Sequence"} and {"Scaling"};
             // Then getting genotypes for each individual by reading lines after line {"DaughterPlate","MasterPlate","MasterWell","Call","X","Y","SNPID","SubjectID","Norm","Carrier","DaughterWell","LongID"}
@@ -374,6 +380,13 @@ public class IntertekImport extends AbstractGenotypeImport {
                 vrd.setPositions(variant.getPositions());
                 vrd.setReferencePosition(variant.getReferencePosition());         
                 vrd.setSynonyms(variant.getSynonyms());
+                
+                for (Integer asmId : assemblyIDs) {
+                    ReferencePosition rp = variant.getReferencePosition(asmId);
+                    if (rp != null)
+                    	project.getContigs(asmId).add(rp.getSequence());
+                }
+                
                 variantRunsChunk.add(vrd);
                 variantsChunk.add(variant);
 
@@ -402,7 +415,13 @@ public class IntertekImport extends AbstractGenotypeImport {
 
             LOG.info("IntertekImport took " + (System.currentTimeMillis() - before) / 1000 + "s for " + count + " records");		
             return createdProject;
-        } finally {
+        }
+        catch (Exception e) {
+        	LOG.error("Error", e);
+        	progress.setError(e.getMessage());
+        	return null;
+        }
+        finally {
             if (m_fCloseContextOpenAfterImport && ctx != null)
                 ctx.close();
             MongoTemplateManager.unlockProjectForWriting(sModule, sProject);

@@ -277,7 +277,7 @@ public class STDVariantImport extends RefactoredImport {
             int nConcurrentThreads = Math.max(1, Runtime.getRuntime().availableProcessors());
             LOG.debug("Importing project '" + sProject + "' into " + sModule + " using " + nConcurrentThreads + " threads");
 
-            long count = importTempFileContents(progress, nConcurrentThreads, mongoTemplate, assembly.getId(), sortedFile, providedVariantPositions, existingVariantIDs, project, sRun, inconsistencies, orderedIndividualToPopulationMap, new HashMap<>(), indexesOfLinesThatMustBeSkipped, false);
+            long count = importTempFileContents(progress, nConcurrentThreads, mongoTemplate, assembly == null ? null : assembly.getId(), sortedFile, providedVariantPositions, existingVariantIDs, project, sRun, inconsistencies, orderedIndividualToPopulationMap, new HashMap<>(), indexesOfLinesThatMustBeSkipped, false);
 
             if (progress.getError() != null)
                 throw new Exception(progress.getError());

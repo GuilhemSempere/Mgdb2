@@ -599,15 +599,14 @@ public class BrapiImport extends AbstractGenotypeImport {
 				stdVariantImport.setPloidy(maxPloidyFound);
 				stdVariantImport.allowDbDropIfNoGenotypingData(false);
 				stdVariantImport.tryAndMatchRandomObjectIDs(true);
-				stdVariantImport.importToMongo(sModule, sProject, sRun, sTechnology, profileToGermplasmMap, false, tempFile.getAbsolutePath(), unknownString, importMode);
+				stdVariantImport.importToMongo(sModule, sProject, sRun, sTechnology, profileToGermplasmMap, false, tempFile.getAbsolutePath(), assemblyName, importMode);
 			}
 
             if (progress.getError() == null && !progress.isAborted())
             	LOG.info("BrapiImport took " + (System.currentTimeMillis() - before) / 1000 + "s for " + createdVariantCount + " records");
 			return createdProject;
 		}
-		catch (SocketException se)
-		{
+		catch (SocketException se) {
 			if ("Connection reset".equals(se.getMessage()))
 			{
 				LOG.error("Error invoking BrAPI service. Try and check server-side logs", se);
@@ -615,8 +614,12 @@ public class BrapiImport extends AbstractGenotypeImport {
 			}
 			throw se;
 		}
-		finally
-		{
+        catch (Exception e) {
+        	LOG.error("Error", e);
+        	progress.setError(e.getMessage());
+        	return null;
+        }
+		finally {
 	        // last, remove any variants that have no associated alleles
 	        DeleteResult dr = mongoTemplate.remove(new Query(Criteria.where(VariantData.FIELDNAME_KNOWN_ALLELES + ".0").exists(false)), VariantData.class);
 	        if (dr.getDeletedCount() > 0) {

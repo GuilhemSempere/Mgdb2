@@ -36,7 +36,6 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
-import org.apache.commons.lang.StringUtils;
 import org.apache.log4j.Logger;
 import org.broadinstitute.gatk.utils.codecs.hapmap.RawHapMapCodec;
 import org.broadinstitute.gatk.utils.codecs.hapmap.RawHapMapFeature;
@@ -463,6 +462,11 @@ public class HapMapImport extends AbstractGenotypeImport {
 			
 			return createdProject;
 		}
+        catch (Exception e) {
+        	LOG.error("Error", e);
+        	progress.setError(e.getMessage());
+        	return null;
+        }
 		finally
 		{
 			if (m_fCloseContextAfterImport && ctx != null)
