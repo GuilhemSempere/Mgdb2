@@ -154,9 +154,6 @@ public abstract class RefactoredImport extends AbstractGenotypeImport {
                                     break;
 
                                 String[] splitLine = line.split("\t");
-                                if (fSkipMonomorphic && Arrays.stream(splitLine, 1, splitLine.length).filter(gt -> !gt.isEmpty()).distinct().count() < 2)
-                                    continue; // skip non-variant positions
-
                                 String providedVariantId = splitLine[0];
 
                                 String sequence = null;
@@ -185,6 +182,12 @@ public abstract class RefactoredImport extends AbstractGenotypeImport {
                                             nonSnpVariantTypeMap.put(variantId, type);  // add the type to this existing variant ID so we don't miss it later on
                                         break;
                                     }
+                                }
+                                
+                                if (variantId == null && fSkipMonomorphic) {
+                                	String[] distinctGTs = Arrays.stream(splitLine, 1, splitLine.length).filter(gt -> !gt.isEmpty()).distinct().toArray(String[]::new);
+                                	if (distinctGTs.length == 0 || (distinctGTs.length == 1 && Arrays.stream(distinctGTs[0].split("/")).distinct().count() < 2))
+										continue; // skip non-variant positions that are not already known
                                 }
 
                                 if (variantId == null && !m_fImportUnknownVariants)

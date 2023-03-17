@@ -196,7 +196,7 @@ public class IntertekImport extends AbstractGenotypeImport {
 
             Set<VariantData> variantsToSave = new HashSet<>();
             HashMap<String /*variant ID*/, List<String> /*allelesList*/> variantAllelesMap = new HashMap<>();
-            HashMap<String /*variant ID*/, HashMap<Integer, SampleGenotype>> variantSamplesMap = new HashMap<>();
+            HashMap<String /*variant ID*/, HashMap<Integer, SampleGenotype>> variantToSampleToGenotypeMap = new HashMap<>();
             m_providedIdToSampleMap = new HashMap<>();
 
             GenotypingProject project = mongoTemplate.findOne(new Query(Criteria.where(GenotypingProject.FIELDNAME_NAME).is(sProject)), GenotypingProject.class);
@@ -272,8 +272,8 @@ public class IntertekImport extends AbstractGenotypeImport {
                                 if (variantId.equals("") || sIndOrSpId.equals(""))
                                     continue; //skip line if no variantId or no individualId
 
-                                if (variantSamplesMap.get(variantId) == null)
-                                    variantSamplesMap.put(variantId, new HashMap<>());
+                                if (variantToSampleToGenotypeMap.get(variantId) == null)
+                                    variantToSampleToGenotypeMap.put(variantId, new HashMap<>());
 
                                 String gtCode = null;
                                 List<String> variantAlleles = variantAllelesMap.get(variantId);
@@ -322,7 +322,7 @@ public class IntertekImport extends AbstractGenotypeImport {
                                     SampleGenotype sampleGt = new SampleGenotype(gtCode);
                                     sampleGt.getAdditionalInfo().put("FI", FI);	//TODO - Check how the fluorescence indexes X et Y should be stored
 
-                                    variantSamplesMap.get(variantId).put(sample.getId(), sampleGt);                                             
+                                    variantToSampleToGenotypeMap.get(variantId).put(sample.getId(), sampleGt);                                             
                                 }
                             }
                         }
@@ -354,8 +354,6 @@ public class IntertekImport extends AbstractGenotypeImport {
             // Store variants and variantRuns
             int count = 0;
             int nNumberOfVariantsToSaveAtOnce = 1;
-//            final ArrayList<Thread> threadsToWaitFor = new ArrayList<>();
-//            int chunkIndex = 0;
             int nNConcurrentThreads = Math.max(1, Runtime.getRuntime().availableProcessors());
             LOG.debug("Importing project '" + sProject + "' into " + sModule + " using " + nNConcurrentThreads + " threads");
             
@@ -369,13 +367,15 @@ public class IntertekImport extends AbstractGenotypeImport {
             for (VariantData variant : variantsToSave) {
                 if (progress.getError() != null || progress.isAborted())
                     break;
-
-                if (!existingIds.contains(variant.getId()) && fSkipMonomorphic && variantSamplesMap.get(variant.getVariantId()).values().stream().map(sampleGT -> sampleGT.getCode()).filter(gtCode -> gtCode != null).distinct().count() < 2)
-                    continue;
-
+                if (!existingIds.contains(variant.getId()) && fSkipMonomorphic) {
+                	String[] distinctGTs = variantToSampleToGenotypeMap.get(variant.getVariantId()).values().stream().map(sampleGT -> sampleGT.getCode()).filter(gtCode -> gtCode != null).distinct().toArray(String[]::new);
+                	if (distinctGTs.length == 0 || (distinctGTs.length == 1 && Arrays.stream(distinctGTs[0].split("/")).distinct().count() < 2))
+						continue; // skip non-variant positions that are not already known
+                }
+                
                 VariantRunData vrd = new VariantRunData(new VariantRunData.VariantRunDataId(project.getId(), sRun, variant.getVariantId()));
                 vrd.setKnownAlleles(variant.getKnownAlleles());
-                vrd.setSampleGenotypes(variantSamplesMap.get(variant.getVariantId()));
+                vrd.setSampleGenotypes(variantToSampleToGenotypeMap.get(variant.getVariantId()));
                 vrd.setType(variant.getType());
                 vrd.setPositions(variant.getPositions());
                 vrd.setReferencePosition(variant.getReferencePosition());         

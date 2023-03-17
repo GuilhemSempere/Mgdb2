@@ -363,9 +363,12 @@ public class HapMapImport extends AbstractGenotypeImport {
                                         if (variantId != null)
                                             break;
                                     }
-
-                                    if (variantId == null && fSkipMonomorphic && Arrays.stream(hmFeature.getGenotypes()).filter(gt -> !"NA".equals(gt) && !"NN".equals(gt)).distinct().count() < 2)
-                                        continue; // skip non-variant positions that are not already known
+                    
+                                    if (variantId == null && fSkipMonomorphic) {
+                                    	String[] distinctGTs = Arrays.stream(hmFeature.getGenotypes()).filter(gt -> !"NA".equals(gt) && !"NN".equals(gt)).distinct().toArray(String[]::new);
+                                    	if (distinctGTs.length == 0 || (distinctGTs.length == 1 && Arrays.stream(distinctGTs[0].split(variantType.equals(Type.SNP) ? "" : "/")).distinct().count() < 2))
+    										continue; // skip non-variant positions that are not already known
+                                    }
                 
                                     VariantData variant = variantId == null || !fDbAlreadyContainedVariants ? null : finalMongoTemplate.findById(variantId, VariantData.class);
                                     if (variant == null) {

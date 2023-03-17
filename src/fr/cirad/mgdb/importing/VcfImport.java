@@ -27,6 +27,8 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.Spliterator;
+import java.util.Spliterators;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ConcurrentLinkedDeque;
 import java.util.concurrent.ExecutorService;
@@ -35,8 +37,8 @@ import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
+import java.util.stream.StreamSupport;
 
-import org.apache.commons.lang.StringUtils;
 import org.apache.log4j.Logger;
 import org.bson.types.ObjectId;
 import org.springframework.beans.factory.BeanDefinitionStoreException;
@@ -369,8 +371,11 @@ public class VcfImport extends AbstractGenotypeImport {
                                             break;
                                     }
 
-                                   if (variantId == null && fSkipMonomorphic && !vcfEntry.isVariant())
-                                        continue; // skip non-variant positions that are not already known
+                                    if (variantId == null && fSkipMonomorphic) {
+                                    	String[] distinctGTs = StreamSupport.stream(Spliterators.spliteratorUnknownSize(vcfEntry.getGenotypesOrderedByName().iterator(), Spliterator.ORDERED), false).map(gt -> gt.getGenotypeString()).filter(gt -> gt.charAt(0) != '.').distinct().toArray(String[]::new);
+                                    	if (distinctGTs.length == 0 || (distinctGTs.length == 1 && Arrays.stream(distinctGTs[0].split("/")).distinct().count() < 2))
+    										continue; // skip non-variant positions that are not already known
+                                    }
 
                                     VariantData variant = variantId == null || !fDbAlreadyContainedVariants ? null : finalMongoTemplate.findById(variantId, VariantData.class);
                                     if (variant == null) {
