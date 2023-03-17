@@ -79,7 +79,7 @@ public class AbstractGenotypeImport {
 		ArrayList<String> result = new ArrayList<String>();
 
 		if (idAndSynonyms != null)
-			result.addAll(idAndSynonyms.stream().map(s -> s.toUpperCase()).collect(Collectors.toList()));
+			result.addAll(idAndSynonyms.stream().filter(s -> s != null && !s.isEmpty() && !s.equals(".")).map(s -> s.toUpperCase()).collect(Collectors.toList()));
 
 		if (sSeq != null && nStartPos != null)
 			result.add(new StringBuilder(sType).append("¤").append(sSeq).append("¤").append(nStartPos).toString());
