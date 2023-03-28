@@ -33,7 +33,6 @@ import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Map.Entry;
 import java.util.NoSuchElementException;
 import java.util.TreeMap;
 import java.util.TreeSet;
@@ -43,7 +42,6 @@ import java.util.stream.Collectors;
 import javax.servlet.http.HttpServletResponse;
 
 import org.apache.commons.io.FileUtils;
-import org.apache.commons.collections.CollectionUtils;
 import org.apache.commons.lang.StringUtils;
 import org.apache.log4j.Logger;
 import org.bson.types.ObjectId;
@@ -62,7 +60,6 @@ import fr.cirad.io.brapi.BrapiClient;
 import fr.cirad.io.brapi.BrapiClient.Pager;
 import fr.cirad.io.brapi.BrapiService;
 import fr.cirad.io.brapi.CallsUtils;
-import fr.cirad.mgdb.importing.base.AbstractGenotypeImport;
 import fr.cirad.mgdb.model.mongo.maintypes.Assembly;
 import fr.cirad.mgdb.model.mongo.maintypes.GenotypingProject;
 import fr.cirad.mgdb.model.mongo.maintypes.GenotypingSample;
@@ -76,7 +73,6 @@ import fr.cirad.tools.Helper;
 import fr.cirad.tools.ProgressIndicator;
 import fr.cirad.tools.mongo.AutoIncrementCounter;
 import fr.cirad.tools.mongo.MongoTemplateManager;
-import htsjdk.variant.variantcontext.VariantContext.Type;
 import jhi.brapi.api.BrapiBaseResource;
 import jhi.brapi.api.BrapiListResource;
 import jhi.brapi.api.Status;
@@ -94,15 +90,10 @@ import retrofit2.Response;
 /**
  * The Class BrapiImport.
  */
-public class BrapiImport extends AbstractGenotypeImport {
+public class BrapiImport extends STDVariantImport {
 	
 	/** The Constant LOG. */
 	private static final Logger LOG = Logger.getLogger(VariantData.class);
-
-	/** The m_process id. */
-	private String m_processID;
-	
-//	private BrapiClient client = new BrapiClient();
 
 	private static final String unphasedGenotypeSeparator = "/"; 
 	private static String phasedGenotypeSeparator = "|";
@@ -186,22 +177,10 @@ public class BrapiImport extends AbstractGenotypeImport {
 		if (m_processID == null)
 			m_processID = "IMPORT__" + sModule + "__" + sProject + "__" + sRun + "__" + System.currentTimeMillis();
 		int createdVariantCount = 0;
+		Integer createdProject = null;
 
+		boolean fMayUseTsv = false;
 		try {
-			GenotypingProject project = mongoTemplate.findOne(new Query(Criteria.where(GenotypingProject.FIELDNAME_NAME).is(sProject)), GenotypingProject.class);
-			MongoTemplateManager.lockProjectForWriting(sModule, sProject);
-			
-			cleanupBeforeImport(mongoTemplate, sModule, project, importMode, sRun);
-
-			Integer createdProject = null;
-            if (project == null || importMode > 0) {   // create it
-                project = new GenotypingProject(AutoIncrementCounter.getNextSequence(mongoTemplate, MongoTemplateManager.getMongoCollectionName(GenotypingProject.class)));
-                project.setName(sProject);
-                project.setTechnology(sTechnology);
-                if (importMode != 1)
-                	createdProject = project.getId();
-            }
-
 			BrapiClient client = new BrapiClient();	
 			client.initService(endpointUrl, brapiToken);
 			client.getCalls();
@@ -217,8 +196,7 @@ public class BrapiImport extends AbstractGenotypeImport {
 				callPager.paginate(br.getMetadata());
 			}
 
-			boolean fMayUseTsv = client.hasAlleleMatrixSearchTSV();
-//			fMayUseTsv=false;
+//			fMayUseTsv = client.hasAlleleMatrixSearchTSV();
 			client.setMapID(mapDbId);
 			
 			Pager markerPager = new Pager();
@@ -318,7 +296,7 @@ public class BrapiImport extends AbstractGenotypeImport {
 							VariantData variant = variantsToCreate.get(marker.getMarkerDbId());
 							if (variant == null) {
 								progress.setError("Marker details call returned different list from the requested one");
-								return null;
+								return createdProject;
 							}
 
 							if (marker.getDefaultDisplayName() != null && marker.getDefaultDisplayName().length() > 0) {
@@ -330,11 +308,8 @@ public class BrapiImport extends AbstractGenotypeImport {
 								for (String syn : marker.getSynonyms())
 									internalSynonyms.add(syn);
 							}
-							if (marker.getType() != null && marker.getType().length() > 0) {
+							if (marker.getType() != null && marker.getType().length() > 0)
 								variant.setType(marker.getType());
-								if (!project.getVariantTypes().contains(marker.getType()))
-									project.getVariantTypes().add(marker.getType());
-							}
 							if (fGotKnownAllelesWhenImportingVariants == null)
 								fGotKnownAllelesWhenImportingVariants = marker.getRefAlt() != null && marker.getRefAlt().size() > 0;
 							if (fGotKnownAllelesWhenImportingVariants)
@@ -358,18 +333,6 @@ public class BrapiImport extends AbstractGenotypeImport {
 						throw new Exception("Dataset contains duplicate markers - " + dke.getMessage());
 					}
 					createdVariantCount += variantsToCreate.size();
-				}
-				
-				if (variantsToQueryGenotypesFor.size() > variantsToCreate.size()) {	// we already had some of them
-					try {
-						Collection<String> skippedVariants = CollectionUtils.disjunction(variantsToQueryGenotypesFor, variantsToCreate.keySet());
-//						List<Comparable> fixedSkippedVariantIdList = skippedVariants.stream().map(str -> ObjectId.isValid(str) ? new ObjectId(str) : str).collect(Collectors.toList());
-						project.getVariantTypes().addAll(mongoTemplate.getCollection(mongoTemplate.getCollectionName(VariantData.class)).distinct(VariantData.FIELDNAME_TYPE, new Query(Criteria.where("_id").in(skippedVariants)).getQueryObject(), String.class).into(new ArrayList()));
-					}
-					catch (Exception e) {	// on big DBs querying just the ones we need leads to a query > 16 Mb
-						LOG.warn("DB too big for efficiently finding distinct variant types", e);
-						project.getVariantTypes().addAll(mongoTemplate.getCollection(mongoTemplate.getCollectionName(VariantData.class)).distinct(VariantData.FIELDNAME_TYPE, String.class).into(new ArrayList()));
-					}
 				}
 				
 				markerPager.paginate(positions.getMetadata());
@@ -402,7 +365,7 @@ public class BrapiImport extends AbstractGenotypeImport {
 			
 			if (mongoTemplate.findOne(new Query(Criteria.where(GenotypingSample.FIELDNAME_NAME).in(profileToGermplasmMap.keySet())), GenotypingSample.class) != null)
 				throw new Exception("The dataset you are trying to import contains markerProfile IDs that already exist in the target database!");
-
+			
 			LOG.debug("Importing " + markerprofiles.size() + " individuals");
 			List<String> markerProfileIDs = markerprofiles.stream().map(BrapiMarkerProfile::getMarkerprofileDbId).collect(Collectors.toList());
 					
@@ -410,7 +373,38 @@ public class BrapiImport extends AbstractGenotypeImport {
 			LOG.debug("Importing from " + endpointUrl + " using " + (fMayUseTsv ? "TSV" : "JSON") + " format");
 
 			final String unknownString = "";
-			if (fMayUseTsv) {	// first call to initiate data export on server-side
+			if (fMayUseTsv) {
+				GenotypingProject project = mongoTemplate.findOne(new Query(Criteria.where(GenotypingProject.FIELDNAME_NAME).is(sProject)), GenotypingProject.class);
+				MongoTemplateManager.lockProjectForWriting(sModule, sProject);
+				
+				cleanupBeforeImport(mongoTemplate, sModule, project, importMode, sRun);
+	            if (project == null || importMode > 0) {   // create it
+	                project = new GenotypingProject(AutoIncrementCounter.getNextSequence(mongoTemplate, MongoTemplateManager.getMongoCollectionName(GenotypingProject.class)));
+	                project.setName(sProject);
+	                project.setTechnology(sTechnology);
+	                if (importMode != 1)
+	                	createdProject = project.getId();
+	            }
+
+				m_providedIdToSampleMap = new TreeMap<>();	// will auto-magically remove all duplicates, and sort data by keys
+				for (String markerProfile : profileToGermplasmMap.keySet()) {
+					String sIndividual = profileToGermplasmMap.get(markerProfile);
+
+					if (!m_providedIdToSampleMap.containsKey(sIndividual)) {	// we don't want to persist each sample several times
+		                Individual ind = mongoTemplate.findById(sIndividual, Individual.class);
+		                if (ind == null) {	// we don't have any population data so we don't need to update the Individual if it already exists
+		                    ind = new Individual(sIndividual);
+		                    mongoTemplate.save(ind);
+		                }
+
+		                int sampleId = AutoIncrementCounter.getNextSequence(mongoTemplate, MongoTemplateManager.getMongoCollectionName(GenotypingSample.class));
+		                m_providedIdToSampleMap.put(sIndividual, new GenotypingSample(sampleId, project.getId(), sRun, sIndividual, markerProfile));	// add a sample for this individual to the project
+		            }
+				}
+				mongoTemplate.insert(m_providedIdToSampleMap.values(), GenotypingSample.class);
+				m_fSamplesPersisted = true;
+				
+				// Initiate data export on server-side
 				Pager genotypePager = new Pager();
 				HashMap<String, Object> body = new HashMap<>();
 				body.put("markerprofileDbId", markerProfileIDs);
@@ -436,14 +430,14 @@ public class BrapiImport extends AbstractGenotypeImport {
 					Response<BrapiBaseResource<Object>> statusResponse = statusCall.execute();
 					if (HttpServletResponse.SC_OK != statusResponse.code()) {
                         progress.setError("Wrong http code checking for allele-matrix status: " + statusResponse.code());
-                        return null;
+                        return createdProject;
 					}
 					    
 					BrapiBaseResource<Object> statusPoll = statusResponse.body();
 					Status status = AsyncChecker.checkAsyncStatus(statusPoll.getMetadata().getStatus());
 
 					// Keep checking until the async call returns anything else than "INPROCESS"
-					while (AsyncChecker.callInProcess(status)) {
+					while (AsyncChecker.callInProcess(status) && progress.getError() == null && !progress.isAborted()) {
 						// Wait for a second before polling again
 						try { Thread.sleep(1000); }
 						catch (InterruptedException e) {}
@@ -459,12 +453,12 @@ public class BrapiImport extends AbstractGenotypeImport {
 
 					if (AsyncChecker.ASYNC_FAILED.equals(status.getMessage())) {
 						progress.setError("BrAPI export failed on server-side");
-						return null;
+						return createdProject;
 					}
 					
 					if (!AsyncChecker.callFinished(status)) {
 						progress.setError("BrAPI export is in unknown status");
-						return null;
+						return createdProject;
 					}
 					else {
 						progress.addStep("Downloading remote genotypes into temporary file");
@@ -488,7 +482,7 @@ public class BrapiImport extends AbstractGenotypeImport {
 
                         if (createdVariantCount > 0)
                             existingVariantIDs = buildSynonymToIdMapForExistingVariants(mongoTemplate, true, assembly.getId()); // update it
-                        importTsvToMongo(sModule, project, sRun, sTechnology, tempFile.getAbsolutePath(), profileToGermplasmMap, importMode, existingVariantIDs);
+                        importTsvToMongo(sModule, project, sRun, sTechnology, tempFile.getAbsolutePath(), profileToGermplasmMap, importMode, existingVariantIDs, progress	);
 
 		                if (progress.getError() != null || progress.isAborted())
 		                    return createdProject;
@@ -496,7 +490,7 @@ public class BrapiImport extends AbstractGenotypeImport {
 					}
 				}
 			}
-			else {	// writing json contents to STD format then invoke STDVariantImport
+			else {	// writing json contents to STD format then invoke STDVariantImport's code
 				LOG.debug("Writing remote json data to temp file: " + tempFile);
 				FileWriter tempFileWriter = new FileWriter(tempFile);
 				
@@ -593,13 +587,11 @@ public class BrapiImport extends AbstractGenotypeImport {
                 if (progress.getError() != null || progress.isAborted())
                     return createdProject;
 
-		        // STDVariantImport is convenient because it always sorts data by variants
-				STDVariantImport stdVariantImport = new STDVariantImport(progress.getProcessId());
-				mongoTemplate.save(project);	// save the project so it can be re-opened by our STDVariantImport
-				stdVariantImport.setPloidy(maxPloidyFound);
-				stdVariantImport.allowDbDropIfNoGenotypingData(false);
-				stdVariantImport.tryAndMatchRandomObjectIDs(true);
-				stdVariantImport.importToMongo(sModule, sProject, sRun, sTechnology, profileToGermplasmMap, false, tempFile.getAbsolutePath(), assemblyName, importMode);
+		        // we use STDVariantImport as a base class because it is convenient as it always sorts data by variants
+				setPloidy(maxPloidyFound);
+				allowDbDropIfNoGenotypingData(false);
+				tryAndMatchRandomObjectIDs(true);
+				importToMongo(sModule, sProject, sRun, sTechnology, profileToGermplasmMap, false, tempFile.getAbsolutePath(), assemblyName, importMode);
 			}
 
             if (progress.getError() == null && !progress.isAborted())
@@ -616,8 +608,8 @@ public class BrapiImport extends AbstractGenotypeImport {
 		}
         catch (Exception e) {
         	LOG.error("Error", e);
-        	progress.setError(e.getMessage());
-        	return null;
+        	progress.setError(e.getClass().getSimpleName() + ": " + e.getMessage());
+        	return createdProject;
         }
 		finally {
 	        // last, remove any variants that have no associated alleles
@@ -647,13 +639,9 @@ public class BrapiImport extends AbstractGenotypeImport {
 		}
 	}
 
-	private void importTsvToMongo(String sModule, GenotypingProject project, String sRun, String sTechnology, String mainFilePath, Map<String, String> markerProfileToIndividualMap, int importMode, HashMap<String, String> existingVariantIDs) throws Exception
+	private void importTsvToMongo(String sModule, GenotypingProject project, String sRun, String sTechnology, String mainFilePath, Map<String, String> markerProfileToIndividualMap, int importMode, HashMap<String, String> existingVariantIDs, ProgressIndicator progress) throws Exception
 	{
 		long before = System.currentTimeMillis();
-		ProgressIndicator progress = ProgressIndicator.get(m_processID);
-		if (progress == null)
-			progress = new ProgressIndicator(m_processID, new String[] {"Initializing import"});	// better to add it straight-away so the JSP doesn't get null in return when it checks for it (otherwise it will assume the process has ended)
-		ProgressIndicator.registerProgressIndicator(progress);
 		
 		GenericXmlApplicationContext ctx = null;
 		File genotypeFile = new File(mainFilePath);
@@ -678,10 +666,11 @@ public class BrapiImport extends AbstractGenotypeImport {
 			String sLine = in.readLine();
 			int nResolvedPloidy = 0;
 			long lineCount = 0;
-			while (sLine != null && lineCount++ < 1000)
-			{
-				if (sLine.length() > 0)
-				{
+			while (sLine != null && lineCount++ < 1000) {
+	            if (progress.getError() != null || progress.isAborted())
+	                return;
+
+				if (sLine.length() > 0) {
 					List<String> splitLine = Helper.split(sLine.trim(), "\t");
 					try
 					{
@@ -703,28 +692,8 @@ public class BrapiImport extends AbstractGenotypeImport {
 			in.close();
 			in = new BufferedReader(new FileReader(genotypeFile));
 
-			// The first line is a list of marker profile IDs
-			m_providedIdToSampleMap = new TreeMap<>();	// will auto-magically remove all duplicates, and sort data, cool eh?
-			List<String> markerProfileIDs = Arrays.asList(in.readLine().split("\t"));
-			markerProfileIDs = markerProfileIDs.subList(1, markerProfileIDs.size());			
-			for (String markerProfile : markerProfileIDs) {
-				String sIndividual = markerProfileToIndividualMap.get(markerProfile);
-
-				if (!m_providedIdToSampleMap.containsKey(sIndividual)) {	// we don't want to persist each sample several times
-	                Individual ind = mongoTemplate.findById(sIndividual, Individual.class);
-	                if (ind == null) {	// we don't have any population data so we don't need to update the Individual if it already exists
-	                    ind = new Individual(sIndividual);
-	                    mongoTemplate.save(ind);
-	                }
-
-	                int sampleId = AutoIncrementCounter.getNextSequence(mongoTemplate, MongoTemplateManager.getMongoCollectionName(GenotypingSample.class));
-	                m_providedIdToSampleMap.put(sIndividual, new GenotypingSample(sampleId, project.getId(), sRun, sIndividual, markerProfile));	// add a sample for this individual to the project
-	            }
-			}
-			
-			mongoTemplate.insert(m_providedIdToSampleMap.values(), GenotypingSample.class);
-			m_fSamplesPersisted = true;
-
+			List<String> markerProfileIDs = Arrays.asList(in.readLine().split("\t"));	// read them from the TSV file so we know their order
+			markerProfileIDs = markerProfileIDs.subList(1, markerProfileIDs.size());
 
 			// import genotyping data
 			progress.addStep("Processing variant lines");
@@ -769,8 +738,8 @@ public class BrapiImport extends AbstractGenotypeImport {
 				throw new Exception("No variation data could be imported. Please check the logs.");
 
 			// save project data
-            if (!project.getVariantTypes().contains(Type.SNP.toString()))
-                project.getVariantTypes().add(Type.SNP.toString());
+//            if (!project.getVariantTypes().contains(Type.SNP.toString()))
+//                project.getVariantTypes().add(Type.SNP.toString());
             for (Integer anAssemblyId : affectedSequencesByAssembly.keySet()) {
             	TreeSet<String> affectedSequencesForssembly = affectedSequencesByAssembly.get(anAssemblyId);
             	if (affectedSequencesForssembly != null)
@@ -781,7 +750,7 @@ public class BrapiImport extends AbstractGenotypeImport {
 			mongoTemplate.save(project);	// always save project before samples otherwise the sample cleaning procedure in MgdbDao.prepareDatabaseForSearches may remove them if called in the meantime
 			mongoTemplate.insert(previouslyCreatedSamples.values(), GenotypingSample.class);
 	
-	    	LOG.info("Import took " + (System.currentTimeMillis() - before)/1000 + "s for " + lineCount + " CSV lines (" + nVariantSaveCount + " variants were saved)");
+	    	LOG.info("BrAPI TSV import took " + (System.currentTimeMillis() - before)/1000 + "s for " + lineCount + " CSV lines (" + nVariantSaveCount + " variants were saved)");
 	    	if (unsavedVariants.size() > 0)
 	    	   	LOG.warn("The following variants could not be saved because of concurrent writing: " + StringUtils.join(unsavedVariants, ", "));
 		}
@@ -871,12 +840,11 @@ public class BrapiImport extends AbstractGenotypeImport {
 			
 			if (fNewAllelesEncountered && update != null)
 				update.set(VariantData.FIELDNAME_KNOWN_ALLELES, variant.getKnownAlleles());
-			if (variant.getType() == null && update != null)
-			{	// no variant type was explicitly specified, so try and determine it
+			if (variant.getType() == null && update != null) {	// no variant type was explicitly specified, so try and determine it
 				variant.setType(VariantData.determinePolymorphicType(variant.getKnownAlleles()).toString());
 				update.set(VariantData.FIELDNAME_TYPE, variant.getType());
-				project.getVariantTypes().add(variant.getType());
 			}
+			project.getVariantTypes().add(variant.getType());	// it's a LinkedHashSet so it will only be added if it's not already present
 			project.getAlleleCounts().add(variant.getKnownAlleles().size());	// it's a TreeSet so it will only be added if it's not already present
 
 			try
