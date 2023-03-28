@@ -197,6 +197,8 @@ public class FlapjackImport extends RefactoredImport {
         if (m_processID == null)
             m_processID = "IMPORT__" + sModule + "__" + sProject + "__" + sRun + "__" + System.currentTimeMillis();
 
+        Integer createdProject = null;
+        
         GenotypingProject project = mongoTemplate.findOne(new Query(Criteria.where(GenotypingProject.FIELDNAME_NAME).is(sProject)), GenotypingProject.class);
         File rotatedFile = File.createTempFile("fjImport-" + genotypeFile.getName() + "-", ".tsv");
         try
@@ -204,7 +206,6 @@ public class FlapjackImport extends RefactoredImport {
             MongoTemplateManager.lockProjectForWriting(sModule, sProject);
             cleanupBeforeImport(mongoTemplate, sModule, project, importMode, sRun);
 
-            Integer createdProject = null;
             // create project if necessary
             if (project == null || importMode > 0) {   // create it
                 project = new GenotypingProject(AutoIncrementCounter.getNextSequence(mongoTemplate, MongoTemplateManager.getMongoCollectionName(GenotypingProject.class)));
@@ -299,7 +300,7 @@ public class FlapjackImport extends RefactoredImport {
         catch (Exception e) {
         	LOG.error("Error", e);
         	progress.setError(e.getMessage());
-        	return null;
+        	return createdProject;
         }
         finally {
         	rotatedFile.delete();

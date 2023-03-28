@@ -30,7 +30,6 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.Scanner;
 
-import org.apache.commons.lang.StringUtils;
 import org.apache.log4j.Logger;
 import org.springframework.context.support.GenericXmlApplicationContext;
 import org.springframework.data.mongodb.core.MongoTemplate;
@@ -52,7 +51,7 @@ public class STDVariantImport extends RefactoredImport {
 	
 	private static final Logger LOG = Logger.getLogger(STDVariantImport.class);
 	
-	private String m_processID;
+	protected String m_processID;
 	private boolean m_fTryAndMatchRandomObjectIDs = false;
 	
 	public STDVariantImport()
@@ -129,6 +128,8 @@ public class STDVariantImport extends RefactoredImport {
         File sortedFile = File.createTempFile("sortedImportFile_-" + genotypeFile.getName() + "-", ".std");
 		File variantOrientedFile = File.createTempFile("variantOrientedImportFile_-" + genotypeFile.getName() + "-", ".tsv");
 
+		Integer createdProject = null;
+        
 		try
 		{
 			progress.addStep("Scanning existing marker IDs");
@@ -145,19 +146,18 @@ public class STDVariantImport extends RefactoredImport {
 			
 			MongoTemplateManager.lockProjectForWriting(sModule, sProject);
 			cleanupBeforeImport(mongoTemplate, sModule, project, importMode, sRun);
-            Integer createdProject = null;
+
             // create project if necessary
             if (project == null || importMode > 0) {   // create it
                 project = new GenotypingProject(AutoIncrementCounter.getNextSequence(mongoTemplate, MongoTemplateManager.getMongoCollectionName(GenotypingProject.class)));
                 project.setName(sProject);
-				project.setOrigin(1 /* SNP chip */);
+//				project.setOrigin(1 /* SNP chip */);
 				project.setTechnology(sTechnology);
-				project.getVariantTypes().add("SNP");
                 if (importMode != 1)
                 	createdProject = project.getId();
             }
             project.setPloidyLevel(m_ploidy);
-			LOG.info("variant-oriented file file will be " + variantOrientedFile.getAbsolutePath());
+			LOG.info("variant-oriented file will be " + variantOrientedFile.getAbsolutePath());
 			
 			// sort genotyping data file by marker name 
 			BufferedReader in = new BufferedReader(new FileReader(genotypeFile));			
@@ -289,7 +289,7 @@ public class STDVariantImport extends RefactoredImport {
         catch (Exception e) {
         	LOG.error("Error", e);
         	progress.setError(e.getMessage());
-        	return null;
+        	return createdProject;
         }
 		finally {
         	// let's cleanup

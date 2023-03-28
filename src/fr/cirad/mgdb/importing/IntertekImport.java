@@ -157,6 +157,8 @@ public class IntertekImport extends AbstractGenotypeImport {
         ProgressIndicator progress = ProgressIndicator.get(m_processID) != null ? ProgressIndicator.get(m_processID) : new ProgressIndicator(m_processID, new String[]{"Initializing import"});	// better to add it straight-away so the JSP doesn't get null in return when it checks for it (otherwise it will assume the process has ended)
         progress.setPercentageEnabled(false);        
         
+        Integer createdProject = null;
+        
         // not compatible java 1.8 ? 
         // FeatureReader<VariantContext> reader = AbstractFeatureReader.getFeatureReader(mainFilePath, fIsBCF ? new BCF2Codec() : new VCFCodec(), false);
         GenericXmlApplicationContext ctx = null;
@@ -203,7 +205,6 @@ public class IntertekImport extends AbstractGenotypeImport {
             MongoTemplateManager.lockProjectForWriting(sModule, sProject);
             cleanupBeforeImport(mongoTemplate, sModule, project, importMode, sRun);
 
-            Integer createdProject = null;
             if (project == null || importMode > 0) {	// create it
                 project = new GenotypingProject(AutoIncrementCounter.getNextSequence(mongoTemplate, MongoTemplateManager.getMongoCollectionName(GenotypingProject.class)));
                 project.setName(sProject);
@@ -419,7 +420,7 @@ public class IntertekImport extends AbstractGenotypeImport {
         catch (Exception e) {
         	LOG.error("Error", e);
         	progress.setError(e.getMessage());
-        	return null;
+        	return createdProject;
         }
         finally {
             if (m_fCloseContextOpenAfterImport && ctx != null)

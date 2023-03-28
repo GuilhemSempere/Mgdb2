@@ -210,7 +210,9 @@ public class PlinkImport extends RefactoredImport {
         GenotypingProject project = mongoTemplate.findOne(new Query(Criteria.where(GenotypingProject.FIELDNAME_NAME).is(sProject)), GenotypingProject.class);
         if (importMode == 0 && project != null && project.getPloidyLevel() != 2)
             throw new Exception("Ploidy levels differ between existing (" + project.getPloidyLevel() + ") and provided (" + 2 + ") data!");
-    
+
+        Integer createdProject = null;
+        
         File rotatedFile = null;
         try
         {
@@ -218,7 +220,6 @@ public class PlinkImport extends RefactoredImport {
 
             cleanupBeforeImport(mongoTemplate, sModule, project, importMode, sRun);
 
-            Integer createdProject = null;
             // create project if necessary
             if (project == null || importMode > 0) {   // create it
                 project = new GenotypingProject(AutoIncrementCounter.getNextSequence(mongoTemplate, MongoTemplateManager.getMongoCollectionName(GenotypingProject.class)));
@@ -286,16 +287,14 @@ public class PlinkImport extends RefactoredImport {
             if (progress.getError() != null)
                 throw new Exception(progress.getError());
 
-            if (progress.isAborted())
-            	return createdProject;
-
-            LOG.info("PlinkImport took " + (System.currentTimeMillis() - before) / 1000 + "s for " + count + " records");
+            if (!progress.isAborted())
+            	LOG.info("PlinkImport took " + (System.currentTimeMillis() - before) / 1000 + "s for " + count + " records");
             return createdProject;
         }
         catch (Exception e) {
         	LOG.error("Error", e);
         	progress.setError(e.getMessage());
-        	return null;
+        	return createdProject;
         }
         finally  {
             if (m_fCloseContextOpenAfterImport && ctx != null)

@@ -191,6 +191,8 @@ public class HapMapImport extends AbstractGenotypeImport {
         ProgressIndicator progress = ProgressIndicator.get(m_processID) != null ? ProgressIndicator.get(m_processID) : new ProgressIndicator(m_processID, new String[]{"Initializing import"});	// better to add it straight-away so the JSP doesn't get null in return when it checks for it (otherwise it will assume the process has ended)
 		progress.setPercentageEnabled(false);		
 
+		Integer createdProject = null;
+		
 		FeatureReader<RawHapMapFeature> reader = AbstractFeatureReader.getFeatureReader(mainFileUrl.toString(), new RawHapMapCodec(), false);
 		GenericXmlApplicationContext ctx = null;
 		try
@@ -225,7 +227,6 @@ public class HapMapImport extends AbstractGenotypeImport {
             
             cleanupBeforeImport(mongoTemplate, sModule, project, importMode, sRun);
 
-			Integer createdProject = null;
 			if (project == null || importMode > 0) {	// create it
 				project = new GenotypingProject(AutoIncrementCounter.getNextSequence(mongoTemplate, MongoTemplateManager.getMongoCollectionName(GenotypingProject.class)));
 				project.setName(sProject);
@@ -468,7 +469,7 @@ public class HapMapImport extends AbstractGenotypeImport {
         catch (Exception e) {
         	LOG.error("Error", e);
         	progress.setError(e.getMessage());
-        	return null;
+        	return createdProject;
         }
 		finally
 		{

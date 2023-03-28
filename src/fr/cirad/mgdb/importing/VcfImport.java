@@ -186,6 +186,8 @@ public class VcfImport extends AbstractGenotypeImport {
             reader = AbstractFeatureReader.getFeatureReader(mainFileUrl.toString(), vc, false);
         }
         
+        Integer createdProject = null;
+        
         // not compatible with java 1.8 ?
         // FeatureReader<VariantContext> reader = AbstractFeatureReader.getFeatureReader(mainFilePath, fIsBCF ? new BCF2Codec() : new VCFCodec(), false);
         GenericXmlApplicationContext ctx = null;
@@ -261,7 +263,6 @@ public class VcfImport extends AbstractGenotypeImport {
                 }
             }
 
-            Integer createdProject = null;
             // create project if necessary
             if (project == null || importMode > 0) {   // create it
                 project = new GenotypingProject(AutoIncrementCounter.getNextSequence(mongoTemplate, MongoTemplateManager.getMongoCollectionName(GenotypingProject.class)));
@@ -314,7 +315,7 @@ public class VcfImport extends AbstractGenotypeImport {
             	String sIndividual = sampleToIndividualMap == null ? sIndOrSpId : sampleToIndividualMap.get(sIndOrSpId);
             	if (sIndividual == null) {
             		progress.setError("Sample / individual mapping contains no individual for sample " + sIndOrSpId);
-            		return null;
+            		return createdProject;
             	}
             	
                 if (!fDbAlreadyContainedIndividuals || mongoTemplate.findById(sIndividual, Individual.class) == null)  // we don't have any population data so we don't need to update the Individual if it already exists
@@ -454,7 +455,7 @@ public class VcfImport extends AbstractGenotypeImport {
         catch (Exception e) {
         	LOG.error("Error", e);
         	progress.setError(e.getMessage());
-        	return null;
+        	return createdProject;
         }
         finally
         {
