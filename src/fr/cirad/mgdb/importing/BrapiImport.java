@@ -196,7 +196,7 @@ public class BrapiImport extends STDVariantImport {
 				callPager.paginate(br.getMetadata());
 			}
 
-//			fMayUseTsv = client.hasAlleleMatrixSearchTSV();
+			fMayUseTsv = client.hasAlleleMatrixSearchTSV();
 			client.setMapID(mapDbId);
 			
 			Pager markerPager = new Pager();
