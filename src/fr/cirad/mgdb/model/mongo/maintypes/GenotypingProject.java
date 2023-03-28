@@ -62,10 +62,10 @@ public class GenotypingProject {
      */
     public final static String FIELDNAME_CREATION_DATE = "cd";
 
-    /**
-     * The Constant FIELDNAME_ORIGIN.
-     */
-    public final static String FIELDNAME_ORIGIN = "or";
+//    /**
+//     * The Constant FIELDNAME_ORIGIN.
+//     */
+//    public final static String FIELDNAME_ORIGIN = "or";
 
     /**
      * The Constant SECTION_ADDITIONAL_INFO.
@@ -143,11 +143,11 @@ public class GenotypingProject {
     @Field(FIELDNAME_CREATION_DATE)
     private Date creationDate = null;
 
-    /**
-     * The origin.
-     */
-    @Field(FIELDNAME_ORIGIN)
-    private int origin;
+//    /**
+//     * The origin.
+//     */
+//    @Field(FIELDNAME_ORIGIN)
+//    private int origin;
 
     /**
      * The additional info.
@@ -216,23 +216,23 @@ public class GenotypingProject {
         return id;
     }
 
-    /**
-     * Gets the origin.
-     *
-     * @return the origin
-     */
-    public int getOrigin() {
-        return origin;
-    }
-
-    /**
-     * Sets the origin.
-     *
-     * @param origin the new origin
-     */
-    public void setOrigin(int origin) {
-        this.origin = origin;
-    }
+//    /**
+//     * Gets the origin.
+//     *
+//     * @return the origin
+//     */
+//    public int getOrigin() {
+//        return origin;
+//    }
+//
+//    /**
+//     * Sets the origin.
+//     *
+//     * @param origin the new origin
+//     */
+//    public void setOrigin(int origin) {
+//        this.origin = origin;
+//    }
 
     /**
      * Gets the name.
