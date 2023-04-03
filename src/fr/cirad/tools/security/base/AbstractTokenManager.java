@@ -16,9 +16,7 @@
  *******************************************************************************/
 package fr.cirad.tools.security.base;
 
-//import java.io.IOException;
 import java.io.UnsupportedEncodingException;
-import java.text.ParseException;
 import java.util.Collection;
 
 import javax.ejb.ObjectNotFoundException;

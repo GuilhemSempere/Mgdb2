@@ -56,6 +56,8 @@ public class Helper {
      */
     private static final Logger LOG = Logger.getLogger(Helper.class);
 
+    static public final String ID_SEPARATOR = "§";
+    
     /**
      * The md.
      */
@@ -414,4 +416,38 @@ public class Helper {
         }
         return splitCollection;
     }
+    
+    /**
+     * retrieve info from an ID
+     *
+     * @param id of the GA4GH object to parse
+     * @param expectedParamCount number of params that should be found
+     * @return string[] containing Module, Project, VariantSetName | CallSetName
+     * , VariantName Or null if the module doesn't exist
+     */
+    public static String[] getInfoFromId(String id, int expectedParamCount) {
+
+        String delimitor = ID_SEPARATOR;
+        String[] result = id.split(delimitor, -1);
+        if (result.length == expectedParamCount) {
+            return result;
+        } else {
+            return null;
+        }
+    }
+
+	/**
+	 * create composite ID from a list of params
+	 *
+	 * @param params
+	 * @return String the id
+	 */
+	static public String createId(Comparable... params) {
+	    String result = "";
+	
+	    for (Comparable val : params) {
+	        result += val + ID_SEPARATOR;
+	    }
+	    return result.substring(0, result.length() - 1);
+	}
 }

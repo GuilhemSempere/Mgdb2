@@ -31,7 +31,6 @@ import java.util.TreeMap;
 import java.util.TreeSet;
 import java.util.stream.Collectors;
 
-import org.bson.Document;
 import org.bson.codecs.pojo.annotations.BsonProperty;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.mapping.Field;
@@ -51,7 +50,12 @@ import htsjdk.variant.variantcontext.VariantContextBuilder;
 import htsjdk.variant.vcf.VCFConstants;
 
 abstract public class AbstractVariantData
-{    
+{
+    public static final String VCF_CONSTANT_DESCRIPTION = "description";
+    public static final String VCF_CONSTANT_INFO_META_DATA = "mInfoMetaData";
+    public static final String VCF_CONSTANT_INFO_FORMAT_META_DATA = "mFormatMetaData";
+    
+    
     /** The Constant FIELDNAME_ANALYSIS_METHODS. */
     public final static String FIELDNAME_ANALYSIS_METHODS = "am";
     
