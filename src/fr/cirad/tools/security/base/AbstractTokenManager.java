@@ -16,9 +16,7 @@
  *******************************************************************************/
 package fr.cirad.tools.security.base;
 
-//import java.io.IOException;
 import java.io.UnsupportedEncodingException;
-import java.text.ParseException;
 import java.util.Collection;
 
 import javax.ejb.ObjectNotFoundException;
@@ -47,8 +45,8 @@ public abstract class AbstractTokenManager {
     abstract public boolean removeToken(String token);
     abstract public String generateToken(Authentication auth) throws IllegalArgumentException, UnsupportedEncodingException;
 
-    abstract public boolean canUserReadProject(String token, String module, int projectId);
-    abstract public boolean canUserReadProject(Collection<? extends GrantedAuthority> authorities, String module, int projectId);
+    abstract public boolean canUserReadProject(String token, String module, int projectId) throws ObjectNotFoundException;
+    abstract public boolean canUserReadProject(Collection<? extends GrantedAuthority> authorities, String module, int projectId) throws ObjectNotFoundException;
     
     abstract public boolean canUserReadDB(String token, String module) throws ObjectNotFoundException;    
     abstract public boolean canUserReadDB(Collection<? extends GrantedAuthority> authorities, String module) throws ObjectNotFoundException;

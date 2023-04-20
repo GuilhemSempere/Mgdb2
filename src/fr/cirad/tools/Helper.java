@@ -56,6 +56,8 @@ public class Helper {
      */
     private static final Logger LOG = Logger.getLogger(Helper.class);
 
+    static public final String ID_SEPARATOR = "§";
+    
     /**
      * The md.
      */
@@ -283,17 +285,17 @@ public class Helper {
         return o == null || (o instanceof String && ((String) o).trim().isEmpty());
     }
 
-
     /**
      * Read possibly nested field.
      *
      * @param doc the record
      * @param fieldPath the field path
      * @param listFieldSeparator separator to use for list fields
+     * @param objectToReturnInsteadOfNull to be returned if targeted field contains a null value or doesn't exist
      * @return the object
      */
-    public static Object readPossiblyNestedField(Document doc, String fieldPath, String listFieldSeparator) {
-    	Document slidingRecord = doc;
+    public static Object readPossiblyNestedField(Document doc, String fieldPath, String listFieldSeparator, Object objectToReturnInsteadOfNull) {
+        Document slidingRecord = doc;
         String[] splitFieldName = fieldPath.split("\\.");
         Object o = null, result;
         for (String s : splitFieldName) {
@@ -316,9 +318,8 @@ public class Helper {
             result = o;
         }
 
-        if (result == null) {
-            result = "";
-        }
+        if (result == null)
+            return objectToReturnInsteadOfNull;
 
         return result;
     }
@@ -402,10 +403,10 @@ public class Helper {
         }
     }
     
-    static public <T> List<Collection<T>> evenlySplitCollection(Collection<T> collection, int nChunkCount) {
+    static public <T> ArrayList<ArrayList<T>> evenlySplitCollection(Collection<T> collection, int nChunkCount) {
         int nChunkSize = (int) Math.ceil((float) collection.size() / nChunkCount), nCounter = 0;
-        List<Collection<T>> splitCollection = new ArrayList<>(nChunkCount);
-        Collection<T> currentChunk = null;
+        ArrayList<ArrayList<T>> splitCollection = new ArrayList<>(nChunkCount);
+        ArrayList<T> currentChunk = null;
         for (T variantRuns : collection) {
             if (nCounter++ % nChunkSize == 0) {
                 currentChunk = new ArrayList<>();
@@ -415,4 +416,38 @@ public class Helper {
         }
         return splitCollection;
     }
+    
+    /**
+     * retrieve info from an ID
+     *
+     * @param id of the GA4GH object to parse
+     * @param expectedParamCount number of params that should be found
+     * @return string[] containing Module, Project, VariantSetName | CallSetName
+     * , VariantName Or null if the module doesn't exist
+     */
+    public static String[] getInfoFromId(String id, int expectedParamCount) {
+
+        String delimitor = ID_SEPARATOR;
+        String[] result = id.split(delimitor, -1);
+        if (result.length == expectedParamCount) {
+            return result;
+        } else {
+            return null;
+        }
+    }
+
+	/**
+	 * create composite ID from a list of params
+	 *
+	 * @param params
+	 * @return String the id
+	 */
+	static public String createId(Comparable... params) {
+	    String result = "";
+	
+	    for (Comparable val : params) {
+	        result += val + ID_SEPARATOR;
+	    }
+	    return result.substring(0, result.length() - 1);
+	}
 }

@@ -32,6 +32,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.MissingResourceException;
+import java.util.NoSuchElementException;
 import java.util.Properties;
 import java.util.Set;
 import java.util.TreeMap;
@@ -567,27 +568,6 @@ public class MongoTemplateManager implements ApplicationContextAware {
         return get(sModule).getDb().getName().contains(EXPIRY_PREFIX);
     }
 
-//	public void saveRunsIntoProjectRecords()
-//	{
-//		for (String module : getAvailableModules())
-//		{
-//			MongoTemplate mongoTemplate = MongoTemplateManager.get(module);
-//			for (GenotypingProject proj : mongoTemplate.findAll(GenotypingProject.class))
-//				if (proj.getRuns().size() == 0)
-//				{
-//					boolean fRunAdded = false;
-//					for (String run : (List<String>) mongoTemplate.getCollection(MongoTemplateManager.getMongoCollectionName(VariantData.class)).distinct(VariantData.FIELDNAME_PROJECT_DATA + "." + proj.getId() + "." + Run.RUNNAME))
-//						if (!proj.getRuns().contains(run))
-//						{
-//							proj.getRuns().add(run);
-//							LOG.info("run " + run + " added to project " + proj.getName() + " in module " + module);
-//							fRunAdded = true;
-//						}
-//					if (fRunAdded)
-//						mongoTemplate.save(proj);
-//				}
-//		}
-//	}
     /**
      * Gets the mongo collection name.
      *
@@ -708,9 +688,10 @@ public class MongoTemplateManager implements ApplicationContextAware {
 	}
 
 	public static void unlockProjectForWriting(String sModule, String sProject) {
-		Set<String> projects = currentlyImportedProjects.get(sModule);
-		if (projects != null)
-			projects.remove(sProject);
+		Set<String> moduleLockedProjects = currentlyImportedProjects.get(sModule);
+		if (moduleLockedProjects == null)
+			throw new NoSuchElementException("There are currently no locked projects in database " + sModule);
+		moduleLockedProjects.remove(sProject);
 	}
 
 	public static void lockModuleForWriting(String sModule) {

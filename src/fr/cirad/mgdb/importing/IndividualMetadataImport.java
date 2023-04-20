@@ -32,6 +32,7 @@ import java.util.Scanner;
 import java.util.Set;
 import java.util.stream.Collectors;
 
+import javax.security.sasl.AuthenticationException;
 import javax.servlet.http.HttpSession;
 
 import org.apache.commons.collections.CollectionUtils;
@@ -579,7 +580,7 @@ public class IndividualMetadataImport {
                         samplePager.paginate(br.getMetadata());
                     }
                 } catch (Exception f) {
-                    progress.setError("Error invoking BrAPI /search/samples call (no searchResultDbId returned and yet unable to directly obtain results)");
+                    progress.setError("Error invoking BrAPI /search/samples call (" + (f instanceof AuthenticationException ? "authentication failed" : "no searchResultDbId returned and yet unable to directly obtain results") + ")");
                     LOG.error(e);
                     LOG.error(progress.getError(), f);
                     return 0;
@@ -716,7 +717,7 @@ public class IndividualMetadataImport {
                         samplePager.paginate(br.getMetadata());
                     }
                 } catch (Exception f) {
-                    progress.setError("Error invoking BrAPI " + endpointUrl + "/search/samples call (no searchResultDbId returned and yet unable to directly obtain results)");
+                    progress.setError("Error invoking BrAPI " + endpointUrl + "/search/samples call (" + (f instanceof AuthenticationException ? "authentication failed" : "no searchResultDbId returned and yet unable to directly obtain results") + ")");
                     LOG.error(e);
                     LOG.error(progress.getError(), f);
                     return 0;
@@ -872,7 +873,7 @@ public class IndividualMetadataImport {
                     germplasmPager.paginate(br.getMetadata());
                 }
             } catch (Exception e2) {
-                progress.setError("Error invoking BrAPI " + endPointUrl + "/search/germplasm call (no searchResultDbId returned and yet unable to directly obtain results)");
+                progress.setError("Error invoking BrAPI " + endPointUrl + "/search/germplasm call (" + (e2 instanceof AuthenticationException ? "authentication failed" : "no searchResultDbId returned and yet unable to directly obtain results") + ")");
                 LOG.error(e1);
                 LOG.error(progress.getError(), e2);
                 return new ArrayList<>();
@@ -914,7 +915,7 @@ public class IndividualMetadataImport {
                     attributesPager.paginate(attributesResp.getMetadata());
                 }
             } catch (Exception e2) {
-                progress.setError("Error invoking BrAPI " + endPointUrl + "/search/attributes call (no searchResultDbId returned and yet unable to directly obtain results)");
+                progress.setError("Error invoking BrAPI " + endPointUrl + "/search/attributes call (" + (e2 instanceof AuthenticationException ? "authentication failed" : "no searchResultDbId returned and yet unable to directly obtain results") + ")");
                 LOG.error(e1);
                 LOG.error(progress.getError(), e2);
                 return new HashMap();
@@ -982,7 +983,7 @@ public class IndividualMetadataImport {
                     callPager.paginate(br.getMetadata());
                 }
             } catch (Exception f) {
-                progress.setError("Error invoking BrAPI " + endPointUrl + "/search/germplasm call (no searchResultDbId returned and yet unable to directly obtain results)");
+                progress.setError("Error invoking BrAPI " + endPointUrl + "/search/germplasm call (" + (f instanceof AuthenticationException ? "authentication failed" : "no searchResultDbId returned and yet unable to directly obtain results") + ")");
                 LOG.error(e);
                 LOG.error(progress.getError(), f);
                 return new HashMap();

@@ -23,9 +23,9 @@ import java.io.InputStreamReader;
 import java.net.URL;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -45,16 +45,18 @@ import org.springframework.data.mongodb.core.query.Query;
 import com.opencsv.CSVReader;
 
 import fr.cirad.mgdb.importing.base.AbstractGenotypeImport;
-import fr.cirad.mgdb.model.mongo.maintypes.AutoIncrementCounter;
+import fr.cirad.mgdb.model.mongo.maintypes.Assembly;
 import fr.cirad.mgdb.model.mongo.maintypes.DBVCFHeader;
 import fr.cirad.mgdb.model.mongo.maintypes.GenotypingProject;
 import fr.cirad.mgdb.model.mongo.maintypes.GenotypingSample;
 import fr.cirad.mgdb.model.mongo.maintypes.Individual;
 import fr.cirad.mgdb.model.mongo.maintypes.VariantData;
 import fr.cirad.mgdb.model.mongo.maintypes.VariantRunData;
+import fr.cirad.mgdb.model.mongo.subtypes.ReferencePosition;
 import fr.cirad.mgdb.model.mongo.subtypes.SampleGenotype;
 import fr.cirad.mgdb.model.mongodao.MgdbDao;
 import fr.cirad.tools.ProgressIndicator;
+import fr.cirad.tools.mongo.AutoIncrementCounter;
 import fr.cirad.tools.mongo.MongoTemplateManager;
 import htsjdk.variant.variantcontext.VariantContext.Type;
 import htsjdk.variant.vcf.VCFFormatHeaderLine;
@@ -118,8 +120,8 @@ public class IntertekImport extends AbstractGenotypeImport {
      * @throws Exception the exception
      */
     public static void main(String[] args) throws Exception {
-        if (args.length < 5) {
-            throw new Exception("You must pass 5 parameters as arguments: DATASOURCE name, PROJECT name, RUN name, TECHNOLOGY string, csv file! An optional 6th parameter supports values '1' (empty project data before importing) and '2' (empty all variant data before importing, including marker list).");
+        if (args.length < 6) {
+            throw new Exception("You must pass 6 parameters as arguments: DATASOURCE name, PROJECT name, RUN name, TECHNOLOGY string, csv file, and assembly name! An optional 7th parameter supports values '1' (empty project data before importing) and '2' (empty all variant data before importing, including marker list).");
         }
 
         File csvFile = new File(args[4]);
@@ -129,11 +131,11 @@ public class IntertekImport extends AbstractGenotypeImport {
 
         int mode = 0;
         try {
-            mode = Integer.parseInt(args[5]);
+            mode = Integer.parseInt(args[6]);
         } catch (Exception e) {
             LOG.warn("Unable to parse input mode. Using default (0): overwrite run if exists.");
         }
-        new IntertekImport().importToMongo(args[0], args[1], args[2], args[3], new File(args[4]).toURI().toURL(), null, false, mode);
+        new IntertekImport().importToMongo(args[0], args[1], args[2], args[3], new File(args[4]).toURI().toURL(), args[5], null, false, mode);
     }
 
     /**
@@ -150,10 +152,12 @@ public class IntertekImport extends AbstractGenotypeImport {
      * @return a project ID if it was created by this method, otherwise null
      * @throws Exception the exception
      */
-    public Integer importToMongo(String sModule, String sProject, String sRun, String sTechnology, URL fileURL, Map<String, String> sampleToIndividualMap, boolean fSkipMonomorphic, int importMode) throws Exception {
+    public Integer importToMongo(String sModule, String sProject, String sRun, String sTechnology, URL fileURL, String assemblyName, Map<String, String> sampleToIndividualMap, boolean fSkipMonomorphic, int importMode) throws Exception {
         long before = System.currentTimeMillis();
         ProgressIndicator progress = ProgressIndicator.get(m_processID) != null ? ProgressIndicator.get(m_processID) : new ProgressIndicator(m_processID, new String[]{"Initializing import"});	// better to add it straight-away so the JSP doesn't get null in return when it checks for it (otherwise it will assume the process has ended)
         progress.setPercentageEnabled(false);        
+        
+        Integer createdProject = null;
         
         // not compatible java 1.8 ? 
         // FeatureReader<VariantContext> reader = AbstractFeatureReader.getFeatureReader(mainFilePath, fIsBCF ? new BCF2Codec() : new VCFCodec(), false);
@@ -194,14 +198,13 @@ public class IntertekImport extends AbstractGenotypeImport {
 
             Set<VariantData> variantsToSave = new HashSet<>();
             HashMap<String /*variant ID*/, List<String> /*allelesList*/> variantAllelesMap = new HashMap<>();
-            HashMap<String /*variant ID*/, HashMap<Integer, SampleGenotype>> variantSamplesMap = new HashMap<>();
+            HashMap<String /*variant ID*/, HashMap<Integer, SampleGenotype>> variantToSampleToGenotypeMap = new HashMap<>();
             m_providedIdToSampleMap = new HashMap<>();
 
             GenotypingProject project = mongoTemplate.findOne(new Query(Criteria.where(GenotypingProject.FIELDNAME_NAME).is(sProject)), GenotypingProject.class);
             MongoTemplateManager.lockProjectForWriting(sModule, sProject);
             cleanupBeforeImport(mongoTemplate, sModule, project, importMode, sRun);
 
-            Integer createdProject = null;
             if (project == null || importMode > 0) {	// create it
                 project = new GenotypingProject(AutoIncrementCounter.getNextSequence(mongoTemplate, MongoTemplateManager.getMongoCollectionName(GenotypingProject.class)));
                 project.setName(sProject);
@@ -212,8 +215,17 @@ public class IntertekImport extends AbstractGenotypeImport {
                 	createdProject = project.getId();
             }
             
-            HashMap<String, String> existingVariantIDs = buildSynonymToIdMapForExistingVariants(mongoTemplate, false);
+			progress.addStep("Scanning existing marker IDs");
+			progress.moveToNextStep();
+			Assembly assembly = createAssemblyIfNeeded(mongoTemplate, assemblyName);
+			HashMap<String, String> existingVariantIDs = buildSynonymToIdMapForExistingVariants(mongoTemplate, true, assembly == null ? null : assembly.getId());
 
+			
+            final Collection<Integer> assemblyIDs = mongoTemplate.findDistinct(new Query(), "_id", Assembly.class, Integer.class);
+            if (assemblyIDs.isEmpty())
+            	assemblyIDs.add(null);	// old-style, assembly-less DB
+            
+            
             // Reading csv file
             // Getting alleleX and alleleY for each SNP by reading lines between lines {"SNPID","SNPNum","AlleleY","AlleleX","Sequence"} and {"Scaling"};
             // Then getting genotypes for each individual by reading lines after line {"DaughterPlate","MasterPlate","MasterWell","Call","X","Y","SNPID","SubjectID","Norm","Carrier","DaughterWell","LongID"}
@@ -261,8 +273,8 @@ public class IntertekImport extends AbstractGenotypeImport {
                                 if (variantId.equals("") || sIndOrSpId.equals(""))
                                     continue; //skip line if no variantId or no individualId
 
-                                if (variantSamplesMap.get(variantId) == null)
-                                    variantSamplesMap.put(variantId, new HashMap<>());
+                                if (variantToSampleToGenotypeMap.get(variantId) == null)
+                                    variantToSampleToGenotypeMap.put(variantId, new HashMap<>());
 
                                 String gtCode = null;
                                 List<String> variantAlleles = variantAllelesMap.get(variantId);
@@ -292,7 +304,7 @@ public class IntertekImport extends AbstractGenotypeImport {
                                     
                                     String sIndividual = sampleToIndividualMap == null ? sIndOrSpId : sampleToIndividualMap.get(sIndOrSpId);
                                 	if (sIndividual == null) {
-                                		progress.setError("Sample / individual mapping file contains no individual for sample " + sIndOrSpId);
+                                		progress.setError("Sample / individual mapping contains no individual for sample " + sIndOrSpId);
                                 		break;
                                 	}
 
@@ -311,7 +323,7 @@ public class IntertekImport extends AbstractGenotypeImport {
                                     SampleGenotype sampleGt = new SampleGenotype(gtCode);
                                     sampleGt.getAdditionalInfo().put("FI", FI);	//TODO - Check how the fluorescence indexes X et Y should be stored
 
-                                    variantSamplesMap.get(variantId).put(sample.getId(), sampleGt);                                             
+                                    variantToSampleToGenotypeMap.get(variantId).put(sample.getId(), sampleGt);                                             
                                 }
                             }
                         }
@@ -343,8 +355,6 @@ public class IntertekImport extends AbstractGenotypeImport {
             // Store variants and variantRuns
             int count = 0;
             int nNumberOfVariantsToSaveAtOnce = 1;
-//            final ArrayList<Thread> threadsToWaitFor = new ArrayList<>();
-//            int chunkIndex = 0;
             int nNConcurrentThreads = Math.max(1, Runtime.getRuntime().availableProcessors());
             LOG.debug("Importing project '" + sProject + "' into " + sModule + " using " + nNConcurrentThreads + " threads");
             
@@ -358,16 +368,26 @@ public class IntertekImport extends AbstractGenotypeImport {
             for (VariantData variant : variantsToSave) {
                 if (progress.getError() != null || progress.isAborted())
                     break;
-
-                if (!existingIds.contains(variant.getId()) && fSkipMonomorphic && variantSamplesMap.get(variant.getVariantId()).values().stream().map(sampleGT -> sampleGT.getCode()).filter(gtCode -> gtCode != null).distinct().count() < 2)
-                    continue;
-
+                if (!existingIds.contains(variant.getId()) && fSkipMonomorphic) {
+                	String[] distinctGTs = variantToSampleToGenotypeMap.get(variant.getVariantId()).values().stream().map(sampleGT -> sampleGT.getCode()).filter(gtCode -> gtCode != null).distinct().toArray(String[]::new);
+                	if (distinctGTs.length == 0 || (distinctGTs.length == 1 && Arrays.stream(distinctGTs[0].split("/")).distinct().count() < 2))
+						continue; // skip non-variant positions that are not already known
+                }
+                
                 VariantRunData vrd = new VariantRunData(new VariantRunData.VariantRunDataId(project.getId(), sRun, variant.getVariantId()));
                 vrd.setKnownAlleles(variant.getKnownAlleles());
-                vrd.setSampleGenotypes(variantSamplesMap.get(variant.getVariantId()));
+                vrd.setSampleGenotypes(variantToSampleToGenotypeMap.get(variant.getVariantId()));
                 vrd.setType(variant.getType());
-                vrd.setReferencePosition(variant.getReferencePosition());                
+                vrd.setPositions(variant.getPositions());
+                vrd.setReferencePosition(variant.getReferencePosition());         
                 vrd.setSynonyms(variant.getSynonyms());
+                
+                for (Integer asmId : assemblyIDs) {
+                    ReferencePosition rp = variant.getReferencePosition(asmId);
+                    if (rp != null)
+                    	project.getContigs(asmId).add(rp.getSequence());
+                }
+                
                 variantRunsChunk.add(vrd);
                 variantsChunk.add(variant);
 
@@ -396,7 +416,13 @@ public class IntertekImport extends AbstractGenotypeImport {
 
             LOG.info("IntertekImport took " + (System.currentTimeMillis() - before) / 1000 + "s for " + count + " records");		
             return createdProject;
-        } finally {
+        }
+        catch (Exception e) {
+        	LOG.error("Error", e);
+        	progress.setError(e.getMessage());
+        	return createdProject;
+        }
+        finally {
             if (m_fCloseContextOpenAfterImport && ctx != null)
                 ctx.close();
             MongoTemplateManager.unlockProjectForWriting(sModule, sProject);

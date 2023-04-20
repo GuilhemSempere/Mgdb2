@@ -21,6 +21,7 @@ import java.util.Date;
 import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.TreeSet;
 
 import org.springframework.data.annotation.Id;
@@ -61,10 +62,10 @@ public class GenotypingProject {
      */
     public final static String FIELDNAME_CREATION_DATE = "cd";
 
-    /**
-     * The Constant FIELDNAME_ORIGIN.
-     */
-    public final static String FIELDNAME_ORIGIN = "or";
+//    /**
+//     * The Constant FIELDNAME_ORIGIN.
+//     */
+//    public final static String FIELDNAME_ORIGIN = "or";
 
     /**
      * The Constant SECTION_ADDITIONAL_INFO.
@@ -80,6 +81,11 @@ public class GenotypingProject {
      * The Constant FIELDNAME_SEQUENCES.
      */
     public static final String FIELDNAME_SEQUENCES = "ch";
+    
+    /**
+     * The Constant FIELDNAME_CONTIGS.
+     */
+    public static final String FIELDNAME_CONTIGS = "c";
 
     /**
      * The Constant FIELDNAME_RUNS.
@@ -137,11 +143,11 @@ public class GenotypingProject {
     @Field(FIELDNAME_CREATION_DATE)
     private Date creationDate = null;
 
-    /**
-     * The origin.
-     */
-    @Field(FIELDNAME_ORIGIN)
-    private int origin;
+//    /**
+//     * The origin.
+//     */
+//    @Field(FIELDNAME_ORIGIN)
+//    private int origin;
 
     /**
      * The additional info.
@@ -166,6 +172,12 @@ public class GenotypingProject {
      */
     @Field(FIELDNAME_SEQUENCES)
     private TreeSet<String> sequences = new TreeSet<String>(new AlphaNumericComparator());
+    
+    /**
+     * The sequences.
+     */
+    @Field(FIELDNAME_CONTIGS) /*TODO: not backwards compatible*/
+    private Map<Integer, TreeSet<String>> contigs = new HashMap<>();
 
     /**
      * The allele counts.
@@ -204,23 +216,23 @@ public class GenotypingProject {
         return id;
     }
 
-    /**
-     * Gets the origin.
-     *
-     * @return the origin
-     */
-    public int getOrigin() {
-        return origin;
-    }
-
-    /**
-     * Sets the origin.
-     *
-     * @param origin the new origin
-     */
-    public void setOrigin(int origin) {
-        this.origin = origin;
-    }
+//    /**
+//     * Gets the origin.
+//     *
+//     * @return the origin
+//     */
+//    public int getOrigin() {
+//        return origin;
+//    }
+//
+//    /**
+//     * Sets the origin.
+//     *
+//     * @param origin the new origin
+//     */
+//    public void setOrigin(int origin) {
+//        this.origin = origin;
+//    }
 
     /**
      * Gets the name.
@@ -359,14 +371,40 @@ public class GenotypingProject {
     public List<String> getRuns() {
         return runs;
     }
-
+    
     /**
      * Gets the sequences.
      *
      * @return the sequences
      */
-    public TreeSet<String> getSequences() {
-        return sequences;
+//    public TreeSet<String> getSequences() {
+//        return sequences;
+//    }
+
+    /**
+     * Gets the contigs by assembly ID.
+     *
+     * @return the contigs by assembly ID
+     */
+    public Map<Integer, TreeSet<String>> getContigs() {
+        return contigs;
+    }
+
+    /**
+     * Gets the contigs for a given assembly ID.
+     *
+     * @return the contigs for a given assembly ID
+     */
+    public TreeSet<String> getContigs(Integer nAssemblyId) {
+    	if (nAssemblyId == null)
+    		return sequences;
+
+        TreeSet<String> seqs = contigs.get(nAssemblyId);
+        if (seqs == null) {
+            seqs = new TreeSet<String>(new AlphaNumericComparator());
+            contigs.put(nAssemblyId, seqs);
+        }
+        return seqs;
     }
 
     /**
@@ -411,7 +449,9 @@ public class GenotypingProject {
 		getAlleleCounts().clear();
 		getEffectAnnotations().clear();
 		getVariantTypes().clear();
-		getSequences().clear();
+		sequences.clear();
+		if (getContigs() != null)
+			getContigs().clear();
 		setPloidyLevel(0);
 		getAdditionalInfo().clear();
     }

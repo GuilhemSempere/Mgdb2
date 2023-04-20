@@ -50,7 +50,12 @@ import htsjdk.variant.variantcontext.VariantContextBuilder;
 import htsjdk.variant.vcf.VCFConstants;
 
 abstract public class AbstractVariantData
-{    
+{
+    public static final String VCF_CONSTANT_DESCRIPTION = "description";
+    public static final String VCF_CONSTANT_INFO_META_DATA = "mInfoMetaData";
+    public static final String VCF_CONSTANT_INFO_FORMAT_META_DATA = "mFormatMetaData";
+    
+    
     /** The Constant FIELDNAME_ANALYSIS_METHODS. */
     public final static String FIELDNAME_ANALYSIS_METHODS = "am";
     
@@ -65,9 +70,9 @@ abstract public class AbstractVariantData
     
     /** The Constant FIELDNAME_REFERENCE_POSITION. */
     public final static String FIELDNAME_REFERENCE_POSITION = "rp";
-    
-    /** The Constant FIELDNAME_PROJECT_DATA. */
-    public final static String FIELDNAME_PROJECT_DATA = "pj";
+
+    /** The Constant FIELDNAME_POSITIONS. */
+    public final static String FIELDNAME_POSITIONS = "p";
     
     /** The Constant FIELDNAME_SYNONYM_TYPE_ID_ILLUMINA. */
     public final static String FIELDNAME_SYNONYM_TYPE_ID_ILLUMINA = "il";
@@ -124,16 +129,21 @@ abstract public class AbstractVariantData
     @BsonProperty(FIELDNAME_TYPE)
     @Field(FIELDNAME_TYPE)
     private String type;
-
-    /** The reference position. */
+    
+	/** The reference positions. */
     @BsonProperty(FIELDNAME_REFERENCE_POSITION)
     @Field(FIELDNAME_REFERENCE_POSITION)
-    ReferencePosition referencePosition = null;
-    
-    /** The synonyms. */
-    @BsonProperty(FIELDNAME_SYNONYMS)
-    @Field(FIELDNAME_SYNONYMS)
-    private TreeMap<String /*synonym type*/, TreeSet<String>> synonyms;
+    protected ReferencePosition referencePosition;
+
+	/** The reference positions. */
+    @BsonProperty(FIELDNAME_POSITIONS)
+    @Field(FIELDNAME_POSITIONS)
+    protected Map<Integer, ReferencePosition> positions = new HashMap<>();
+	
+	/** The synonyms. */
+	@BsonProperty(FIELDNAME_SYNONYMS)
+	@Field(FIELDNAME_SYNONYMS)
+	private TreeMap<String /*synonym type*/, TreeSet<String>> synonyms;
 
     /** The analysis methods. */
     @BsonProperty(FIELDNAME_ANALYSIS_METHODS)
@@ -150,16 +160,16 @@ abstract public class AbstractVariantData
     @Field(SECTION_ADDITIONAL_INFO)
     private HashMap<String, Object> additionalInfo = null;
 
-    static private HashSet<String> specificallyTreatedAdditionalInfoFields = new HashSet<String> () {{ add(FIELD_SOURCE); add(FIELD_FULLYDECODED); add(FIELD_FILTERS); add(FIELD_PHREDSCALEDQUAL); }};
-      
-    /**
-     * Fixes AD array in the case where provided alleles are different from the order in which we have them in the DB
-     * @param importedAD
-     * @param importedAlleles
-     * @param knownAlleles
-     * @return
-     */
-    static public int[] fixAdFieldValue(int[] importedAD, List<? extends Comparable> importedAlleles, List<String> knownAlleles)
+	static private HashSet<String> specificallyTreatedAdditionalInfoFields = new HashSet<String> () {{ add(FIELD_SOURCE); add(FIELD_FULLYDECODED); add(FIELD_FILTERS); add(FIELD_PHREDSCALEDQUAL); }};
+
+	/**
+	 * Fixes AD array in the case where provided alleles are different from the order in which we have them in the DB
+	 * @param importedAD
+	 * @param importedAlleles
+	 * @param knownAlleles
+	 * @return
+	 */
+	static public int[] fixAdFieldValue(int[] importedAD, List<? extends Comparable> importedAlleles, List<String> knownAlleles)
     {
         List<String> importedAllelesAsStrings = importedAlleles.stream().filter(allele -> Allele.class.isAssignableFrom(allele.getClass()))
                     .map(Allele.class::cast)
@@ -354,14 +364,16 @@ abstract public class AbstractVariantData
 //        return id;
 //    }
 
-    /**
-     * Gets the synonyms.
-     *
-     * @return the synonyms
-     */
-    public TreeMap<String, TreeSet<String>> getSynonyms() {
+	/**
+	 * Gets the synonyms.
+	 *
+	 * @return the synonyms
+	 */
+	public TreeMap<String, TreeSet<String>> getSynonyms() {
+//        if (synonyms == null)
+//            synonyms = new TreeMap<>();
         return synonyms;
-    }
+	}
 
     /**
      * Sets the synonyms.
@@ -411,23 +423,73 @@ abstract public class AbstractVariantData
     }
 
     /**
-     * Gets the reference position.
+     * Gets the reference positions by assembly ID.
      *
+     * @return the reference positions
+     */
+    public Map<Integer, ReferencePosition> getPositions() {
+        return positions;
+    }
+    
+    /**
+     * Gets the default reference position.
+     *
+     * @return the default reference position
+     */
+    public ReferencePosition getDefaultReferencePosition() {
+        return referencePosition != null ? referencePosition : (positions.isEmpty() ? null : positions.entrySet().iterator().next().getValue());
+    }
+    
+    /**
+     * Gets the reference position for a given assembly ID.
+     *
+     * @param nAssemblyId the assembly id
      * @return the reference position
+     */
+    public ReferencePosition getReferencePosition(Integer nAssemblyId) {
+        return nAssemblyId == null ? referencePosition : positions.get(nAssemblyId);
+    }
+
+    /**
+     * Sets the reference positions.
+     *
+     * @param positions by assembly ID
+     */
+    public void setPositions(Map<Integer, ReferencePosition> positions) {
+        this.positions = positions;
+    }
+
+    /**
+     * Gets the reference position for the default, unnamed (old-style) assembly
+     *
+     * @return the default reference position
      */
     public ReferencePosition getReferencePosition() {
         return referencePosition;
     }
 
     /**
-     * Sets the reference position.
+     * Sets the reference position for the default, unnamed (old-style) assembly
      *
      * @param referencePosition the new reference position
      */
     public void setReferencePosition(ReferencePosition referencePosition) {
-        this.referencePosition = referencePosition;
+   		this.referencePosition = referencePosition;
     }
-    
+
+    /**
+     * Sets the reference position for a given assembly ID.
+     *
+     * @param nAssemblyId the assembly id
+     * @param referencePosition the new reference position
+     */
+    public void setReferencePosition(Integer nAssemblyId, ReferencePosition referencePosition) {
+    	if (nAssemblyId == null)
+    		this.referencePosition = referencePosition;
+    	else
+    		positions.put(nAssemblyId, referencePosition);
+    }
+	
     /**
      * Gets the known alleles.
      *
@@ -438,6 +500,17 @@ abstract public class AbstractVariantData
             knownAlleles = new SetUniqueListWithConstructor<String>();
         return knownAlleles;
     }
+
+//	/**
+//	 * Gets the known allele list.
+//	 *
+//	 * @return the known allele list
+//	 */
+//	public List<String> getKnownAlleleList() {
+//		if (knownAlleleList == null || getKnownAlleles().size() > knownAlleleList.size())
+//			knownAlleleList = new ArrayList<String>(getKnownAlleles());
+//		return knownAlleleList;
+//	}
 
     /**
      * Sets the known allele list.
@@ -562,31 +635,32 @@ abstract public class AbstractVariantData
             result.append(alleleIndex);
         }
 
-        return result.length() > 0 ? result.toString() : null;
-    }
-        
-    /**
-     * To variant context.
-     *
-     * @param MongoTemplate the mongoTemplate
-     * @param runs the runs
-     * @param exportVariantIDs the export variant ids
-     * @param samplesToExport overall list of samples involved in the export
-     * @param individualPositions map providing the index at which each individual must appear in the export file
-     * @param individuals1 individual IDs for group 1
-     * @param individuals2 individual IDs for group 2
-     * @param previousPhasingIds the previous phasing ids
-     * @param annotationFieldThresholds1 the annotation field thresholds for group 1
-     * @param annotationFieldThresholds2 the annotation field thresholds for group 2
-     * @param warningFileWriter the warning file writer
-     * @param synonym the synonym
-     * @return the variant context
-     * @throws Exception the exception
-     */
-    public VariantContext toVariantContext(MongoTemplate mongoTemplate, Collection<VariantRunData> runs, boolean exportVariantIDs, List<GenotypingSample> samplesToExport, Map<String, Integer> individualPositions, Collection<String> individuals1, Collection<String> individuals2, HashMap<Integer, Object> previousPhasingIds, HashMap<String, Float> annotationFieldThresholds1, HashMap<String, Float> annotationFieldThresholds2, FileWriter warningFileWriter, Comparable synonym) throws Exception
-    {
-        ArrayList<Genotype> genotypes = new ArrayList<Genotype>();
-        String sRefAllele = knownAlleles.isEmpty() ? null : knownAlleles.iterator().next();
+		return result.length() > 0 ? result.toString() : null;
+	}
+		
+	/**
+	 * To variant context.
+	 *
+	 * @param MongoTemplate the mongoTemplate
+	 * @param runs the runs
+     * @param nAssemblyId ID of the assembly to work with
+	 * @param exportVariantIDs the export variant ids
+	 * @param samplesToExport overall list of samples involved in the export
+	 * @param individualPositions map providing the index at which each individual must appear in the export file
+	 * @param individuals1 individual IDs for group 1
+	 * @param individuals2 individual IDs for group 2
+	 * @param previousPhasingIds the previous phasing ids
+	 * @param annotationFieldThresholds1 the annotation field thresholds for group 1
+	 * @param annotationFieldThresholds2 the annotation field thresholds for group 2
+	 * @param warningFileWriter the warning file writer
+	 * @param synonym the synonym
+	 * @return the variant context
+	 * @throws Exception the exception
+	 */
+	public VariantContext toVariantContext(MongoTemplate mongoTemplate, Collection<VariantRunData> runs, Integer nAssemblyId, boolean exportVariantIDs, List<GenotypingSample> samplesToExport, Map<String, Integer> individualPositions, Collection<String> individuals1, Collection<String> individuals2, HashMap<Integer, Object> previousPhasingIds, HashMap<String, Float> annotationFieldThresholds1, HashMap<String, Float> annotationFieldThresholds2, FileWriter warningFileWriter, String synonym) throws Exception
+	{
+		ArrayList<Genotype> genotypes = new ArrayList<Genotype>();
+		String sRefAllele = knownAlleles.isEmpty() ? null : knownAlleles.iterator().next();
 
         HashMap<Integer, SampleGenotype> sampleGenotypes = new HashMap<>();
         HashSet<VariantRunData> runsWhereDataWasFound = new HashSet<>();
@@ -686,6 +760,50 @@ abstract public class AbstractVariantData
                 individualAlleles.add(allele);
             }
 
+//<<<<<<< HEAD
+//		ReferencePosition referencePosition = positions.get(nAssemblyId);
+//		Long start = referencePosition == null ? null : referencePosition.getStartSite();
+//		Long stop = null;
+//		if (referencePosition != null) {
+//			if (referencePosition.getEndSite() != null)
+//				stop = referencePosition.getEndSite();
+//			else {
+//				if (sRefAllele == null) {
+//					setKnownAlleles(mongoTemplate.findById(getVariantId(), VariantData.class).getKnownAlleles());
+//					mongoTemplate.save(this);
+//					sRefAllele = knownAlleles.iterator().next();
+//				}
+//				stop = start + sRefAllele.length() - 1;
+//			}
+//		}
+//		String chr = referencePosition == null ? null : referencePosition.getSequence();
+//		VariantContextBuilder vcb = new VariantContextBuilder(source != null ? source : FIELDVAL_SOURCE_MISSING, chr != null ? chr : "", start != null ? start : 0, stop != null ? stop : 0, variantAlleles);
+//		if (exportVariantIDs)
+//			vcb.id((synonym == null ? getVariantId() : synonym).toString());
+//		vcb.genotypes(genotypes);
+//		
+//		if (run != null) {
+//			Boolean fullDecod = (Boolean) run.getAdditionalInfo().get(FIELD_FULLYDECODED);
+//			vcb.fullyDecoded(fullDecod != null && fullDecod);
+//	
+//			String filters = (String) run.getAdditionalInfo().get(FIELD_FILTERS);
+//			if (filters != null)
+//				vcb.filters(filters.split(","));
+//			else
+//				vcb.filters(VCFConstants.UNFILTERED);
+//			
+//			Number qual = (Number) run.getAdditionalInfo().get(FIELD_PHREDSCALEDQUAL);
+//			if (qual != null)
+//				vcb.log10PError(qual.doubleValue() / -10.0D);
+//			
+//			for (String attrName : run.getAdditionalInfo().keySet())
+//				if (!VariantRunData.FIELDNAME_ADDITIONAL_INFO_EFFECT_NAME.equals(attrName) && !VariantRunData.FIELDNAME_ADDITIONAL_INFO_EFFECT_GENE.equals(attrName) && !specificallyTreatedAdditionalInfoFields.contains(attrName))
+//					vcb.attribute(attrName, run.getAdditionalInfo().get(attrName));
+//		}
+//		VariantContext vc = vcb.make();
+//		return vc;
+//	}
+//=======
             GenotypeBuilder gb = new GenotypeBuilder(entry.getKey(), individualAlleles);
             if (individualAlleles.size() > 0)
             {
@@ -739,26 +857,26 @@ abstract public class AbstractVariantData
             }
             genotypes.add(gb.make());
         }
+//>>>>>>> refs/heads/master
 
         VariantRunData run = runsWhereDataWasFound.size() == 1 ? runsWhereDataWasFound.iterator().next() : null;    // if there is not exactly one run involved then we do not export meta-data
         String source = run == null ? null : (String) run.getAdditionalInfo().get(FIELD_SOURCE);
 
-        Long start = referencePosition == null ? null : referencePosition.getStartSite();
-        Long stop = null;
-        if (referencePosition != null) {
-            if (referencePosition.getEndSite() != null)
-                stop = referencePosition.getEndSite();
-            else {
-                if (sRefAllele == null) {
-                    setKnownAlleles(mongoTemplate.findById(getVariantId(), VariantData.class).getKnownAlleles());
-                    mongoTemplate.save(this);
-                    sRefAllele = knownAlleles.iterator().next();
-                }
-                stop = start + sRefAllele.length() - 1;
+        ReferencePosition referencePosition = getReferencePosition(nAssemblyId);
+        long start = referencePosition != null ? referencePosition.getStartSite() : 0;
+        long stop;
+        if (referencePosition != null && referencePosition.getEndSite() != null)
+            stop = referencePosition.getEndSite();
+        else {
+            if (sRefAllele == null) {	// there should be one, let's fix that
+                setKnownAlleles(mongoTemplate.findById(getVariantId(), VariantData.class).getKnownAlleles());
+                mongoTemplate.save(this);
+                sRefAllele = knownAlleles.iterator().next();
             }
+            stop = start + sRefAllele.length() - 1;
         }
         String chr = referencePosition == null ? null : referencePosition.getSequence();
-        VariantContextBuilder vcb = new VariantContextBuilder(source != null ? source : FIELDVAL_SOURCE_MISSING, chr != null ? chr : "", start != null ? start : 0, stop != null ? stop : 0, variantAlleles);
+        VariantContextBuilder vcb = new VariantContextBuilder(source != null ? source : FIELDVAL_SOURCE_MISSING, chr != null ? chr : "", start, stop, variantAlleles);
         if (exportVariantIDs)
             vcb.id((synonym == null ? getVariantId() : synonym).toString());
         vcb.genotypes(genotypes);

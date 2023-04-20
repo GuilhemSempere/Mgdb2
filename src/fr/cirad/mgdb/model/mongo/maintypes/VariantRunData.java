@@ -17,13 +17,10 @@
 package fr.cirad.mgdb.model.mongo.maintypes;
 
 import java.util.HashMap;
-import java.util.List;
-import java.util.NoSuchElementException;
 
 import org.bson.codecs.pojo.annotations.BsonProperty;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.annotation.TypeAlias;
-import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.mapping.Document;
 import org.springframework.data.mongodb.core.mapping.Field;
 
