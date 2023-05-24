@@ -52,13 +52,13 @@ import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.data.mongodb.core.query.Update;
 import org.springframework.stereotype.Component;
 
-import com.mongodb.BasicDBObject;
 import com.mongodb.ServerAddress;
 import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.connection.ClusterDescription;
 import com.mongodb.connection.ServerDescription;
 
+import fr.cirad.mgdb.model.mongo.maintypes.CachedCount;
 import fr.cirad.mgdb.model.mongo.maintypes.DatabaseInformation;
 import fr.cirad.mgdb.model.mongo.maintypes.VariantData;
 import fr.cirad.mgdb.model.mongo.maintypes.VariantRunData;
@@ -140,7 +140,12 @@ public class MongoTemplateManager implements ApplicationContextAware {
     /**
      * The app config.
      */
-    @Autowired private AppConfig appConfig;
+    static private AppConfig appConfig;
+    
+    @Autowired
+    public void setAppConfig(AppConfig ac) {
+    	appConfig = ac; 
+    }
     
     private static final List<String> addressesConsideredLocal = Arrays.asList("127.0.0.1", "localhost");
     
@@ -152,7 +157,7 @@ public class MongoTemplateManager implements ApplicationContextAware {
     @Override
     public void setApplicationContext(ApplicationContext ac) throws BeansException {
         initialize(ac);
-        String serverCleanupCSV = appConfig.dbServerCleanup();
+        String serverCleanupCSV = appConfig.get("dbServerCleanup");
         List<String> authorizedCleanupServers = serverCleanupCSV == null ? null : Arrays.asList(serverCleanupCSV.split(","));
 
         // we do this cleanup here because it only happens when the webapp is being (re)started
@@ -237,6 +242,8 @@ public class MongoTemplateManager implements ApplicationContextAware {
     	    InputStream input = MongoTemplateManager.class.getClassLoader().getResourceAsStream(resource + ".properties");
     	    dataSourceProperties.load(input);
     	    input.close();
+    	    
+    	    boolean fClearCachedCountsOnStartup = Boolean.TRUE.equals(Boolean.parseBoolean(appConfig.get("clearCachedCountsOnStartup")));
             
             Enumeration<Object> bundleKeys = dataSourceProperties.keys();
             while (bundleKeys.hasMoreElements()) {
@@ -263,7 +270,12 @@ public class MongoTemplateManager implements ApplicationContextAware {
                 try {
                 	if (datasourceInfo.length > 2)
                 		setTaxon(cleanKey, datasourceInfo[2]);
-                    templateMap.put(cleanKey, createMongoTemplate(datasourceInfo[0], datasourceInfo[1]));
+                	
+                    MongoTemplate mongoTemplate = createMongoTemplate(datasourceInfo[0], datasourceInfo[1]);
+                    templateMap.put(cleanKey, mongoTemplate);
+
+                    if (fClearCachedCountsOnStartup)
+                    	mongoTemplate.dropCollection(CachedCount.class);
                     if (fPublic)
                         publicDatabases.add(cleanKey);
                     if (fHidden)
@@ -297,7 +309,6 @@ public class MongoTemplateManager implements ApplicationContextAware {
 
         MongoTemplate mongoTemplate = new MongoTemplate(client, sDbName);
         ((MappingMongoConverter) mongoTemplate.getConverter()).setMapKeyDotReplacement(DOT_REPLACEMENT_STRING);
-		mongoTemplate.getDb().runCommand(new BasicDBObject("profile", 0));
 
 		MgdbDao.ensurePositionIndexes(mongoTemplate, Arrays.asList(mongoTemplate.getCollection(mongoTemplate.getCollectionName(VariantData.class)), mongoTemplate.getCollection(mongoTemplate.getCollectionName(VariantRunData.class))));	// make sure we have indexes defined as required in v2.4
         return mongoTemplate;

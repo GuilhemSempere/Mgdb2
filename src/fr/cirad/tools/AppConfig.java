@@ -102,16 +102,6 @@ public class AppConfig {
 			return Collections.enumeration(propKeys);
 		}
     };
-    
-
-    /**
-     * Db server cleanup.
-     *
-     * @return the string
-     */
-    public String dbServerCleanup() {
-        return get("dbServerCleanup");
-    }
 
     public String get(String sPropertyName) {
         return props.containsKey(sPropertyName) ? props.getString(sPropertyName) : null;
