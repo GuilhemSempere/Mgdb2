@@ -46,6 +46,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.ApplicationContext;
 import org.springframework.context.ApplicationContextAware;
 import org.springframework.core.io.ClassPathResource;
+import org.springframework.data.mongodb.ClientSessionException;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.convert.MappingMongoConverter;
 import org.springframework.data.mongodb.core.query.Query;
@@ -167,12 +168,17 @@ public class MongoTemplateManager implements ApplicationContextAware {
             if (authorizedCleanupServers == null || (serverDescriptions.size() == 1 && authorizedCleanupServers.contains(serverDescriptions.get(0).getAddress().toString()))) 
                 new Thread() {
                     public void run() {
-                        for (String collName : mongoTemplate.getCollectionNames()) {
-                            if (collName.startsWith(TEMP_COLL_PREFIX)) {
-                                mongoTemplate.dropCollection(collName);
-                                LOG.debug("Dropped collection " + collName + " in module " + sModule);
-                            }
-                        }
+                    	try {
+	                        for (String collName : mongoTemplate.getCollectionNames()) {
+	                            if (collName.startsWith(TEMP_COLL_PREFIX)) {
+	                                mongoTemplate.dropCollection(collName);
+	                                LOG.debug("Dropped collection " + collName + " in module " + sModule);
+	                            }
+	                        }
+                    	}
+                    	catch (ClientSessionException cse) {
+                    		LOG.error("Error cleaning up temporary collections in module " + sModule, cse);
+                    	}
                     }
                 }.start();
         }

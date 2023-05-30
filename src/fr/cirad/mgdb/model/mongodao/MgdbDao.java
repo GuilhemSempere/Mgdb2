@@ -278,6 +278,12 @@ public class MgdbDao {
 	                        fFoundStartSiteIndex = true;
 	                    else if (!fOnlySNPsInDB && (rpPath + ReferencePosition.FIELDNAME_END_SITE).equals(keyIndex.iterator().next()))
 	                    	fFoundEndSiteIndex = true;
+	                    
+//	                    // CLEANUP
+//	                    else if (fOnlySNPsInDB && (rpPath + ReferencePosition.FIELDNAME_END_SITE).equals(keyIndex.iterator().next())) {
+//	                    	LOG.info("CLEANUP: removing " + keyDoc + " on " + coll.getNamespace());
+//	                        coll.dropIndex(keyDoc);
+//	                    }
 	                } else if (keyIndex.size() == 2) {	// compound index
 	                    String[] compoundIndexItems = keyIndex.toArray(new String[2]);
 	                    if (compoundIndexItems[0].equals(rpPath + ReferencePosition.FIELDNAME_SEQUENCE) && compoundIndexItems[1].equals(rpPath + ReferencePosition.FIELDNAME_START_SITE)) {
@@ -290,6 +296,17 @@ public class MgdbDao {
 	                        Document collation = (Document) doc.get("collation");
 	                        fFoundCorrectEndCompoundIndex = collation != null && "en_US".equals(collation.get("locale")) && Boolean.TRUE.equals(collation.get("numericOrdering"));
 	                    }
+	                    
+//	                    // CLEANUP
+//	                    else if (fOnlySNPsInDB && compoundIndexItems[0].equals(rpPath + ReferencePosition.FIELDNAME_SEQUENCE) && compoundIndexItems[1].equals(rpPath + ReferencePosition.FIELDNAME_END_SITE)) {
+//	                    	LOG.info("CLEANUP: removing " + keyDoc + " on " + coll.getNamespace());
+//	                        coll.dropIndex(keyDoc);
+//	                    }
+//	                    // CLEANUP
+//	                    else if ((compoundIndexItems[0].equals(rpPath + ReferencePosition.FIELDNAME_START_SITE) || compoundIndexItems[0].equals(rpPath + ReferencePosition.FIELDNAME_END_SITE)) && compoundIndexItems[1].equals(rpPath + ReferencePosition.FIELDNAME_SEQUENCE)) {
+//	                    	LOG.info("CLEANUP: removing " + keyDoc + " on " + coll.getNamespace());
+//	                        coll.dropIndex(keyDoc);
+//	                    }
 	                }
 	            }
 
