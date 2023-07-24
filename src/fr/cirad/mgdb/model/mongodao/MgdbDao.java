@@ -763,7 +763,7 @@ public class MgdbDao {
         return samples;
     }
 
-    public boolean removeProjectAndRelatedRecords(String sModule, int nProjectId) throws ObjectNotFoundException {
+    public boolean removeProjectAndRelatedRecords(String sModule, int nProjectId) throws Exception {
     	AtomicBoolean fAnythingRemoved = new AtomicBoolean(false);
         MongoTemplate mongoTemplate = MongoTemplateManager.get(sModule);
         Query query = new Query();
@@ -800,13 +800,13 @@ public class MgdbDao {
             LOG.info("Removed project " + nProjectId + " from module " + sModule);
 	        fAnythingRemoved.set(true);
         }
-        
+
         long nDeletedVcfHeaders = mongoTemplate.remove(new Query(Criteria.where("_id." + DBVCFHeader.VcfHeaderId.FIELDNAME_PROJECT).is(nProjectId)), DBVCFHeader.class).getDeletedCount();
         if (nDeletedVcfHeaders > 0) {
             LOG.info("Removed " + nDeletedVcfHeaders + " vcf header(s) for project" + nProjectId + " from module " + sModule);
 	        fAnythingRemoved.set(true);
         }
-        
+
         long nDeletedVariantSetCacheItems = mongoTemplate.remove(new Query(Criteria.where("_id").regex("^" + Helper.createId(sModule, nProjectId, "") + "\\.*")), VariantSet.BRAPI_CACHE_COLL_VARIANTSET).getDeletedCount();
 		if (nDeletedVariantSetCacheItems > 0) {
 			LOG.debug("Removed " + nDeletedVariantSetCacheItems + " previously existing entries in " + VariantSet.BRAPI_CACHE_COLL_VARIANTSET + " in project " + nProjectId + " of module " + sModule);
@@ -832,7 +832,7 @@ public class MgdbDao {
         			LOG.info("Deleted BrAPI v2 VariantSet export file: " + exportFile);
 			        fAnythingRemoved.set(true);
 			    }
-        
+
         if (!fAnythingRemoved.get())
         	return false;
 
@@ -841,7 +841,7 @@ public class MgdbDao {
         return true;
     }
 
-    public boolean removeRunAndRelatedRecords(String sModule, int nProjectId, String sRun) {
+    public boolean removeRunAndRelatedRecords(String sModule, int nProjectId, String sRun) throws Exception {
     	AtomicBoolean fAnythingRemoved = new AtomicBoolean(false);
         MongoTemplate mongoTemplate = MongoTemplateManager.get(sModule);
         long nRemovedSampleCount = mongoTemplate.remove(new Query(new Criteria().andOperator(Criteria.where(GenotypingSample.FIELDNAME_PROJECT_ID).is(nProjectId), Criteria.where(GenotypingSample.FIELDNAME_RUN).is(sRun))), GenotypingSample.class).getDeletedCount();
@@ -871,7 +871,7 @@ public class MgdbDao {
 			LOG.debug("Removed previously existing entry in " + VariantSet.BRAPI_CACHE_COLL_VARIANTSET + " for run " + sRun + " in project " + nProjectId + " of module " + sModule);
 			fAnythingRemoved.set(true);
         }
-		
+
         new Thread() {
             public void run() {
                 long nRemovedVrdCount = mongoTemplate.remove(new Query(new Criteria().andOperator(Criteria.where("_id." + VariantRunDataId.FIELDNAME_PROJECT_ID).is(nProjectId), Criteria.where("_id." + VariantRunDataId.FIELDNAME_RUNNAME).is(sRun))), VariantRunData.class).getDeletedCount();
@@ -898,5 +898,22 @@ public class MgdbDao {
         mongoTemplate.getCollection(mongoTemplate.getCollectionName(CachedCount.class)).drop();
         MongoTemplateManager.updateDatabaseLastModification(sModule);
         return true;
+    }
+
+    /* WARNING; this method works, but if you invoke it, be sure it no import process is running, because it may delete records that are being imported */
+    public long removeOrphanVariantRunDataRecords(String sModule) throws Exception {
+    	MongoTemplate mongoTemplate = MongoTemplateManager.get(sModule);
+    	if (!MongoTemplateManager.isModuleAvailableForWriting(sModule)) 
+    		throw new Exception("removeOrphanVariantRunDataRecords may only be called when database is unlocked");
+    	
+    	MongoTemplateManager.lockModuleForWriting(sModule);
+
+    	ArrayList<Criteria> norList = new ArrayList<>();
+    	for (GenotypingProject project : mongoTemplate.findAll(GenotypingProject.class))
+    		norList.add(Criteria.where("_id." + VariantRunDataId.FIELDNAME_PROJECT_ID).is(project.getId()).andOperator(Criteria.where("_id." + GenotypingProject.FIELDNAME_RUNS).in(project.getRuns())));
+    	
+    	long n = mongoTemplate.remove(new Query(new Criteria().norOperator(norList)), VariantRunData.class).getDeletedCount();;
+    	MongoTemplateManager.unlockModuleForWriting(sModule);
+    	return n;
     }
 }
