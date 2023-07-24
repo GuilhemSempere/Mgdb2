@@ -20,6 +20,7 @@ import java.util.Enumeration;
 import java.util.HashMap;
 import java.util.Map;
 
+import javax.servlet.ServletContext;
 import javax.servlet.http.HttpSession;
 
 /**
@@ -28,9 +29,11 @@ import javax.servlet.http.HttpSession;
  */
 public class SessionAttributeAwareThread extends Thread {
 	private Map<String, Object> sessionAttributes = new HashMap<>();
+	private ServletContext sc;
 	
 	public SessionAttributeAwareThread(HttpSession session) {
 		storeSessionAttributes(session);
+		sc = session.getServletContext();
 	}
 	
 	public Map<String, Object> getSessionAttributes() {
@@ -43,5 +46,9 @@ public class SessionAttributeAwareThread extends Thread {
             String name = attrNames.nextElement();
             sessionAttributes.put(name, session.getAttribute(name));
         }
+	}
+	
+	public ServletContext getServletContext() {
+		return sc;
 	}
 }

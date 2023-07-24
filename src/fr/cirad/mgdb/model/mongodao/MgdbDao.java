@@ -17,6 +17,7 @@
  */
 package fr.cirad.mgdb.model.mongodao;
 
+import java.io.File;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -28,13 +29,17 @@ import java.util.Map;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.TreeSet;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
 
 import javax.ejb.ObjectNotFoundException;
+import javax.servlet.ServletContext;
 import javax.servlet.http.HttpSession;
 
+import org.apache.commons.collections.CollectionUtils;
 import org.apache.log4j.Level;
 import org.apache.log4j.Logger;
+import org.brapi.v2.model.VariantSet;
 import org.bson.Document;
 import org.springframework.beans.factory.ObjectFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -42,6 +47,7 @@ import org.springframework.data.domain.Sort;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
+import org.springframework.data.mongodb.core.query.Update;
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.stereotype.Component;
 
@@ -68,6 +74,7 @@ import fr.cirad.mgdb.model.mongo.maintypes.VariantData;
 import fr.cirad.mgdb.model.mongo.maintypes.VariantRunData;
 import fr.cirad.mgdb.model.mongo.maintypes.VariantRunData.VariantRunDataId;
 import fr.cirad.mgdb.model.mongo.subtypes.ReferencePosition;
+import fr.cirad.tools.Helper;
 import fr.cirad.tools.SessionAttributeAwareThread;
 import fr.cirad.tools.mongo.MongoTemplateManager;
 import fr.cirad.tools.security.base.AbstractTokenManager;
@@ -754,5 +761,142 @@ public class MgdbDao {
         Query q = new Query(Criteria.where(GenotypingSample.FIELDNAME_INDIVIDUAL).in(indIDs));
         List<GenotypingSample> samples = MongoTemplateManager.get(sModule).find(q, GenotypingSample.class);
         return samples;
-    } 
+    }
+
+    public boolean removeProjectAndRelatedRecords(String sModule, int nProjectId) throws ObjectNotFoundException {
+    	AtomicBoolean fAnythingRemoved = new AtomicBoolean(false);
+        MongoTemplate mongoTemplate = MongoTemplateManager.get(sModule);
+        Query query = new Query();
+        query.fields().include("_id");
+        Collection<String> individualsInThisProject = null, individualsInOtherProjects = new ArrayList<>();
+        int nProjCount = 0;
+        for (GenotypingProject proj : mongoTemplate.find(query, GenotypingProject.class)) {
+            nProjCount++;
+            if (proj.getId() == nProjectId)
+                individualsInThisProject = MgdbDao.getProjectIndividuals(sModule, proj.getId());
+            else
+                individualsInOtherProjects.addAll(MgdbDao.getProjectIndividuals(sModule, proj.getId()));
+        }
+        if (nProjCount == 1 && !individualsInThisProject.isEmpty()) {
+            mongoTemplate.getDb().drop();
+            LOG.info("Dropped database for module " + sModule + " instead of removing its only project");
+            return true;
+        }
+
+        long nRemovedSampleCount = mongoTemplate.remove(new Query(Criteria.where(GenotypingSample.FIELDNAME_PROJECT_ID).is(nProjectId)), GenotypingSample.class).getDeletedCount();
+        if (nRemovedSampleCount > 0) {
+	        LOG.info("Removed " + nRemovedSampleCount + " samples for project " + nProjectId);
+	        fAnythingRemoved.set(true);
+        }
+
+        Collection<String> individualsToRemove = CollectionUtils.disjunction(individualsInThisProject, CollectionUtils.intersection(individualsInThisProject, individualsInOtherProjects));
+        long nRemovedIndCount = mongoTemplate.remove(new Query(Criteria.where("_id").in(individualsToRemove)), Individual.class).getDeletedCount();
+        if (nRemovedIndCount > 0) {
+        	LOG.info("Removed " + nRemovedIndCount + " individuals out of " + individualsInThisProject.size());
+	        fAnythingRemoved.set(true);
+        }
+
+        if (mongoTemplate.remove(new Query(Criteria.where("_id").is(nProjectId)), GenotypingProject.class).getDeletedCount() > 0) {
+            LOG.info("Removed project " + nProjectId + " from module " + sModule);
+	        fAnythingRemoved.set(true);
+        }
+        
+        long nDeletedVcfHeaders = mongoTemplate.remove(new Query(Criteria.where("_id." + DBVCFHeader.VcfHeaderId.FIELDNAME_PROJECT).is(nProjectId)), DBVCFHeader.class).getDeletedCount();
+        if (nDeletedVcfHeaders > 0) {
+            LOG.info("Removed " + nDeletedVcfHeaders + " vcf header(s) for project" + nProjectId + " from module " + sModule);
+	        fAnythingRemoved.set(true);
+        }
+        
+        long nDeletedVariantSetCacheItems = mongoTemplate.remove(new Query(Criteria.where("_id").regex("^" + Helper.createId(sModule, nProjectId, "") + "\\.*")), VariantSet.BRAPI_CACHE_COLL_VARIANTSET).getDeletedCount();
+		if (nDeletedVariantSetCacheItems > 0) {
+			LOG.debug("Removed " + nDeletedVariantSetCacheItems + " previously existing entries in " + VariantSet.BRAPI_CACHE_COLL_VARIANTSET + " in project " + nProjectId + " of module " + sModule);
+			fAnythingRemoved.set(true);
+        }
+
+        new Thread() {
+            public void run() {
+                long nRemovedVrdCount = mongoTemplate.remove(new Query(Criteria.where("_id." + VariantRunDataId.FIELDNAME_PROJECT_ID).is(nProjectId)), VariantRunData.class).getDeletedCount();
+                if (nRemovedVrdCount > 0) {
+	                LOG.info("Removed " + nRemovedVrdCount + " VRD records for project " + nProjectId + " of module " + sModule);
+	    	        fAnythingRemoved.set(true);
+                }
+            }
+        }.start();
+        LOG.info("Launched async VRD cleanup for project " + nProjectId + " of module " + sModule);
+
+        ServletContext sc = SessionAttributeAwareThread.class.isAssignableFrom(Thread.currentThread().getClass()) ? ((SessionAttributeAwareThread) Thread.currentThread()).getServletContext() : httpSessionFactory.getObject().getServletContext();
+        File brapiV2ExportFolder = new File(sc.getRealPath(File.separator + VariantSet.TMP_OUTPUT_FOLDER));
+        if (brapiV2ExportFolder.exists() && brapiV2ExportFolder.isDirectory())
+        	for (File exportFile : brapiV2ExportFolder.listFiles(f -> f.getName().startsWith(VariantSet.brapiV2ExportFilePrefix + sModule + Helper.ID_SEPARATOR + nProjectId + Helper.ID_SEPARATOR)))
+        		if (exportFile.delete()) {
+        			LOG.info("Deleted BrAPI v2 VariantSet export file: " + exportFile);
+			        fAnythingRemoved.set(true);
+			    }
+        
+        if (!fAnythingRemoved.get())
+        	return false;
+
+        mongoTemplate.getCollection(mongoTemplate.getCollectionName(CachedCount.class)).drop();
+        MongoTemplateManager.updateDatabaseLastModification(sModule);
+        return true;
+    }
+
+    public boolean removeRunAndRelatedRecords(String sModule, int nProjectId, String sRun) {
+    	AtomicBoolean fAnythingRemoved = new AtomicBoolean(false);
+        MongoTemplate mongoTemplate = MongoTemplateManager.get(sModule);
+        long nRemovedSampleCount = mongoTemplate.remove(new Query(new Criteria().andOperator(Criteria.where(GenotypingSample.FIELDNAME_PROJECT_ID).is(nProjectId), Criteria.where(GenotypingSample.FIELDNAME_RUN).is(sRun))), GenotypingSample.class).getDeletedCount();
+        if (nRemovedSampleCount > 0) {
+            LOG.info("Removed " + nRemovedSampleCount + " samples for project " + nProjectId + " of module " + sModule);
+            fAnythingRemoved.set(true);
+        }
+
+        Collection<String> individualsWithSamples = mongoTemplate.findDistinct(new Query(), GenotypingSample.FIELDNAME_INDIVIDUAL,  GenotypingSample.class, String.class);
+        long nRemovedIndCount = mongoTemplate.remove(new Query(Criteria.where("_id").not().in(individualsWithSamples)), Individual.class).getDeletedCount();
+        if (nRemovedIndCount > 0) {
+        	LOG.info("Removed " + nRemovedIndCount + " individuals from project " + nProjectId + " of module " + sModule);
+        	fAnythingRemoved.set(true);
+        }
+
+        if (mongoTemplate.updateFirst(new Query(Criteria.where("_id").is(nProjectId)), new Update().pull(GenotypingProject.FIELDNAME_RUNS, sRun), GenotypingProject.class).getModifiedCount() > 0) {
+            LOG.info("Removed run " + sRun + " from project " + nProjectId + " of module " + sModule);
+            fAnythingRemoved.set(true);
+        }
+
+        if (mongoTemplate.remove(new Query(new Criteria().andOperator(Criteria.where("_id." + DBVCFHeader.VcfHeaderId.FIELDNAME_PROJECT).is(nProjectId), Criteria.where("_id." + DBVCFHeader.VcfHeaderId.FIELDNAME_RUN).is(sRun))), DBVCFHeader.class).getDeletedCount() > 0) {
+            LOG.info("Removed vcf header for run " + sRun + " in project " + nProjectId + " of module " + sModule);
+            fAnythingRemoved.set(true);
+        }
+
+		if (mongoTemplate.remove(new Query(Criteria.where("_id").is(Helper.createId(sModule, nProjectId, sRun))), VariantSet.BRAPI_CACHE_COLL_VARIANTSET).getDeletedCount() > 0) {
+			LOG.debug("Removed previously existing entry in " + VariantSet.BRAPI_CACHE_COLL_VARIANTSET + " for run " + sRun + " in project " + nProjectId + " of module " + sModule);
+			fAnythingRemoved.set(true);
+        }
+		
+        new Thread() {
+            public void run() {
+                long nRemovedVrdCount = mongoTemplate.remove(new Query(new Criteria().andOperator(Criteria.where("_id." + VariantRunDataId.FIELDNAME_PROJECT_ID).is(nProjectId), Criteria.where("_id." + VariantRunDataId.FIELDNAME_RUNNAME).is(sRun))), VariantRunData.class).getDeletedCount();
+                if (nRemovedVrdCount > 0) {
+	                LOG.info("Removed " + nRemovedVrdCount + " VRD records for project " + nProjectId + " of module " + sModule);
+	                fAnythingRemoved.set(true);
+	            }
+            }
+        }.start();
+        LOG.info("Launched async VRD cleanup for run " + sRun + " in project " + nProjectId + " of module " + sModule);
+
+        ServletContext sc = SessionAttributeAwareThread.class.isAssignableFrom(Thread.currentThread().getClass()) ? ((SessionAttributeAwareThread) Thread.currentThread()).getServletContext() : httpSessionFactory.getObject().getServletContext();
+        File brapiV2ExportFolder = new File(sc.getRealPath(File.separator + VariantSet.TMP_OUTPUT_FOLDER));
+        if (brapiV2ExportFolder.exists() && brapiV2ExportFolder.isDirectory())
+        	for (File exportFile : brapiV2ExportFolder.listFiles(f -> f.getName().startsWith(VariantSet.brapiV2ExportFilePrefix + sModule + Helper.ID_SEPARATOR + nProjectId + Helper.ID_SEPARATOR)))
+        		if (exportFile.delete()) {
+        			LOG.info("Deleted BrAPI v2 VariantSet export file: " + exportFile);
+        			fAnythingRemoved.set(true);
+        		}
+
+        if (!fAnythingRemoved.get())
+        	return false;
+
+        mongoTemplate.getCollection(mongoTemplate.getCollectionName(CachedCount.class)).drop();
+        MongoTemplateManager.updateDatabaseLastModification(sModule);
+        return true;
+    }
 }
