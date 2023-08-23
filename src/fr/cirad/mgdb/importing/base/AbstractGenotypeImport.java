@@ -30,8 +30,6 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 
-import javax.ejb.ObjectNotFoundException;
-
 import org.apache.commons.lang3.StringUtils;
 import org.apache.log4j.Logger;
 import org.bson.Document;
@@ -290,7 +288,7 @@ public class AbstractGenotypeImport {
 //		System.err.println("VD: " + t1 + " / VRD: " + (System.currentTimeMillis() - b4));
     }
 
-    protected void cleanupBeforeImport(MongoTemplate mongoTemplate, String sModule, GenotypingProject project, int importMode, String sRun) throws ObjectNotFoundException {	/*FIXME: we don't need MongoTemplate param*/
+    protected void cleanupBeforeImport(MongoTemplate mongoTemplate, String sModule, GenotypingProject project, int importMode, String sRun) throws Exception {	/*FIXME: we don't need MongoTemplate param*/
         if (importMode == 2)
             mongoTemplate.getDb().drop(); // drop database before importing
         else if (project != null)
