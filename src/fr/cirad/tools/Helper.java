@@ -376,8 +376,8 @@ public class Helper {
 
     public static HashMap<Integer /*project*/, List<String /*runs*/>> getRunsByProjectInSampleCollection(Collection<GenotypingSample> samples) {
 		HashMap<Integer, List<String>> runsByProject = new HashMap<>();
-		for (String projectAndRun : samples.stream().map(sp -> sp.getProjectId() + "§" + sp.getRun()).distinct().collect(Collectors.toList())) {
-			String[] separateIDs = projectAndRun.split("§");
+		for (String projectAndRun : samples.stream().map(sp -> sp.getProjectId() + ID_SEPARATOR + sp.getRun()).distinct().collect(Collectors.toList())) {
+			String[] separateIDs = projectAndRun.split(ID_SEPARATOR);
 			int projId = Integer.parseInt(separateIDs[0]);
 			List<String> projectRuns = runsByProject.get(projId);
 			if (projectRuns == null) {
