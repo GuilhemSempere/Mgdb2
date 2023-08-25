@@ -26,6 +26,7 @@ import org.springframework.data.mongodb.core.mapping.Field;
 
 import fr.cirad.mgdb.model.mongo.subtypes.AbstractVariantData;
 import fr.cirad.mgdb.model.mongo.subtypes.SampleGenotype;
+import fr.cirad.tools.Helper;
 
 /**
  * The Class VariantRunData.
@@ -152,7 +153,7 @@ public class VariantRunData extends AbstractVariantData
 		@Override
 		public String toString()
 		{
-			return projectId + "§" + runName + "§" + variantId;
+			return projectId + Helper.ID_SEPARATOR + runName + Helper.ID_SEPARATOR + variantId;
 		}
 	}
 

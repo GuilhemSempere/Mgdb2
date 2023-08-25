@@ -8,6 +8,8 @@ import org.springframework.data.annotation.TypeAlias;
 import org.springframework.data.mongodb.core.mapping.Document;
 import org.springframework.data.mongodb.core.mapping.Field;
 
+import fr.cirad.tools.Helper;
+
 @Document(collection = "customSampleMetadata")
 @TypeAlias("SM")
 public class CustomSampleMetadata {
@@ -98,7 +100,7 @@ public class CustomSampleMetadata {
 	
 	@Override
 	public String toString() {
-		return id.getSampleId() + "§" + id.getUser();
+		return id.getSampleId() + Helper.ID_SEPARATOR + id.getUser();
 	}
 
 }
