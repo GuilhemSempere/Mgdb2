@@ -395,10 +395,10 @@ public class ExportManager
                 tempMarkerRunsToWrite.add(currentMarkerRuns);
                 orderedVariantIds.add(previousVarId);
                 currentMarkerRuns = new ArrayList<>();
+                nTotalWrittenMarkerCount++;
             }
 
             currentMarkerRuns.add(vrd);
-            nTotalWrittenMarkerCount++;
 
             if (!markerCursor.hasNext()) {
                 tempMarkerRunsToWrite.add(currentMarkerRuns);    // special case, when the end of the cursor is being reached
