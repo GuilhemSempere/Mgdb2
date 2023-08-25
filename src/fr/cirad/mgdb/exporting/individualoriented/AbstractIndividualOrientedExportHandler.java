@@ -19,14 +19,17 @@ package fr.cirad.mgdb.exporting.individualoriented;
 import java.io.BufferedOutputStream;
 import java.io.File;
 import java.io.FileOutputStream;
+import java.io.FileWriter;
+import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Modifier;
+import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
@@ -51,6 +54,7 @@ import fr.cirad.mgdb.model.mongo.maintypes.VariantData;
 import fr.cirad.mgdb.model.mongo.maintypes.VariantRunData;
 import fr.cirad.mgdb.model.mongo.subtypes.SampleGenotype;
 import fr.cirad.tools.AlphaNumericComparator;
+import fr.cirad.tools.Helper;
 import fr.cirad.tools.ProgressIndicator;
 import fr.cirad.tools.mongo.MongoTemplateManager;
 
@@ -141,7 +145,7 @@ public abstract class AbstractIndividualOrientedExportHandler implements IExport
 							return;
 
 						HashMap<String, String> genotypeStringCache = new HashMap<>();
-						LinkedHashSet<String>[] individualGenotypes = new LinkedHashSet[individualPositions.size()];
+						List<String>[] individualGenotypes = new ArrayList[individualPositions.size()];
 		                if (runsToWrite != null)
 		                	for (Object vrd : runsToWrite) {
 		                    	VariantRunData run = (VariantRunData) vrd;
@@ -162,7 +166,7 @@ public abstract class AbstractIndividualOrientedExportHandler implements IExport
 				                    }
 									
 									if (individualGenotypes[individualIndex] == null)
-										individualGenotypes[individualIndex] = new LinkedHashSet<String>();
+										individualGenotypes[individualIndex] = new ArrayList<>();
 									individualGenotypes[individualIndex].add(exportedGT);
 								}
 		                	}
@@ -263,6 +267,40 @@ public abstract class AbstractIndividualOrientedExportHandler implements IExport
 			}
 		}
 		return individualOrientedExportHandlers;
+	}
+	
+	protected String findOutMostFrequentGenotype(String line, FileWriter warningFileWriter, int nMarkerIndex, String individualId) throws IOException {
+        String mostFrequentGenotype = null;
+        if (!line.isEmpty()) {
+            List<String> genotypes = Helper.split(line, "|");
+            if (genotypes.size() == 1)
+                mostFrequentGenotype = genotypes.get(0);
+            else {
+                HashMap<Object, Integer> genotypeCounts = new HashMap<Object, Integer>();   // will help us to keep track of missing genotypes
+                int highestGenotypeCount = 0;
+
+                for (String genotype : genotypes) {
+                    if (genotype == null)
+                        continue;   /* skip missing genotypes */
+
+                    int gtCount = 1 + Helper.getCountForKey(genotypeCounts, genotype);
+                    if (gtCount > highestGenotypeCount) {
+                        highestGenotypeCount = gtCount;
+                        mostFrequentGenotype = genotype;
+                    }
+                    genotypeCounts.put(genotype, gtCount);
+                }
+
+                if (genotypeCounts.size() > 1) {
+                    List<Integer> reverseSortedGtCounts = genotypeCounts.values().stream().sorted(Comparator.reverseOrder()).collect(Collectors.toList());
+                    if (reverseSortedGtCounts.get(0) == reverseSortedGtCounts.get(1))
+                        mostFrequentGenotype = null;
+                    if (warningFileWriter != null)
+                        warningFileWriter.write("- Dissimilar genotypes found for variant n. " + nMarkerIndex + ", individual " + individualId + ". " + (mostFrequentGenotype == null ? "Exporting as missing data" : "Exporting most frequent: " + mostFrequentGenotype.replaceAll(" ", "/")) + "\n");
+                }
+            }
+        }
+        return mostFrequentGenotype;
 	}
 
 	/* (non-Javadoc)

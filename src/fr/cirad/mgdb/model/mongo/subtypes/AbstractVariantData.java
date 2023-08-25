@@ -31,6 +31,7 @@ import java.util.TreeMap;
 import java.util.TreeSet;
 import java.util.stream.Collectors;
 
+import org.apache.commons.lang3.StringUtils;
 import org.bson.codecs.pojo.annotations.BsonProperty;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.mapping.Field;
@@ -703,6 +704,7 @@ abstract public class AbstractVariantData
 
         for (Map.Entry<String, Integer> entry : individualPositions.entrySet()) {
             int nIndividualIndex = entry.getValue();
+            
             HashMap<Object, Integer> genotypeCounts = new HashMap<>(2); // will help us to keep track of missing genotypes
                 
             int highestGenotypeCount = 0;
@@ -729,11 +731,14 @@ abstract public class AbstractVariantData
                 List<Integer> reverseSortedGtCounts = genotypeCounts.values().stream().sorted(Comparator.reverseOrder()).collect(Collectors.toList());
                 if (reverseSortedGtCounts.get(0) == reverseSortedGtCounts.get(1))
                     mostFrequentGenotype = null;
-                warningFileWriter.write("- Dissimilar genotypes found for variant " + (synonym == null ? getVariantId() : synonym) + ", individual " + entry.getKey() + ". " + (mostFrequentGenotype == null ? "Exporting as missing data" : "Exporting most frequent: " + mostFrequentGenotype) + "\n");
             }
-             
-            if (mostFrequentGenotype == null)
+
+            if (mostFrequentGenotype == null) {
+                if (warningFileWriter != null && genotypeCounts.size() > 1)
+                    warningFileWriter.write("- Dissimilar genotypes found for variant " + (synonym == null ? getVariantId() : synonym) + ", individual " + entry.getKey() + ". " + "Exporting as missing data\n");
+
                 continue;    // no genotype for this individual
+            }
 
             Integer spId = individualGenotypes[nIndividualIndex].get(mostFrequentGenotype).iterator().next();    // any will do (although ideally we should make sure we export the best annotation values found)
             SampleGenotype sampleGenotype = sampleGenotypes.get(spId);
@@ -746,11 +751,14 @@ abstract public class AbstractVariantData
                 alleles = safelyGetAllelesFromGenotypeCode(gtCode, mongoTemplate);
                 genotypeStringCache.put(gtCode, alleles);
             }
+            
+            if (warningFileWriter != null && genotypeCounts.size() > 1)
+                warningFileWriter.write("- Dissimilar genotypes found for variant " + (synonym == null ? getVariantId() : synonym) + ", individual " + entry.getKey() + ". " + "Exporting most frequent: " + StringUtils.join(alleles, "/") + "\n");
 
             ArrayList<Allele> individualAlleles = new ArrayList<>(alleles.size());
             previousPhasingIds.put(spId, currentPhId == null ? getVariantId() : currentPhId);
-            if (alleles.size() == 0)
-                continue;    /* skip this individual because there is no genotype for it */
+//            if (alleles.size() == 0)
+//                continue;    /* skip this individual because there is no genotype for it */
             
             boolean fAllAllelesNoCall = !alleles.stream().filter(all -> !all.isEmpty()).findAny().isPresent();            
             for (String sAllele : alleles) {
@@ -760,50 +768,6 @@ abstract public class AbstractVariantData
                 individualAlleles.add(allele);
             }
 
-//<<<<<<< HEAD
-//		ReferencePosition referencePosition = positions.get(nAssemblyId);
-//		Long start = referencePosition == null ? null : referencePosition.getStartSite();
-//		Long stop = null;
-//		if (referencePosition != null) {
-//			if (referencePosition.getEndSite() != null)
-//				stop = referencePosition.getEndSite();
-//			else {
-//				if (sRefAllele == null) {
-//					setKnownAlleles(mongoTemplate.findById(getVariantId(), VariantData.class).getKnownAlleles());
-//					mongoTemplate.save(this);
-//					sRefAllele = knownAlleles.iterator().next();
-//				}
-//				stop = start + sRefAllele.length() - 1;
-//			}
-//		}
-//		String chr = referencePosition == null ? null : referencePosition.getSequence();
-//		VariantContextBuilder vcb = new VariantContextBuilder(source != null ? source : FIELDVAL_SOURCE_MISSING, chr != null ? chr : "", start != null ? start : 0, stop != null ? stop : 0, variantAlleles);
-//		if (exportVariantIDs)
-//			vcb.id((synonym == null ? getVariantId() : synonym).toString());
-//		vcb.genotypes(genotypes);
-//		
-//		if (run != null) {
-//			Boolean fullDecod = (Boolean) run.getAdditionalInfo().get(FIELD_FULLYDECODED);
-//			vcb.fullyDecoded(fullDecod != null && fullDecod);
-//	
-//			String filters = (String) run.getAdditionalInfo().get(FIELD_FILTERS);
-//			if (filters != null)
-//				vcb.filters(filters.split(","));
-//			else
-//				vcb.filters(VCFConstants.UNFILTERED);
-//			
-//			Number qual = (Number) run.getAdditionalInfo().get(FIELD_PHREDSCALEDQUAL);
-//			if (qual != null)
-//				vcb.log10PError(qual.doubleValue() / -10.0D);
-//			
-//			for (String attrName : run.getAdditionalInfo().keySet())
-//				if (!VariantRunData.FIELDNAME_ADDITIONAL_INFO_EFFECT_NAME.equals(attrName) && !VariantRunData.FIELDNAME_ADDITIONAL_INFO_EFFECT_GENE.equals(attrName) && !specificallyTreatedAdditionalInfoFields.contains(attrName))
-//					vcb.attribute(attrName, run.getAdditionalInfo().get(attrName));
-//		}
-//		VariantContext vc = vcb.make();
-//		return vc;
-//	}
-//=======
             GenotypeBuilder gb = new GenotypeBuilder(entry.getKey(), individualAlleles);
             if (individualAlleles.size() > 0)
             {
@@ -857,7 +821,6 @@ abstract public class AbstractVariantData
             }
             genotypes.add(gb.make());
         }
-//>>>>>>> refs/heads/master
 
         VariantRunData run = runsWhereDataWasFound.size() == 1 ? runsWhereDataWasFound.iterator().next() : null;    // if there is not exactly one run involved then we do not export meta-data
         String source = run == null ? null : (String) run.getAdditionalInfo().get(FIELD_SOURCE);

@@ -16,12 +16,15 @@
  *******************************************************************************/
 package fr.cirad.mgdb.exporting.markeroriented;
 
+import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Modifier;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
@@ -124,6 +127,26 @@ public abstract class AbstractMarkerOrientedExportHandler implements IExportHand
 		return markerOrientedExportHandlers;
 	}
 	
+	static public LinkedHashMap<Object, Integer> sortGenotypesFromMostFound(Collection<String> genotypes) throws IOException {
+        // Create a LinkedHashMap to maintain the sorted order
+        LinkedHashMap<Object, Integer> sortedMap = new LinkedHashMap<>();
+		if (genotypes != null) {
+	        Map<String, Integer> countMap = new HashMap<>();
+	        
+	        // Count occurrences of strings
+	        for (String str : genotypes)
+	            countMap.put(str, countMap.getOrDefault(str, 0) + 1);
+	        
+	        // Sort the map by values using a custom Comparator
+	        List<Map.Entry<String, Integer>> sortedEntries = new ArrayList<>(countMap.entrySet());
+	        sortedEntries.sort((e1, e2) -> e2.getValue().compareTo(e1.getValue()));
+	        
+	        for (Map.Entry<String, Integer> entry : sortedEntries)
+	            sortedMap.put(entry.getKey(), entry.getValue());
+		}
+        return sortedMap;
+	}
+
 	/* (non-Javadoc)
 	 * @see fr.cirad.mgdb.exporting.IExportHandler#getSupportedVariantTypes()
 	 */
