@@ -249,7 +249,7 @@ public class MongoTemplateManager implements ApplicationContextAware {
     	    dataSourceProperties.load(input);
     	    input.close();
     	    
-    	    boolean fClearCachedCountsOnStartup = Boolean.TRUE.equals(Boolean.parseBoolean(appConfig.get("clearCachedCountsOnStartup")));
+    	    boolean fClearCachedCountsOnStartup = appConfig != null && Boolean.TRUE.equals(Boolean.parseBoolean(appConfig.get("clearCachedCountsOnStartup")));
             
             Enumeration<Object> bundleKeys = dataSourceProperties.keys();
             while (bundleKeys.hasMoreElements()) {
