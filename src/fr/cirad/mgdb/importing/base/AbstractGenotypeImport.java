@@ -287,21 +287,9 @@ public class AbstractGenotypeImport {
         else if (project != null)
         {
 			if (importMode == 1 || (project.getRuns().size() == 1 && project.getRuns().get(0).equals(sRun)))
-//			{	// empty project data before importing
-//				DeleteResult dr = mongoTemplate.remove(new Query(Criteria.where("_id." + VcfHeaderId.FIELDNAME_PROJECT).is(project.getId())), DBVCFHeader.class);
-//				if (dr.getDeletedCount() > 0)
-//					LOG.info(dr.getDeletedCount() + " records removed from vcf_header");
-//				dr = mongoTemplate.remove(new Query(Criteria.where("_id." + VariantRunDataId.FIELDNAME_PROJECT_ID).is(project.getId())), VariantRunData.class);
-//				if (dr.getDeletedCount() > 0)
-//					LOG.info(dr.getDeletedCount() + " variantRunData records removed while cleaning up project " + project.getId() + "'s data");
-//				dr = mongoTemplate.remove(new Query(Criteria.where(GenotypingSample.FIELDNAME_PROJECT_ID).is(project.getId())), GenotypingSample.class);
-//				if (dr.getDeletedCount() > 0)
-//					LOG.info(dr.getDeletedCount() + " samples were removed while cleaning up project " + project.getId() + "'s data");
-//				mongoTemplate.remove(new Query(Criteria.where("_id").is(project.getId())), GenotypingProject.class);
-//			}
-				MgdbDao.getInstance().removeProjectAndRelatedRecords(sModule, project.getId());	// empty project data before importing
+				MgdbDao.removeProjectAndRelatedRecords(sModule, project.getId());	// empty project data before importing
 			else
-	            MgdbDao.getInstance().removeRunAndRelatedRecords(sModule, project.getId(), sRun);	// empty run data before importing
+	            MgdbDao.removeRunAndRelatedRecords(sModule, project.getId(), sRun);	// empty run data before importing
 
 			if (Helper.estimDocCount(mongoTemplate, VariantRunData.class) == 0 && m_fAllowDbDropIfNoGenotypingData && doesDatabaseSupportImportingUnknownVariants(sModule))
                 mongoTemplate.getDb().drop();	// if there is no genotyping data left and we are not working on a fixed list of variants then any other data is irrelevant

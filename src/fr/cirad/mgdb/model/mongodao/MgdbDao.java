@@ -106,7 +106,7 @@ public class MgdbDao {
     static final public String FIELD_NAME_CACHED_COUNT_VALUE = "val";
 
     @Autowired
-    protected ObjectFactory<HttpSession> httpSessionFactory;
+    static protected ObjectFactory<HttpSession> httpSessionFactory;
 
     static protected MgdbDao instance;	// a bit of a hack, allows accessing a singleton to be able to call the non-static loadIndividualsWithAllMetadata
 
@@ -117,6 +117,11 @@ public class MgdbDao {
 
     public static MgdbDao getInstance() {
         return instance;
+    }
+    
+    @Autowired
+    private void setHttpSessionFactory(ObjectFactory<HttpSession> hsf) {
+        httpSessionFactory = hsf;
     }
 
     /**
@@ -763,7 +768,7 @@ public class MgdbDao {
         return samples;
     }
 
-    public boolean removeProjectAndRelatedRecords(String sModule, int nProjectId) throws Exception {
+    public static boolean removeProjectAndRelatedRecords(String sModule, int nProjectId) throws Exception {
     	AtomicBoolean fAnythingRemoved = new AtomicBoolean(false);
         MongoTemplate mongoTemplate = MongoTemplateManager.get(sModule);
         Query query = new Query();
@@ -824,14 +829,18 @@ public class MgdbDao {
         }.start();
         LOG.info("Launched async VRD cleanup for project " + nProjectId + " of module " + sModule);
 
-        ServletContext sc = SessionAttributeAwareThread.class.isAssignableFrom(Thread.currentThread().getClass()) ? ((SessionAttributeAwareThread) Thread.currentThread()).getServletContext() : httpSessionFactory.getObject().getServletContext();
-        File brapiV2ExportFolder = new File(sc.getRealPath(File.separator + VariantSet.TMP_OUTPUT_FOLDER));
-        if (brapiV2ExportFolder.exists() && brapiV2ExportFolder.isDirectory())
-        	for (File exportFile : brapiV2ExportFolder.listFiles(f -> f.getName().startsWith(VariantSet.brapiV2ExportFilePrefix + sModule + Helper.ID_SEPARATOR + nProjectId + Helper.ID_SEPARATOR)))
-        		if (exportFile.delete()) {
-        			LOG.info("Deleted BrAPI v2 VariantSet export file: " + exportFile);
-			        fAnythingRemoved.set(true);
-			    }
+        if (httpSessionFactory == null)
+        	LOG.info("Skipped removal of BrAPI v2 VariantSet export files (apparently invoked from command line)");
+        else {
+	        ServletContext sc = SessionAttributeAwareThread.class.isAssignableFrom(Thread.currentThread().getClass()) ? ((SessionAttributeAwareThread) Thread.currentThread()).getServletContext() : httpSessionFactory.getObject().getServletContext();
+	        File brapiV2ExportFolder = new File(sc.getRealPath(File.separator + VariantSet.TMP_OUTPUT_FOLDER));
+	        if (brapiV2ExportFolder.exists() && brapiV2ExportFolder.isDirectory())
+	        	for (File exportFile : brapiV2ExportFolder.listFiles(f -> f.getName().startsWith(VariantSet.brapiV2ExportFilePrefix + sModule + Helper.ID_SEPARATOR + nProjectId + Helper.ID_SEPARATOR)))
+	        		if (exportFile.delete()) {
+	        			LOG.info("Deleted BrAPI v2 VariantSet export file: " + exportFile);
+				        fAnythingRemoved.set(true);
+				    }
+        }
 
         if (!fAnythingRemoved.get())
         	return false;
@@ -841,7 +850,7 @@ public class MgdbDao {
         return true;
     }
 
-    public boolean removeRunAndRelatedRecords(String sModule, int nProjectId, String sRun) throws Exception {
+    public static boolean removeRunAndRelatedRecords(String sModule, int nProjectId, String sRun) throws Exception {
     	AtomicBoolean fAnythingRemoved = new AtomicBoolean(false);
         MongoTemplate mongoTemplate = MongoTemplateManager.get(sModule);
         long nRemovedSampleCount = mongoTemplate.remove(new Query(new Criteria().andOperator(Criteria.where(GenotypingSample.FIELDNAME_PROJECT_ID).is(nProjectId), Criteria.where(GenotypingSample.FIELDNAME_RUN).is(sRun))), GenotypingSample.class).getDeletedCount();
@@ -883,14 +892,18 @@ public class MgdbDao {
         }.start();
         LOG.info("Launched async VRD cleanup for run " + sRun + " in project " + nProjectId + " of module " + sModule);
 
-        ServletContext sc = SessionAttributeAwareThread.class.isAssignableFrom(Thread.currentThread().getClass()) ? ((SessionAttributeAwareThread) Thread.currentThread()).getServletContext() : httpSessionFactory.getObject().getServletContext();
-        File brapiV2ExportFolder = new File(sc.getRealPath(File.separator + VariantSet.TMP_OUTPUT_FOLDER));
-        if (brapiV2ExportFolder.exists() && brapiV2ExportFolder.isDirectory())
-        	for (File exportFile : brapiV2ExportFolder.listFiles(f -> f.getName().startsWith(VariantSet.brapiV2ExportFilePrefix + sModule + Helper.ID_SEPARATOR + nProjectId + Helper.ID_SEPARATOR)))
-        		if (exportFile.delete()) {
-        			LOG.info("Deleted BrAPI v2 VariantSet export file: " + exportFile);
-        			fAnythingRemoved.set(true);
-        		}
+        if (httpSessionFactory == null)
+        	LOG.info("Skipped removal of BrAPI v2 VariantSet export file (apparently invoked from command line)");
+        else {
+	        ServletContext sc = SessionAttributeAwareThread.class.isAssignableFrom(Thread.currentThread().getClass()) ? ((SessionAttributeAwareThread) Thread.currentThread()).getServletContext() : httpSessionFactory.getObject().getServletContext();
+	        File brapiV2ExportFolder = new File(sc.getRealPath(File.separator + VariantSet.TMP_OUTPUT_FOLDER));
+	        if (brapiV2ExportFolder.exists() && brapiV2ExportFolder.isDirectory())
+	        	for (File exportFile : brapiV2ExportFolder.listFiles(f -> f.getName().startsWith(VariantSet.brapiV2ExportFilePrefix + sModule + Helper.ID_SEPARATOR + nProjectId + Helper.ID_SEPARATOR)))
+	        		if (exportFile.delete()) {
+	        			LOG.info("Deleted BrAPI v2 VariantSet export file: " + exportFile);
+	        			fAnythingRemoved.set(true);
+	        		}
+        }
 
         if (!fAnythingRemoved.get())
         	return false;
