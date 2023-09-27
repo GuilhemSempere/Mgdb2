@@ -35,6 +35,7 @@ import fr.cirad.mgdb.model.mongo.maintypes.Assembly;
 import fr.cirad.mgdb.model.mongo.maintypes.VariantData;
 import fr.cirad.mgdb.model.mongo.subtypes.ReferencePosition;
 import fr.cirad.tools.Helper;
+import fr.cirad.tools.ProgressIndicator;
 import fr.cirad.tools.mongo.AutoIncrementCounter;
 import fr.cirad.tools.mongo.MongoTemplateManager;
 
@@ -52,13 +53,19 @@ public class InitialVariantImport {
     static private final List<String> synonymColNames = Arrays.asList(VariantData.FIELDNAME_SYNONYM_TYPE_ID_ILLUMINA, VariantData.FIELDNAME_SYNONYM_TYPE_ID_NCBI, VariantData.FIELDNAME_SYNONYM_TYPE_ID_INTERNAL);
     
     static private final String ASSEMBLY_POSITION_PREFIX = "pos-";
+    
+    private ProgressIndicator progress = null;
 
     static
     {
         twoDecimalNF.setMaximumFractionDigits(2);
     }
 
-    /**
+    public InitialVariantImport(ProgressIndicator progress) {
+		this.progress = progress;
+	}
+
+	/**
      * The main method.
      *
      * @param args the arguments
@@ -96,7 +103,7 @@ public class InitialVariantImport {
 //      sc.close();
 //      fw.close();
         
-        insertVariantsAndSynonyms(args);
+        new InitialVariantImport(null).insertVariantsAndSynonyms(args);
     }
 
     /**
@@ -105,7 +112,7 @@ public class InitialVariantImport {
      * @param args the args
      * @throws Exception the exception
      */
-    public static void insertVariantsAndSynonyms(String[] args) throws Exception
+    public void insertVariantsAndSynonyms(String[] args) throws Exception
     {
         if (args.length < 2)
             throw new Exception("You must pass 2 parameters as arguments: DATASOURCE name, exhaustive variant list TSV file. This TSV file is expected to be formatted as follows: id, chr:pos, colon-separated list of containing chips, zero or more colon-separated lists of synonyms (their type being defined in the header)");
@@ -222,6 +229,8 @@ public class InitialVariantImport {
                             if (count > 0)
                             {
                                 String info = count + " lines processed"/*"(" + (System.currentTimeMillis() - before) / 1000 + ")\t"*/;
+                                if (progress != null)
+                                	progress.setCurrentStepProgress(count);
                                 LOG.debug(info);
                             }
                         }
