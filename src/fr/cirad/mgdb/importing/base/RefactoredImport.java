@@ -223,15 +223,6 @@ public abstract class RefactoredImport extends AbstractGenotypeImport {
                                     }
 
                                     VariantRunData runToSave = addDataToVariant(mongoTemplate, variant, nAssemblyId, sequence, bpPosition, orderedIndividualToPopulationMap, nonSnpVariantTypeMap, alleles, project, sRun, m_fImportUnknownVariants);
-                                    
-                                    for (Integer asmId : assemblyIDs) {
-                                        ReferencePosition rp = variant.getReferencePosition(asmId);
-                                        if (rp != null)
-                                        	project.getContigs(asmId).add(rp.getSequence());
-                                    }
-
-                                    project.getVariantTypes().add(variant.getType());					// it's a TreeSet so it will only be added if it's not already present
-                                    project.getAlleleCounts().add(variant.getKnownAlleles().size());	// it's a TreeSet so it will only be added if it's not already present
                                     if (m_maxExpectedAlleleCount != null && variant.getKnownAlleles().size() > m_maxExpectedAlleleCount)
                                         LOG.warn("Variant " + variant.getId() + " (" + providedVariantId + ") has more than " + m_maxExpectedAlleleCount + " alleles!");
 
@@ -240,6 +231,15 @@ public abstract class RefactoredImport extends AbstractGenotypeImport {
                                             unsavedVariants.add(variant);
                                         if (!unsavedRuns.contains(runToSave))
                                             unsavedRuns.add(runToSave);
+                                        
+                                        for (Integer asmId : assemblyIDs) {
+                                            ReferencePosition rp = variant.getReferencePosition(asmId);
+                                            if (rp != null)
+                                            	project.getContigs(asmId).add(rp.getSequence());
+                                        }
+                                        
+                                        project.getVariantTypes().add(variant.getType());					// it's a TreeSet so it will only be added if it's not already present
+                                        project.getAlleleCounts().add(variant.getKnownAlleles().size());	// it's a TreeSet so it will only be added if it's not already present
                                     }
                                     else {
                                     	ReferencePosition rp = variant.getReferencePosition(nAssemblyId);
