@@ -54,6 +54,7 @@ import fr.cirad.mgdb.model.mongo.maintypes.Individual;
 import fr.cirad.mgdb.model.mongo.maintypes.VariantData;
 import fr.cirad.mgdb.model.mongo.maintypes.VariantRunData;
 import fr.cirad.mgdb.model.mongo.subtypes.ReferencePosition;
+import fr.cirad.mgdb.model.mongo.subtypes.Run;
 import fr.cirad.mgdb.model.mongo.subtypes.SampleGenotype;
 import fr.cirad.mgdb.model.mongo.subtypes.VariantRunDataId;
 import fr.cirad.mgdb.model.mongodao.MgdbDao;
@@ -383,6 +384,9 @@ public class HapMapImport extends AbstractGenotypeImport {
                                     }
                                     else
                                         totalProcessedVariantCount.getAndIncrement();
+                                    
+                                    //update variant runs
+                                    variant.getRuns().add(new Run(finalProject.getId(), sRun));
 
                                     AtomicInteger allIdx = new AtomicInteger(0);
                                     Map<String, Integer> alleleIndexMap = variant.getKnownAlleles().stream().collect(Collectors.toMap(Function.identity(), t -> allIdx.getAndIncrement()));  // should be more efficient not to call indexOf too often...

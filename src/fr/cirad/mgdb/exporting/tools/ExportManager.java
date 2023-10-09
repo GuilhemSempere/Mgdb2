@@ -61,6 +61,8 @@ import fr.cirad.tools.AlphaNumericComparator;
 import fr.cirad.tools.Helper;
 import fr.cirad.tools.ProgressIndicator;
 import fr.cirad.tools.mongo.MongoTemplateManager;
+import java.util.Map;
+import org.springframework.data.mongodb.core.aggregation.Aggregation;
 
 /**
  * The class ExportManager.
@@ -173,7 +175,7 @@ public class ExportManager
                 Entry<String, Object> firstMatchEntry = varQuery.entrySet().iterator().next();
                 List<Document> matchAndList = "$and".equals(firstMatchEntry.getKey()) ? (List<Document>) firstMatchEntry.getValue() : Arrays.asList(varQuery);
                 matchAndList.addAll(projectFilterList);
-            }
+        }
             matchStage = new BasicDBObject("$match", varQuery);
         }
 
@@ -347,7 +349,7 @@ public class ExportManager
         
         List<BasicDBObject> pipeline = new ArrayList<>();
         if (matchStage != null) {
-            Document matchContents = (Document) matchStage.get("$match");
+            Document matchContents = (Document) new Document((Map<String, ?>) matchStage.toMap().get("$match"));
             BasicDBList filters = matchContents.containsKey("$and") ? (BasicDBList) matchContents.get("$and") : new BasicDBList() {{ add(new BasicDBObject(matchContents)); }};
             Helper.convertIdFiltersToRunFormat(Arrays.asList(filters));
             pipeline.add(matchStage);
@@ -389,7 +391,7 @@ public class ExportManager
             }
 
             VariantRunData vrd = (VariantRunData) markerCursor.next();
-            varId = vrd.getId().getVariantId();
+            varId = vrd.getVariantId();
 
             if (previousVarId != null && !varId.equals(previousVarId)) {	// switching to the next variant
                 tempMarkerRunsToWrite.add(currentMarkerRuns);

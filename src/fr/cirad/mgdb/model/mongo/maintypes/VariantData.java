@@ -30,6 +30,7 @@ import fr.cirad.mgdb.model.mongo.subtypes.AbstractVariantData;
 import fr.cirad.mgdb.model.mongo.subtypes.Run;
 import java.util.HashSet;
 import java.util.Set;
+import org.springframework.data.mongodb.core.index.Indexed;
 //import fr.cirad.mgdb.model.mongo.subtypes.ReferencePosition;
 
 /**

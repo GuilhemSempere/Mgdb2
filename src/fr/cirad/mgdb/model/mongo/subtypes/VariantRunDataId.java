@@ -63,6 +63,11 @@ public class VariantRunDataId  extends Run {
         return variantId;
     }
 
+    public void setVariantId(String variantId) {
+        this.variantId = variantId;
+    }   
+    
+
     @Override
     public boolean equals(Object o) // thanks to this overriding, HashSet.contains will find such objects based on their ID
     {
