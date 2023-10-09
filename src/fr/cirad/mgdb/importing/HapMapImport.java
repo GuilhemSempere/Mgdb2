@@ -264,9 +264,6 @@ public class HapMapImport extends AbstractGenotypeImport {
 			Assembly assembly = createAssemblyIfNeeded(mongoTemplate, assemblyName);
 			HashMap<String, String> existingVariantIDs = buildSynonymToIdMapForExistingVariants(mongoTemplate, true, assembly == null ? null : assembly.getId());
 
-			if (!project.getVariantTypes().contains(Type.SNP.toString()))
-				project.getVariantTypes().add(Type.SNP.toString());
-
 			String generatedIdBaseString = Long.toHexString(System.currentTimeMillis());
 			AtomicInteger nNumberOfVariantsToSaveAtOnce = new AtomicInteger(1), totalProcessedVariantCount = new AtomicInteger(0);
 			final ArrayList<String> sampleIds = new ArrayList<>();

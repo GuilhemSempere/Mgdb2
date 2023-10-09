@@ -26,6 +26,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.NoSuchElementException;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.TreeSet;
@@ -152,7 +153,7 @@ public class MgdbDao {
         
         MongoCollection<Document> variantColl = mongoTemplate.getCollection(mongoTemplate.getCollectionName(VariantData.class));
         if (!variantColl.find(new BasicDBObject()).projection(new BasicDBObject("_id", 1)).limit(1).cursor().hasNext())
-        	throw new Exception("No variants found in database!");
+        	throw new NoSuchElementException("No variants found in database!");
         	
         MongoCollection<Document> taggedVarColl = mongoTemplate.getCollection(MgdbDao.COLLECTION_NAME_TAGGED_VARIANT_IDS);
 

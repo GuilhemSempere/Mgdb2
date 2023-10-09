@@ -739,8 +739,6 @@ public class BrapiImport extends STDVariantImport {
 				throw new Exception("No variation data could be imported. Please check the logs.");
 
 			// save project data
-//            if (!project.getVariantTypes().contains(Type.SNP.toString()))
-//                project.getVariantTypes().add(Type.SNP.toString());
             for (Integer anAssemblyId : affectedSequencesByAssembly.keySet()) {
             	TreeSet<String> affectedSequencesForssembly = affectedSequencesByAssembly.get(anAssemblyId);
             	if (affectedSequencesForssembly != null)
