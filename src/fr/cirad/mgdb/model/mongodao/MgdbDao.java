@@ -84,6 +84,13 @@ import htsjdk.variant.vcf.VCFConstants;
 import htsjdk.variant.vcf.VCFFormatHeaderLine;
 import htsjdk.variant.vcf.VCFHeaderLineCount;
 import htsjdk.variant.vcf.VCFHeaderLineType;
+import org.springframework.data.mongodb.core.aggregation.Aggregation;
+import org.springframework.data.mongodb.core.aggregation.AggregationResults;
+import org.springframework.data.mongodb.core.aggregation.Fields;
+import org.springframework.data.mongodb.core.aggregation.GroupOperation;
+import org.springframework.data.mongodb.core.aggregation.MergeOperation;
+import org.springframework.data.mongodb.core.aggregation.OutOperation;
+import org.springframework.data.mongodb.core.aggregation.ProjectionOperation;
 
 /**
  * The Class MgdbDao.
@@ -929,5 +936,43 @@ public class MgdbDao {
     	long n = mongoTemplate.remove(new Query(new Criteria().norOperator(norList)), VariantRunData.class).getDeletedCount();;
     	MongoTemplateManager.unlockModuleForWriting(sModule);
     	return n;
+    }
+    
+    public static void migrateVariantCollectionWithRuns(MongoTemplate mongoTemplate) {
+        String copyCollectionName = "variants_without_runs";
+        VariantData lastVariant = mongoTemplate.findOne(new Query().with(Sort.by(Arrays.asList(new Sort.Order(Sort.Direction.DESC, "natural")))), VariantData.class);
+        String info = "Migrating variant collection in db " + mongoTemplate.getDb().getName();
+        if (lastVariant == null) { // empty collection, nothing to migrate
+            LOG.info(info + ": empty variant collection, nothing to migrate");
+        } else {
+            if (lastVariant.getRuns() != null && !lastVariant.getRuns().isEmpty()) { //no need to migrate
+                LOG.info(info + ": already been migrated");
+            } else {
+                MongoCollection coll = mongoTemplate.getCollection(copyCollectionName);
+                if (coll != null) { //copy initial variant collection                    
+                    OutOperation outOperation = new OutOperation(copyCollectionName);
+                    AggregationResults<VariantData> results = mongoTemplate.aggregate(Aggregation.newAggregation(outOperation), mongoTemplate.getCollectionName(VariantData.class), VariantData.class);
+                    LOG.info(info + ": Copy variant collection - " + results.getMappedResults().size() + " documents copied into variants_without_runs collection" );
+                }
+                
+                //select only _id and runs in VariantRunData and merge into Variants
+                ProjectionOperation project = Aggregation.project("_id");
+                GroupOperation group = Aggregation.group("_id.vi")
+                            .addToSet(new Document()
+                                        .append(VariantRunDataId.FIELDNAME_PROJECT_ID, "$_id." + VariantRunDataId.FIELDNAME_PROJECT_ID)
+                                        .append(VariantRunDataId.FIELDNAME_RUNNAME, "$_id." + VariantRunDataId.FIELDNAME_RUNNAME)
+                            ).as(VariantData.FIELDNAME_RUNS);
+                MergeOperation merge = Aggregation.merge()
+                        .intoCollection(mongoTemplate.getCollectionName(VariantData.class)).on("_id")
+                        .whenMatched(MergeOperation.WhenDocumentsMatch.mergeDocuments())
+                        .whenNotMatched(MergeOperation.WhenDocumentsDontMatch.discardDocument())
+                        .build();
+                
+                Aggregation aggregation = Aggregation.newAggregation(project, group, merge);
+                AggregationResults<VariantData> results = mongoTemplate.aggregate(aggregation, VariantRunData.class, VariantData.class);
+                LOG.info(info + ": " + results.getMappedResults().size() + " documents updated");
+                
+            }
+        }
     }
 }
