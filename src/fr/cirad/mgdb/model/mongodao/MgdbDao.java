@@ -85,6 +85,7 @@ import htsjdk.variant.vcf.VCFFormatHeaderLine;
 import htsjdk.variant.vcf.VCFHeaderLineCount;
 import htsjdk.variant.vcf.VCFHeaderLineType;
 import org.springframework.data.mongodb.core.aggregation.Aggregation;
+import org.springframework.data.mongodb.core.aggregation.AggregationOptions;
 import org.springframework.data.mongodb.core.aggregation.AggregationResults;
 import org.springframework.data.mongodb.core.aggregation.Fields;
 import org.springframework.data.mongodb.core.aggregation.GroupOperation;
@@ -938,41 +939,65 @@ public class MgdbDao {
     	return n;
     }
     
-    public static void migrateVariantCollectionWithRuns(MongoTemplate mongoTemplate) {
+    public static void addRunsToVariantCollectionIfNecessary(MongoTemplate mongoTemplate) throws Exception {
         String copyCollectionName = "variants_without_runs";
-        VariantData lastVariant = mongoTemplate.findOne(new Query().with(Sort.by(Arrays.asList(new Sort.Order(Sort.Direction.DESC, "natural")))), VariantData.class);
-        String info = "Migrating variant collection in db " + mongoTemplate.getDb().getName();
-        if (lastVariant == null) { // empty collection, nothing to migrate
-            LOG.info(info + ": empty variant collection, nothing to migrate");
-        } else {
-            if (lastVariant.getRuns() != null && !lastVariant.getRuns().isEmpty()) { //no need to migrate
-                LOG.info(info + ": already been migrated");
-            } else {
-                MongoCollection coll = mongoTemplate.getCollection(copyCollectionName);
-                if (coll != null) { //copy initial variant collection                    
-                    OutOperation outOperation = new OutOperation(copyCollectionName);
-                    AggregationResults<VariantData> results = mongoTemplate.aggregate(Aggregation.newAggregation(outOperation), mongoTemplate.getCollectionName(VariantData.class), VariantData.class);
-                    LOG.info(info + ": Copy variant collection - " + results.getMappedResults().size() + " documents copied into variants_without_runs collection" );
-                }
-                
-                //select only _id and runs in VariantRunData and merge into Variants
-                ProjectionOperation project = Aggregation.project("_id");
-                GroupOperation group = Aggregation.group("_id.vi")
-                            .addToSet(new Document()
-                                        .append(VariantRunDataId.FIELDNAME_PROJECT_ID, "$_id." + VariantRunDataId.FIELDNAME_PROJECT_ID)
-                                        .append(VariantRunDataId.FIELDNAME_RUNNAME, "$_id." + VariantRunDataId.FIELDNAME_RUNNAME)
-                            ).as(VariantData.FIELDNAME_RUNS);
-                MergeOperation merge = Aggregation.merge()
-                        .intoCollection(mongoTemplate.getCollectionName(VariantData.class)).on("_id")
-                        .whenMatched(MergeOperation.WhenDocumentsMatch.mergeDocuments())
-                        .whenNotMatched(MergeOperation.WhenDocumentsDontMatch.discardDocument())
-                        .build();
-                
-                Aggregation aggregation = Aggregation.newAggregation(project, group, merge);
-                AggregationResults<VariantData> results = mongoTemplate.aggregate(aggregation, VariantRunData.class, VariantData.class);
-                LOG.info(info + ": " + results.getMappedResults().size() + " documents updated");
-                
-            }
+        String info = "Ensuring presence of run info in variants collection for db " + mongoTemplate.getDb().getName();
+        
+        List<Document> runsInVariantColl = mongoTemplate.findDistinct(new Query(), VariantData.FIELDNAME_RUNS, VariantData.class, Document.class);
+        AggregationResults<Document> runsInDB = mongoTemplate.aggregate(Aggregation.newAggregation(Aggregation.unwind("$" + GenotypingProject.FIELDNAME_RUNS), Aggregation.group(Fields.fields().and(VariantRunDataId.FIELDNAME_PROJECT_ID, "$_id").and(GenotypingProject.FIELDNAME_RUNS, "$" + GenotypingProject.FIELDNAME_RUNS))).withOptions(AggregationOptions.builder().allowDiskUse(true).build()),  GenotypingProject.class, Document.class);
+        if (runsInVariantColl.size() == runsInDB.getMappedResults().size()) {
+	        LOG.debug(info + ": variants collection already up to date"); // no need to migrate
+	        return;
         }
+
+//        Query lastVrdQuery = new Query().with(Sort.by(Arrays.asList(new Sort.Order(Sort.Direction.DESC, "natural"))));
+//        lastVrdQuery.fields().include("_id");
+//        VariantRunData lastVRD = mongoTemplate.findOne(lastVrdQuery, VariantRunData.class);
+//        if (lastVRD == null) {
+//            LOG.debug(info + ": empty variantRunData collection, nothing to migrate"); // empty collection, nothing to migrate
+//            return;
+//        }        
+//        VariantData lastVariant = mongoTemplate.findById(lastVRD.getVariantId(), VariantData.class);
+//        if (lastVariant == null)
+//        	throw new Exception("Unable to find VariantData record with ID " + lastVRD.getVariantId());
+//        if (lastVariant.getRuns() != null && !lastVariant.getRuns().isEmpty()) {
+//            LOG.debug(info + ": variants collection already up to date"); // no need to migrate
+//            return;
+//        }
+        
+        long before = System.currentTimeMillis();
+        
+        
+        AggregationResults<VariantData> duplicationresults = mongoTemplate.aggregate(Aggregation.newAggregation(new OutOperation(copyCollectionName)), mongoTemplate.getCollectionName(VariantData.class), VariantData.class);
+        LOG.info(info + " - Backing-up variant collection... " + duplicationresults.getMappedResults().size() + " documents copied into " + copyCollectionName + " collection");
+        
+        MongoTemplateManager.updateDatabaseLastModification(mongoTemplate);
+        
+        
+        // select only _id and runs in VariantRunData and merge into variants
+////        ProjectionOperation project = Aggregation.project("_id");
+//        GroupOperation group = Aggregation.group("_id." + VariantRunDataId.FIELDNAME_VARIANT_ID)
+//                    .addToSet(new Document()
+//                                .append(VariantRunDataId.FIELDNAME_PROJECT_ID, "$_id." + VariantRunDataId.FIELDNAME_PROJECT_ID)
+//                                .append(VariantRunDataId.FIELDNAME_RUNNAME, "$_id." + VariantRunDataId.FIELDNAME_RUNNAME)
+//                    ).as(VariantData.FIELDNAME_RUNS);
+//        MergeOperation merge = Aggregation.merge()
+//                .intoCollection(mongoTemplate.getCollectionName(VariantData.class)).on("_id")
+//                .whenMatched(MergeOperation.WhenDocumentsMatch.mergeDocuments())
+//                .whenNotMatched(MergeOperation.WhenDocumentsDontMatch.discardDocument())
+//                .build();
+//        
+//        Aggregation aggregation = Aggregation.newAggregation(/*project, */group, merge).withOptions(AggregationOptions.builder().allowDiskUse(true).build());
+//        /*AggregationResults<VariantData> results = */mongoTemplate.aggregate(aggregation, VariantRunData.class, VariantData.class);
+        
+        
+        List<BasicDBObject> pipeline = Arrays.asList(
+        			new BasicDBObject("$group", new BasicDBObject("_id", "$_id." + VariantRunDataId.FIELDNAME_VARIANT_ID).append(VariantData.FIELDNAME_RUNS, new BasicDBObject("$addToSet", new BasicDBObject(VariantRunDataId.FIELDNAME_PROJECT_ID, "$_id." + VariantRunDataId.FIELDNAME_PROJECT_ID).append(VariantRunDataId.FIELDNAME_RUNNAME, "$_id." + VariantRunDataId.FIELDNAME_RUNNAME)))),
+        			new BasicDBObject("$merge", new BasicDBObject("into", mongoTemplate.getCollectionName(VariantData.class)).append("whenMatched", "merge").append("whenNotMatched", "discard"))
+        		);
+        mongoTemplate.getCollection(mongoTemplate.getCollectionName(VariantRunData.class)).aggregate(pipeline).allowDiskUse(true).toCollection();;
+        
+        
+        LOG.info(info + " - VariantData documents updated with run info extracted from variantRunData. Update done in " + (System.currentTimeMillis() - before) / 1000 + "s");
     }
 }

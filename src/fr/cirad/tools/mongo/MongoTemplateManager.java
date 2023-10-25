@@ -37,6 +37,8 @@ import java.util.Properties;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.TreeSet;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.stream.Collectors;
 
 import org.apache.log4j.Logger;
@@ -295,9 +297,24 @@ public class MongoTemplateManager implements ApplicationContextAware {
                     LOG.warn("Unable to create MongoTemplate for module " + cleanKey, e);
                 }
             }
+
+    	    ExecutorService executor = Executors.newFixedThreadPool(2);
+            for (String db : templateMap.keySet())
+            	executor.submit(new Thread() {
+        			public void run() {
+	                    try {
+							MgdbDao.addRunsToVariantCollectionIfNecessary(templateMap.get(db));
+						} catch (Exception e) {
+							LOG.error("Error while adding run info to variants colleciton for db " + db, e);
+						}
+	        		}
+            	});
+
+            executor.shutdown();
         } catch (IOException ioe) {
             LOG.error("Unable to load " + resource + ".properties, you may need to adjust your classpath", ioe);
         }
+        System.err.println("done");
     }
 
     /**
@@ -316,9 +333,7 @@ public class MongoTemplateManager implements ApplicationContextAware {
         MongoTemplate mongoTemplate = new MongoTemplate(client, sDbName);
         ((MappingMongoConverter) mongoTemplate.getConverter()).setMapKeyDotReplacement(DOT_REPLACEMENT_STRING);
 
-	MgdbDao.ensurePositionIndexes(mongoTemplate, Arrays.asList(mongoTemplate.getCollection(mongoTemplate.getCollectionName(VariantData.class)), mongoTemplate.getCollection(mongoTemplate.getCollectionName(VariantRunData.class))));	// make sure we have indexes defined as required in v2.4
-        
-        MgdbDao.migrateVariantCollectionWithRuns(mongoTemplate);
+        MgdbDao.ensurePositionIndexes(mongoTemplate, Arrays.asList(mongoTemplate.getCollection(mongoTemplate.getCollectionName(VariantData.class)), mongoTemplate.getCollection(mongoTemplate.getCollectionName(VariantRunData.class))));	// make sure we have indexes defined as required in v2.4
         
         return mongoTemplate;
     }
@@ -732,17 +747,24 @@ public class MongoTemplateManager implements ApplicationContextAware {
 		}
 	}
 	
+    public static void updateDatabaseLastModification(MongoTemplate template, Date lastModification, boolean restored) {    	
+    	Update update = new Update();
+    	update.set(DatabaseInformation.FIELDNAME_LAST_MODIFICATION, lastModification);
+    	update.set(DatabaseInformation.FIELDNAME_RESTORE_DATE, restored ? new Date() : null);
+    	template.upsert(new Query(), update, "dbInfo");
+    }
+    
+    public static void updateDatabaseLastModification(MongoTemplate template) {
+    	MongoTemplateManager.updateDatabaseLastModification(template, new Date(), false);
+    }
+
     public static void updateDatabaseLastModification(String sModule) {
     	MongoTemplateManager.updateDatabaseLastModification(sModule, new Date(), false);
     }
     
     public static void updateDatabaseLastModification(String sModule, Date lastModification, boolean restored) {
+    	MongoTemplateManager.updateDatabaseLastModification(MongoTemplateManager.get(sModule), lastModification, restored);
     	MongoTemplate template = MongoTemplateManager.get(sModule);
-    	
-    	Update update = new Update();
-    	update.set(DatabaseInformation.FIELDNAME_LAST_MODIFICATION, lastModification);
-    	update.set(DatabaseInformation.FIELDNAME_RESTORE_DATE, restored ? new Date() : null);
-    	template.upsert(new Query(), update, "dbInfo");
     }
     
     public static DatabaseInformation getDatabaseInformation(String sModule) {
