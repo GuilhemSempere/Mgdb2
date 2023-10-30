@@ -54,6 +54,7 @@ import org.springframework.stereotype.Component;
 
 import com.mongodb.BasicDBObject;
 import com.mongodb.MongoCommandException;
+import com.mongodb.MongoNamespace;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoCursor;
 import com.mongodb.client.model.IndexOptions;
@@ -940,7 +941,7 @@ public class MgdbDao {
     }
     
     public static void addRunsToVariantCollectionIfNecessary(MongoTemplate mongoTemplate) throws Exception {
-        String copyCollectionName = "variants_without_runs";
+        String variantDataCollName = mongoTemplate.getCollectionName(VariantData.class), copyCollectionName = variantDataCollName + "_copy";
         String info = "Ensuring presence of run info in variants collection for db " + mongoTemplate.getDb().getName();
         
         List<Document> runsInVariantColl = mongoTemplate.findDistinct(new Query(), VariantData.FIELDNAME_RUNS, VariantData.class, Document.class);
@@ -967,14 +968,15 @@ public class MgdbDao {
         
         long before = System.currentTimeMillis();
         
-        
         AggregationResults<VariantData> duplicationresults = mongoTemplate.aggregate(Aggregation.newAggregation(new OutOperation(copyCollectionName)), mongoTemplate.getCollectionName(VariantData.class), VariantData.class);
         LOG.info(info + " - Backing-up variant collection... " + duplicationresults.getMappedResults().size() + " documents copied into " + copyCollectionName + " collection");
         
         MongoTemplateManager.updateDatabaseLastModification(mongoTemplate);
         
         
-        // select only _id and runs in VariantRunData and merge into variants
+        // select only _id and runs in VariantRunData and merge into variants (not using Spring here because it creates overhead, maybe it tries to send back AggregationResults but we don't want any because we're only merging into a collection)
+        
+
 ////        ProjectionOperation project = Aggregation.project("_id");
 //        GroupOperation group = Aggregation.group("_id." + VariantRunDataId.FIELDNAME_VARIANT_ID)
 //                    .addToSet(new Document()
@@ -982,7 +984,7 @@ public class MgdbDao {
 //                                .append(VariantRunDataId.FIELDNAME_RUNNAME, "$_id." + VariantRunDataId.FIELDNAME_RUNNAME)
 //                    ).as(VariantData.FIELDNAME_RUNS);
 //        MergeOperation merge = Aggregation.merge()
-//                .intoCollection(mongoTemplate.getCollectionName(VariantData.class)).on("_id")
+//                .intoCollection(copyCollectionName).on("_id")
 //                .whenMatched(MergeOperation.WhenDocumentsMatch.mergeDocuments())
 //                .whenNotMatched(MergeOperation.WhenDocumentsDontMatch.discardDocument())
 //                .build();
@@ -993,11 +995,26 @@ public class MgdbDao {
         
         List<BasicDBObject> pipeline = Arrays.asList(
         			new BasicDBObject("$group", new BasicDBObject("_id", "$_id." + VariantRunDataId.FIELDNAME_VARIANT_ID).append(VariantData.FIELDNAME_RUNS, new BasicDBObject("$addToSet", new BasicDBObject(VariantRunDataId.FIELDNAME_PROJECT_ID, "$_id." + VariantRunDataId.FIELDNAME_PROJECT_ID).append(VariantRunDataId.FIELDNAME_RUNNAME, "$_id." + VariantRunDataId.FIELDNAME_RUNNAME)))),
-        			new BasicDBObject("$merge", new BasicDBObject("into", mongoTemplate.getCollectionName(VariantData.class)).append("whenMatched", "merge").append("whenNotMatched", "discard"))
+        			new BasicDBObject("$merge", new BasicDBObject("into", copyCollectionName).append("whenMatched", "merge").append("whenNotMatched", "discard"))
         		);
-        mongoTemplate.getCollection(mongoTemplate.getCollectionName(VariantRunData.class)).aggregate(pipeline).allowDiskUse(true).toCollection();;
-        
+        mongoTemplate.getCollection(mongoTemplate.getCollectionName(VariantRunData.class)).aggregate(pipeline).allowDiskUse(true).toCollection();
         
         LOG.info(info + " - VariantData documents updated with run info extracted from variantRunData. Update done in " + (System.currentTimeMillis() - before) / 1000 + "s");
+        
+        MongoNamespace activeNameSpace = mongoTemplate.getCollection(variantDataCollName).getNamespace(), backupNameSpace = new MongoNamespace(activeNameSpace.getDatabaseName(), activeNameSpace.getCollectionName() + "_without_runs");
+        try {
+        	mongoTemplate.getCollection(variantDataCollName).renameCollection(backupNameSpace);
+        }
+        catch (MongoCommandException mce) {
+        	if (mce.getMessage().contains("NamespaceExists")) {
+        		mongoTemplate.getCollection(backupNameSpace.getCollectionName()).drop();
+        		mongoTemplate.getCollection(variantDataCollName).renameCollection(backupNameSpace);
+        	}
+        	else {
+        		LOG.error("Error while renaming collections at end of addRunsToVariantCollectionIfNecessary execution", mce);
+        		return;
+        	}
+        }
+        mongoTemplate.getCollection(copyCollectionName).renameCollection(activeNameSpace);
     }
 }

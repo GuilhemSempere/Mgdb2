@@ -297,24 +297,22 @@ public class MongoTemplateManager implements ApplicationContextAware {
                     LOG.warn("Unable to create MongoTemplate for module " + cleanKey, e);
                 }
             }
-
-    	    ExecutorService executor = Executors.newFixedThreadPool(2);
-            for (String db : templateMap.keySet())
-            	executor.submit(new Thread() {
-        			public void run() {
-	                    try {
-							MgdbDao.addRunsToVariantCollectionIfNecessary(templateMap.get(db));
-						} catch (Exception e) {
-							LOG.error("Error while adding run info to variants colleciton for db " + db, e);
-						}
-	        		}
-            	});
-
-            executor.shutdown();
         } catch (IOException ioe) {
             LOG.error("Unable to load " + resource + ".properties, you may need to adjust your classpath", ioe);
         }
-        System.err.println("done");
+        
+	    ExecutorService executor = Executors.newFixedThreadPool(2);
+        for (String db : templateMap.keySet())
+        	executor.submit(new Thread() {
+    			public void run() {
+                    try {
+						MgdbDao.addRunsToVariantCollectionIfNecessary(templateMap.get(db));
+					} catch (Exception e) {
+						LOG.error("Error while adding run info to variants colleciton for db " + db, e);
+					}
+        		}
+        	});
+        executor.shutdown();
     }
 
     /**
