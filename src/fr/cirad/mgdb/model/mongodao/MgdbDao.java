@@ -30,6 +30,9 @@ import java.util.NoSuchElementException;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.TreeSet;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
 
@@ -46,6 +49,10 @@ import org.springframework.beans.factory.ObjectFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.data.mongodb.core.aggregation.Aggregation;
+import org.springframework.data.mongodb.core.aggregation.AggregationOptions;
+import org.springframework.data.mongodb.core.aggregation.AggregationResults;
+import org.springframework.data.mongodb.core.aggregation.Fields;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.data.mongodb.core.query.Update;
@@ -85,14 +92,6 @@ import htsjdk.variant.vcf.VCFConstants;
 import htsjdk.variant.vcf.VCFFormatHeaderLine;
 import htsjdk.variant.vcf.VCFHeaderLineCount;
 import htsjdk.variant.vcf.VCFHeaderLineType;
-import org.springframework.data.mongodb.core.aggregation.Aggregation;
-import org.springframework.data.mongodb.core.aggregation.AggregationOptions;
-import org.springframework.data.mongodb.core.aggregation.AggregationResults;
-import org.springframework.data.mongodb.core.aggregation.Fields;
-import org.springframework.data.mongodb.core.aggregation.GroupOperation;
-import org.springframework.data.mongodb.core.aggregation.MergeOperation;
-import org.springframework.data.mongodb.core.aggregation.OutOperation;
-import org.springframework.data.mongodb.core.aggregation.ProjectionOperation;
 
 /**
  * The Class MgdbDao.
@@ -170,26 +169,7 @@ public class MgdbDao {
         Thread t = new Thread() {
             public void run() {
                 // create indexes
-                if (variantColl.aggregate(Arrays.asList( new BasicDBObject("$limit", 100000), new BasicDBObject("$match", new BasicDBObject(VariantData.FIELDNAME_SYNONYMS + "." + VariantData.FIELDNAME_SYNONYM_TYPE_ID_ILLUMINA + ".0", new BasicDBObject("$exists", true))) )).iterator().hasNext()) {
-	                LOG.debug("Creating index on field " + VariantData.FIELDNAME_SYNONYMS + "." + VariantData.FIELDNAME_SYNONYM_TYPE_ID_ILLUMINA + " of collection " + variantColl.getNamespace());
-	                variantColl.createIndex(new BasicDBObject(VariantData.FIELDNAME_SYNONYMS + "." + VariantData.FIELDNAME_SYNONYM_TYPE_ID_ILLUMINA, 1));
-                }
-                if (variantColl.aggregate(Arrays.asList( new BasicDBObject("$limit", 100000), new BasicDBObject("$match", new BasicDBObject(VariantData.FIELDNAME_SYNONYMS + "." + VariantData.FIELDNAME_SYNONYM_TYPE_ID_INTERNAL + ".0", new BasicDBObject("$exists", true))) )).iterator().hasNext()) {
-                	LOG.debug("Creating index on field " + VariantData.FIELDNAME_SYNONYMS + "." + VariantData.FIELDNAME_SYNONYM_TYPE_ID_INTERNAL + " of collection " + variantColl.getNamespace());
-                	variantColl.createIndex(new BasicDBObject(VariantData.FIELDNAME_SYNONYMS + "." + VariantData.FIELDNAME_SYNONYM_TYPE_ID_INTERNAL, 1));
-                }
-                if (variantColl.aggregate(Arrays.asList( new BasicDBObject("$limit", 100000), new BasicDBObject("$match", new BasicDBObject(VariantData.FIELDNAME_SYNONYMS + "." + VariantData.FIELDNAME_SYNONYM_TYPE_ID_NCBI + ".0", new BasicDBObject("$exists", true))) )).iterator().hasNext()) {
-	                LOG.debug("Creating index on field " + VariantData.FIELDNAME_SYNONYMS + "." + VariantData.FIELDNAME_SYNONYM_TYPE_ID_NCBI + " of collection " + variantColl.getNamespace());
-	                variantColl.createIndex(new BasicDBObject(VariantData.FIELDNAME_SYNONYMS + "." + VariantData.FIELDNAME_SYNONYM_TYPE_ID_NCBI, 1));
-                }
-                LOG.debug("Creating index on field " + VariantData.FIELDNAME_TYPE + " of collection " + variantColl.getNamespace());
-                try {
-                    variantColl.createIndex(new BasicDBObject(VariantData.FIELDNAME_TYPE, 1));
-                } catch (MongoCommandException mce) {
-                    if (!mce.getMessage().contains("already exists with a different name")) {
-                        throw mce;  // otherwise we have nothing to do because it already exists anyway
-                    }
-                }
+            	ensureVariantDataIndexes(mongoTemplate);
 
                 // tag variant IDs across database
                 mongoTemplate.dropCollection(COLLECTION_NAME_TAGGED_VARIANT_IDS);
@@ -268,6 +248,66 @@ public class MgdbDao {
         return res;
     }
 
+    /**
+     * Ensures VariantData indexes are correct
+     *
+     * @param mongoTemplate the mongoTemplate
+     */
+    public static int ensureVariantDataIndexes(MongoTemplate mongoTemplate) {
+    	int nResult = 0;
+        MongoCollection<Document> variantColl = mongoTemplate.getCollection(mongoTemplate.getCollectionName(VariantData.class));
+        
+        boolean fFoundTypeIndex = false;
+        Collection<String> missingSynonymIndexes = new java.util.HashSet<>() {{ 
+        	add(VariantData.FIELDNAME_SYNONYMS + "." + VariantData.FIELDNAME_SYNONYM_TYPE_ID_ILLUMINA);
+        	add(VariantData.FIELDNAME_SYNONYMS + "." + VariantData.FIELDNAME_SYNONYM_TYPE_ID_INTERNAL);
+        	add(VariantData.FIELDNAME_SYNONYMS + "." + VariantData.FIELDNAME_SYNONYM_TYPE_ID_NCBI);
+        }}, foundSynonymIndexes = new ArrayList<>();
+        
+        MongoCursor<Document> indexCursor = variantColl.listIndexes().cursor();
+        while (indexCursor.hasNext()) {
+            Document doc = (Document) indexCursor.next();
+            Document keyDoc = ((Document) doc.get("key"));
+            if (keyDoc.keySet().contains(VariantData.FIELDNAME_TYPE)) {
+            	fFoundTypeIndex = true;
+            	continue;
+            }
+            for (String indexType : missingSynonymIndexes)
+                if (keyDoc.keySet().contains(indexType)) {
+                	foundSynonymIndexes.add(indexType);
+                	continue;
+                }
+        }
+        missingSynonymIndexes.removeAll(foundSynonymIndexes);
+
+        if (missingSynonymIndexes.contains(VariantData.FIELDNAME_SYNONYMS + "." + VariantData.FIELDNAME_SYNONYM_TYPE_ID_ILLUMINA) && variantColl.aggregate(Arrays.asList( new BasicDBObject("$limit", 100000), new BasicDBObject("$match", new BasicDBObject(VariantData.FIELDNAME_SYNONYMS + "." + VariantData.FIELDNAME_SYNONYM_TYPE_ID_ILLUMINA + ".0", new BasicDBObject("$exists", true))) )).iterator().hasNext()) {
+            LOG.debug("Creating index on field " + VariantData.FIELDNAME_SYNONYMS + "." + VariantData.FIELDNAME_SYNONYM_TYPE_ID_ILLUMINA + " of collection " + variantColl.getNamespace());
+            variantColl.createIndex(new BasicDBObject(VariantData.FIELDNAME_SYNONYMS + "." + VariantData.FIELDNAME_SYNONYM_TYPE_ID_ILLUMINA, 1));
+            nResult++;
+        }
+        if (missingSynonymIndexes.contains(VariantData.FIELDNAME_SYNONYMS + "." + VariantData.FIELDNAME_SYNONYM_TYPE_ID_INTERNAL) && variantColl.aggregate(Arrays.asList( new BasicDBObject("$limit", 100000), new BasicDBObject("$match", new BasicDBObject(VariantData.FIELDNAME_SYNONYMS + "." + VariantData.FIELDNAME_SYNONYM_TYPE_ID_INTERNAL + ".0", new BasicDBObject("$exists", true))) )).iterator().hasNext()) {
+        	LOG.debug("Creating index on field " + VariantData.FIELDNAME_SYNONYMS + "." + VariantData.FIELDNAME_SYNONYM_TYPE_ID_INTERNAL + " of collection " + variantColl.getNamespace());
+        	variantColl.createIndex(new BasicDBObject(VariantData.FIELDNAME_SYNONYMS + "." + VariantData.FIELDNAME_SYNONYM_TYPE_ID_INTERNAL, 1));
+        	nResult++;
+        }
+        if (missingSynonymIndexes.contains(VariantData.FIELDNAME_SYNONYMS + "." + VariantData.FIELDNAME_SYNONYM_TYPE_ID_NCBI) && variantColl.aggregate(Arrays.asList( new BasicDBObject("$limit", 100000), new BasicDBObject("$match", new BasicDBObject(VariantData.FIELDNAME_SYNONYMS + "." + VariantData.FIELDNAME_SYNONYM_TYPE_ID_NCBI + ".0", new BasicDBObject("$exists", true))) )).iterator().hasNext()) {
+            LOG.debug("Creating index on field " + VariantData.FIELDNAME_SYNONYMS + "." + VariantData.FIELDNAME_SYNONYM_TYPE_ID_NCBI + " of collection " + variantColl.getNamespace());
+            variantColl.createIndex(new BasicDBObject(VariantData.FIELDNAME_SYNONYMS + "." + VariantData.FIELDNAME_SYNONYM_TYPE_ID_NCBI, 1));
+            nResult++;
+        }
+        if (!fFoundTypeIndex)
+	        try {
+	            LOG.debug("Creating index on field " + VariantData.FIELDNAME_TYPE + " of collection " + variantColl.getNamespace());
+	            variantColl.createIndex(new BasicDBObject(VariantData.FIELDNAME_TYPE, 1));
+	            nResult++;
+	        } catch (MongoCommandException mce) {
+	            if (!mce.getMessage().contains("already exists with a different name")) {
+	                throw mce;  // otherwise we have nothing to do because it already exists anyway
+	            }
+	        }
+        return nResult;
+    }
+    
     /**
      * Ensures position indexes are correct in passed collections. Supports
      * variants, variantRunData and temporary collections Removes incorrect
@@ -946,62 +986,50 @@ public class MgdbDao {
         
         List<Document> runsInVariantColl = mongoTemplate.findDistinct(new Query(), VariantData.FIELDNAME_RUNS, VariantData.class, Document.class);
         AggregationResults<Document> runsInDB = mongoTemplate.aggregate(Aggregation.newAggregation(Aggregation.unwind("$" + GenotypingProject.FIELDNAME_RUNS), Aggregation.group(Fields.fields().and(VariantRunDataId.FIELDNAME_PROJECT_ID, "$_id").and(GenotypingProject.FIELDNAME_RUNS, "$" + GenotypingProject.FIELDNAME_RUNS))).withOptions(AggregationOptions.builder().allowDiskUse(true).build()),  GenotypingProject.class, Document.class);
-        if (runsInVariantColl.size() == runsInDB.getMappedResults().size()) {
+        if (runsInVariantColl.size() >= runsInDB.getMappedResults().size()) {
 	        LOG.debug(info + ": variants collection already up to date"); // no need to migrate
 	        return;
         }
-
-//        Query lastVrdQuery = new Query().with(Sort.by(Arrays.asList(new Sort.Order(Sort.Direction.DESC, "natural"))));
-//        lastVrdQuery.fields().include("_id");
-//        VariantRunData lastVRD = mongoTemplate.findOne(lastVrdQuery, VariantRunData.class);
-//        if (lastVRD == null) {
-//            LOG.debug(info + ": empty variantRunData collection, nothing to migrate"); // empty collection, nothing to migrate
-//            return;
-//        }        
-//        VariantData lastVariant = mongoTemplate.findById(lastVRD.getVariantId(), VariantData.class);
-//        if (lastVariant == null)
-//        	throw new Exception("Unable to find VariantData record with ID " + lastVRD.getVariantId());
-//        if (lastVariant.getRuns() != null && !lastVariant.getRuns().isEmpty()) {
-//            LOG.debug(info + ": variants collection already up to date"); // no need to migrate
-//            return;
-//        }
         
         long before = System.currentTimeMillis();
         
-        AggregationResults<VariantData> duplicationresults = mongoTemplate.aggregate(Aggregation.newAggregation(new OutOperation(copyCollectionName)), mongoTemplate.getCollectionName(VariantData.class), VariantData.class);
-        LOG.info(info + " - Backing-up variant collection... " + duplicationresults.getMappedResults().size() + " documents copied into " + copyCollectionName + " collection");
-        
-        MongoTemplateManager.updateDatabaseLastModification(mongoTemplate);
-        
-        
-        // select only _id and runs in VariantRunData and merge into variants (not using Spring here because it creates overhead, maybe it tries to send back AggregationResults but we don't want any because we're only merging into a collection)
-        
+        mongoTemplate.getCollection(mongoTemplate.getCollectionName(VariantData.class)).aggregate(Arrays.asList(new BasicDBObject("$out", copyCollectionName))).allowDiskUse(true).toCollection();
+        LOG.info(info + " - Backed-up variant collection: " + Helper.estimDocCount(mongoTemplate, copyCollectionName) + " documents copied into " + copyCollectionName + " collection");
 
-////        ProjectionOperation project = Aggregation.project("_id");
-//        GroupOperation group = Aggregation.group("_id." + VariantRunDataId.FIELDNAME_VARIANT_ID)
-//                    .addToSet(new Document()
-//                                .append(VariantRunDataId.FIELDNAME_PROJECT_ID, "$_id." + VariantRunDataId.FIELDNAME_PROJECT_ID)
-//                                .append(VariantRunDataId.FIELDNAME_RUNNAME, "$_id." + VariantRunDataId.FIELDNAME_RUNNAME)
-//                    ).as(VariantData.FIELDNAME_RUNS);
-//        MergeOperation merge = Aggregation.merge()
-//                .intoCollection(copyCollectionName).on("_id")
-//                .whenMatched(MergeOperation.WhenDocumentsMatch.mergeDocuments())
-//                .whenNotMatched(MergeOperation.WhenDocumentsDontMatch.discardDocument())
-//                .build();
-//        
-//        Aggregation aggregation = Aggregation.newAggregation(/*project, */group, merge).withOptions(AggregationOptions.builder().allowDiskUse(true).build());
-//        /*AggregationResults<VariantData> results = */mongoTemplate.aggregate(aggregation, VariantRunData.class, VariantData.class);
-        
-        
-        List<BasicDBObject> pipeline = Arrays.asList(
-        			new BasicDBObject("$group", new BasicDBObject("_id", "$_id." + VariantRunDataId.FIELDNAME_VARIANT_ID).append(VariantData.FIELDNAME_RUNS, new BasicDBObject("$addToSet", new BasicDBObject(VariantRunDataId.FIELDNAME_PROJECT_ID, "$_id." + VariantRunDataId.FIELDNAME_PROJECT_ID).append(VariantRunDataId.FIELDNAME_RUNNAME, "$_id." + VariantRunDataId.FIELDNAME_RUNNAME)))),
-        			new BasicDBObject("$merge", new BasicDBObject("into", copyCollectionName).append("whenMatched", "merge").append("whenNotMatched", "discard"))
-        		);
-        mongoTemplate.getCollection(mongoTemplate.getCollectionName(VariantRunData.class)).aggregate(pipeline).allowDiskUse(true).toCollection();
-        
+	    ExecutorService executor = Executors.newFixedThreadPool(5);
+        MongoNamespace activeNameSpace = mongoTemplate.getCollection(variantDataCollName).getNamespace(), backupNameSpace = new MongoNamespace(activeNameSpace.getDatabaseName(), activeNameSpace.getCollectionName() + "_without_runs");
+        final List<Map> taggedVariantList = mongoTemplate.findAll(Map.class, MgdbDao.COLLECTION_NAME_TAGGED_VARIANT_IDS);
+        for (int i=0; i<=taggedVariantList.size(); i++) {
+        	final int finalIndex = i;
+        	executor.submit(new Thread() {
+    			public void run() {
+    	        	BasicDBObject chunkMatchFilters = new BasicDBObject();
+    		        String leftBound = null, rightBound = null;
+    		        if (finalIndex > 0) {
+    		            leftBound = (String) taggedVariantList.get(finalIndex - 1).get("_id");
+    		            chunkMatchFilters.append("$gt", leftBound);
+    		        }
+    		        
+    		        if (finalIndex < taggedVariantList.size()) {
+    		            rightBound = (String) taggedVariantList.get(finalIndex).get("_id");
+    		            chunkMatchFilters.append("$lte", rightBound);
+    		        }
+    		        List<BasicDBObject> pipeline = Arrays.asList(
+    		        		new BasicDBObject("$match", new BasicDBObject("_id." + VariantRunDataId.FIELDNAME_VARIANT_ID, chunkMatchFilters)),
+    	        			new BasicDBObject("$group", new BasicDBObject("_id", "$_id." + VariantRunDataId.FIELDNAME_VARIANT_ID).append(VariantData.FIELDNAME_RUNS, new BasicDBObject("$addToSet", new BasicDBObject(VariantRunDataId.FIELDNAME_PROJECT_ID, "$_id." + VariantRunDataId.FIELDNAME_PROJECT_ID).append(VariantRunDataId.FIELDNAME_RUNNAME, "$_id." + VariantRunDataId.FIELDNAME_RUNNAME)))),
+    	        			new BasicDBObject("$merge", new BasicDBObject("into", copyCollectionName).append("whenMatched", "merge").append("whenNotMatched", "discard"))
+    	        		);
+
+    		        mongoTemplate.getCollection(mongoTemplate.getCollectionName(VariantRunData.class)).aggregate(pipeline).allowDiskUse(true).toCollection();
+    		        if (finalIndex > 0 && finalIndex % 50 == 0)
+    		        	LOG.debug(info + " - Adding run info to variants collection..." + (finalIndex * 100 / taggedVariantList.size()) + "%");
+    	        }
+        	});
+        }
+        executor.shutdown();
+        executor.awaitTermination(Integer.MAX_VALUE, TimeUnit.DAYS);
         LOG.info(info + " - VariantData documents updated with run info extracted from variantRunData. Update done in " + (System.currentTimeMillis() - before) / 1000 + "s");
         
-        MongoNamespace activeNameSpace = mongoTemplate.getCollection(variantDataCollName).getNamespace(), backupNameSpace = new MongoNamespace(activeNameSpace.getDatabaseName(), activeNameSpace.getCollectionName() + "_without_runs");
         try {
         	mongoTemplate.getCollection(variantDataCollName).renameCollection(backupNameSpace);
         }
@@ -1015,6 +1043,8 @@ public class MgdbDao {
         		return;
         	}
         }
+
         mongoTemplate.getCollection(copyCollectionName).renameCollection(activeNameSpace);
+        MongoTemplateManager.updateDatabaseLastModification(mongoTemplate);
     }
 }
