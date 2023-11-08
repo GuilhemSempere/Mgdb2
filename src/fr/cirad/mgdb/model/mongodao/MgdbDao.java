@@ -36,6 +36,7 @@ import javax.ejb.ObjectNotFoundException;
 import javax.servlet.ServletContext;
 import javax.servlet.http.HttpSession;
 
+import org.ga4gh.methods.SearchCallSetsRequest;
 import org.apache.commons.collections.CollectionUtils;
 import org.apache.log4j.Level;
 import org.apache.log4j.Logger;
@@ -538,7 +539,7 @@ public class MgdbDao {
      * Gets the individuals from samples.
      *
      * @param sModule the module
-     * @param sampleIDs the sample ids
+     * @param samples the sample ids
      * @return the individuals from samples
      */
     public static List<Individual> getIndividualsFromSamples(final String sModule, final Collection<GenotypingSample> samples) {
@@ -929,4 +930,113 @@ public class MgdbDao {
     	MongoTemplateManager.unlockModuleForWriting(sModule);
     	return n;
     }
+
+    /**
+     * @param module the database name (mandatory)
+     * @param sCurrentUser username for whom to get custom metadata (optional)
+     * @param projID a project ID (optional)
+     * @param indIDs a list of individual IDs (optional)
+     * @return LinkedHashMap which contains all different metadata of the project
+     */
+    public LinkedHashMap<String, ArrayList<String>> distinctIndividualMetadata(String module,String sCurrentUser, Integer projID, Collection<String> indIDs) {
+        MongoTemplate mongoTemplate = MongoTemplateManager.get(module);
+
+        // build the initial list of Individual objects
+        if (indIDs == null) {
+            indIDs = mongoTemplate.findDistinct(projID == null ? new Query() : new Query(Criteria.where(GenotypingSample.FIELDNAME_PROJECT_ID).is(projID)), GenotypingSample.FIELDNAME_INDIVIDUAL, GenotypingSample.class, String.class);
+        }
+        Query q = new Query(Criteria.where("_id").in(indIDs));
+        q.with(Sort.by(Sort.Direction.ASC, "_id"));
+        Map<String, LinkedHashMap<String, Object>> indMap = mongoTemplate.find(q, Individual.class).stream().collect(Collectors.toMap(Individual::getId, ind -> ind.getAdditionalInfo()));
+        LinkedHashMap<String, ArrayList<String>> result = new LinkedHashMap<>();	// this one will be sorted according to the provided list
+        if (sCurrentUser != null) {
+            if ("anonymousUser".equals(sCurrentUser)) {
+                for (String indId : indIDs) {
+                    for (Map.Entry<String, Object> subEntry : indMap.get(indId).entrySet()) {
+                        String key = subEntry.getKey();
+                        String value = (String) subEntry.getValue();
+
+                        if (result.containsKey(key)) {
+                            ArrayList<String> existingValues = result.get(key);
+
+                            if (!existingValues.contains(value)) {
+                                    existingValues.add(value);
+                            }
+
+                            result.put(key, existingValues);
+                        } else {
+                            ArrayList<String> values = new ArrayList<String>();
+                            values.add(value);
+                            result.put(key, values);
+                        }
+                    }
+                }
+            }
+            else {
+                for (CustomIndividualMetadata cimd : mongoTemplate.find(new Query(new Criteria().andOperator(Criteria.where("_id." + CustomIndividualMetadataId.FIELDNAME_USER).is(sCurrentUser), Criteria.where("_id." + CustomIndividualMetadataId.FIELDNAME_INDIVIDUAL_ID).in(indIDs))), CustomIndividualMetadata.class)) {
+                    if (cimd.getAdditionalInfo() != null && !cimd.getAdditionalInfo().isEmpty()) {
+                        HashMap<String, Object> entryValue = cimd.getAdditionalInfo();
+
+                        for (Map.Entry<String, Object> subEntry : entryValue.entrySet()) {
+                            String key = subEntry.getKey();
+                            String value = (String) subEntry.getValue();
+
+                            if (result.containsKey(key)) {
+                                ArrayList<String> existingValues = result.get(key);
+
+                                if (!existingValues.contains(value)) {
+                                    existingValues.add(value);
+                                }
+
+                                result.put(key, existingValues);
+                            } else {
+                                ArrayList<String> values = new ArrayList<String>();
+                                values.add(value);
+                                result.put(key, values);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        return result;
+    }
+
+    /**
+     * @param module the database name (mandatory)
+     * @param filters the filters to apply (mandatory)
+     * @param projID a project ID (optional)
+     * @param indIDs a list of individual IDs (optional)
+     * @return LinkedHashMap which contains all individuals of the project who matches with filter
+     */
+    public List<Individual> filterIndividualMetadata(String module, Integer projID, Collection<String> indIDs, LinkedHashMap<String,ArrayList<String>> filters) {
+        MongoTemplate mongoTemplate = MongoTemplateManager.get(module);
+
+        // build the initial list of Individual objects
+        if (indIDs == null) {
+            indIDs = mongoTemplate.findDistinct(projID == null ? new Query() : new Query(Criteria.where(GenotypingSample.FIELDNAME_PROJECT_ID).is(projID)), GenotypingSample.FIELDNAME_INDIVIDUAL, GenotypingSample.class, String.class);
+        }
+        Query q = new Query(Criteria.where("_id").in(indIDs));
+        q.with(Sort.by(Sort.Direction.ASC, "_id"));
+        Map<String, Individual> indMap = mongoTemplate.find(q, Individual.class).stream().collect(Collectors.toMap(Individual::getId, ind -> ind));
+        List<Individual> result = new ArrayList<>();	// this one will be sorted according to the provided list
+
+        for (String indId : indIDs) {
+            result.add(indMap.get(indId));
+        }
+
+        for (Map.Entry<String, ArrayList<String>> filterEntry : filters.entrySet()) {
+            String filterKey = filterEntry.getKey();
+            ArrayList<String> filterValues = filterEntry.getValue();
+
+            if (filterValues.isEmpty())
+                continue;
+            result = result.stream()
+                .filter(individual -> individual.getAdditionalInfo().containsKey(filterKey)
+                        && filterValues.contains(individual.getAdditionalInfo().get(filterKey)))
+                .collect(Collectors.toList());
+        }
+        return result;
+    }
 }
+
