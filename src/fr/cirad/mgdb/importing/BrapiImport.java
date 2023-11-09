@@ -68,6 +68,7 @@ import fr.cirad.mgdb.model.mongo.maintypes.VariantData;
 import fr.cirad.mgdb.model.mongo.maintypes.VariantRunData;
 import fr.cirad.mgdb.model.mongo.subtypes.ReferencePosition;
 import fr.cirad.mgdb.model.mongo.subtypes.SampleGenotype;
+import fr.cirad.mgdb.model.mongo.subtypes.VariantRunDataId;
 import fr.cirad.mgdb.model.mongodao.MgdbDao;
 import fr.cirad.tools.Helper;
 import fr.cirad.tools.ProgressIndicator;
@@ -782,7 +783,7 @@ public class BrapiImport extends STDVariantImport {
 			
 			String sVariantName = lineForVariant.trim().split("\t")[0];
 			
-			VariantRunData vrd = new VariantRunData(new VariantRunData.VariantRunDataId(project.getId(), runName, mgdbVariantId));
+			VariantRunData vrd = new VariantRunData(new VariantRunDataId(project.getId(), runName, mgdbVariantId));
 			
 			ArrayList<String> inconsistentIndividuals = inconsistencies.get(mgdbVariantId);
 			String[] cells = lineForVariant.trim().split("\t");

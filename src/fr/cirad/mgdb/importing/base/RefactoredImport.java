@@ -41,7 +41,9 @@ import fr.cirad.mgdb.model.mongo.maintypes.Individual;
 import fr.cirad.mgdb.model.mongo.maintypes.VariantData;
 import fr.cirad.mgdb.model.mongo.maintypes.VariantRunData;
 import fr.cirad.mgdb.model.mongo.subtypes.ReferencePosition;
+import fr.cirad.mgdb.model.mongo.subtypes.Run;
 import fr.cirad.mgdb.model.mongo.subtypes.SampleGenotype;
+import fr.cirad.mgdb.model.mongo.subtypes.VariantRunDataId;
 import fr.cirad.tools.ProgressIndicator;
 import fr.cirad.tools.mongo.AutoIncrementCounter;
 import fr.cirad.tools.mongo.MongoTemplateManager;
@@ -133,6 +135,8 @@ public abstract class RefactoredImport extends AbstractGenotypeImport {
             if (assemblyIDs.isEmpty())
             	assemblyIDs.add(null);	// old-style, assembly-less DB
             AtomicInteger nLineIndex = new AtomicInteger(-1);
+            
+            final int projId = project.getId();
 
             for (int threadIndex = 0; threadIndex < nImportThreads; threadIndex++) {
                 importThreads[threadIndex] = new Thread() {
@@ -200,9 +204,11 @@ public abstract class RefactoredImport extends AbstractGenotypeImport {
                                 else
                                 {
                                     VariantData variant = mongoTemplate.findById(variantId == null ? providedVariantId : variantId, VariantData.class);
-                                    if (variant == null)
+                                    if (variant == null) 
                                         variant = new VariantData((ObjectId.isValid(providedVariantId) ? "_" : "") + providedVariantId);
 
+                                    variant.getRuns().add(new Run(projId, sRun));
+                                    
                                     String[][] alleles = new String[individuals.length][m_ploidy];
                                     int nIndividualIndex = 0;
                                     while (nIndividualIndex < individuals.length) {
@@ -296,7 +302,7 @@ public abstract class RefactoredImport extends AbstractGenotypeImport {
 
     protected VariantRunData addDataToVariant(MongoTemplate mongoTemplate, VariantData variantToFeed, Integer nAssemblyId, String sequence, Long bpPos, LinkedHashMap<String, String> orderedIndOrSpToPopulationMap, Map<String, Type> nonSnpVariantTypeMap, String[][] alleles, GenotypingProject project, String runName, boolean fImportUnknownVariants) throws Exception
     {
-        VariantRunData vrd = new VariantRunData(new VariantRunData.VariantRunDataId(project.getId(), runName, variantToFeed.getId()));
+        VariantRunData vrd = new VariantRunData(new VariantRunDataId(project.getId(), runName, variantToFeed.getId()));
 
         // genotype fields
         AtomicInteger allIdx = new AtomicInteger(0);
