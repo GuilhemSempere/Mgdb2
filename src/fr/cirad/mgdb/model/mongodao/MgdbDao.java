@@ -650,9 +650,14 @@ public class MgdbDao {
      * @return the individual ID to population map
      */
     public static Map<String, String> getIndividualPopulations(final String sModule, final Collection<String> individuals) {
-        Query query = new Query(new Criteria().andOperator(Criteria.where("_id").in(individuals), Criteria.where(Individual.FIELDNAME_POPULATION).ne(null)));
-        query.fields().include(Individual.FIELDNAME_POPULATION);
-        return MongoTemplateManager.get(sModule).find(query, Individual.class).stream().collect(Collectors.toMap(ind -> ind.getId(), ind -> ind.getPopulation()));
+        return getIndividualPopulations(sModule, individuals, null);
+    }
+
+    public static Map<String, String> getIndividualPopulations(final String sModule, final Collection<String> individuals, final String metadataFielToUseAsPop) {
+    	String targetedField = metadataFielToUseAsPop == null ? Individual.FIELDNAME_POPULATION : (Individual.SECTION_ADDITIONAL_INFO + "." + metadataFielToUseAsPop);
+        Query query = new Query(new Criteria().andOperator(Criteria.where("_id").in(individuals), Criteria.where(targetedField).ne(null)));
+        query.fields().include(targetedField);
+        return MongoTemplateManager.get(sModule).find(query, Individual.class).stream().collect(Collectors.toMap(ind -> ind.getId(), ind -> ind.getAdditionalInfo().values().toArray()[0].toString()));            
     }
 
     public static TreeSet<String> getAnnotationFields(MongoTemplate mongoTemplate, int projId, boolean fOnlySearchableFields) {
