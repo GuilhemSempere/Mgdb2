@@ -657,7 +657,7 @@ public class MgdbDao {
     	String targetedField = metadataFielToUseAsPop == null ? Individual.FIELDNAME_POPULATION : (Individual.SECTION_ADDITIONAL_INFO + "." + metadataFielToUseAsPop);
         Query query = new Query(new Criteria().andOperator(Criteria.where("_id").in(individuals), Criteria.where(targetedField).ne(null)));
         query.fields().include(targetedField);
-        return MongoTemplateManager.get(sModule).find(query, Individual.class).stream().collect(Collectors.toMap(ind -> ind.getId(), ind -> ind.getAdditionalInfo().values().toArray()[0].toString()));            
+        return MongoTemplateManager.get(sModule).find(query, Individual.class).stream().collect(Collectors.toMap(ind -> ind.getId(), ind -> metadataFielToUseAsPop == null ? ind.getPopulation() : ind.getAdditionalInfo().values().toArray()[0].toString()));            
     }
 
     public static TreeSet<String> getAnnotationFields(MongoTemplate mongoTemplate, int projId, boolean fOnlySearchableFields) {
