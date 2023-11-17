@@ -58,21 +58,19 @@ public abstract class AbstractMarkerOrientedExportHandler implements IExportHand
      * @param sModule the module
      * @param nAssemblyId ID of the assembly to work with
 	 * @param sExportingUser the user who launched the export
-     * @param individuals1 the individuals in group 1
-     * @param individuals2 the individuals in group 2
+     * @param individuals List of the individuals in each group
      * @param progress the progress
      * @param tmpVarCollName the variant collection name (null if not temporary)
      * @param varQuery query to apply on varColl
      * @param markerCount number of variants to export
      * @param markerSynonyms the marker synonyms
-     * @param annotationFieldThresholds the annotation field thresholds for group 1
-     * @param annotationFieldThresholds2 the annotation field thresholds for group 2
+     * @param annotationFieldThresholds the annotation field thresholds for each group
      * @param samplesToExport the samples to export genotyping data for
      * @param individualMetadataFieldsToExport metadata fields to export for individuals
      * @param readyToExportFiles files to export along with the genotyping data
      * @throws Exception the exception
      */
-    abstract public void exportData(OutputStream outputStream, String sModule, Integer nAssemblyId, String sExportingUser, Collection<String> individuals1, Collection<String> individuals2, ProgressIndicator progress, String tmpVarCollName, Document varQuery, long markerCount, Map<String, String> markerSynonyms, HashMap<String, Float> annotationFieldThresholds, HashMap<String, Float> annotationFieldThresholds2, List<GenotypingSample> samplesToExport, Collection<String> individualMetadataFieldsToExport, Map<String, InputStream> readyToExportFiles) throws Exception;
+    abstract public void exportData(OutputStream outputStream, String sModule, Integer nAssemblyId, String sExportingUser, Collection<Collection<String>> individuals, ProgressIndicator progress, String tmpVarCollName, Document varQuery, long markerCount, Map<String, String> markerSynonyms, List<HashMap<String, Float>> annotationFieldThresholds, List<GenotypingSample> samplesToExport, Collection<String> individualMetadataFieldsToExport, Map<String, InputStream> readyToExportFiles) throws Exception;
 	
 	/**
 	 * Gets the marker oriented export handlers.
