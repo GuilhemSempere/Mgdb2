@@ -38,6 +38,7 @@ import org.springframework.core.type.filter.AssignableTypeFilter;
 import fr.cirad.mgdb.exporting.IExportHandler;
 import fr.cirad.mgdb.model.mongo.maintypes.GenotypingSample;
 import fr.cirad.tools.ProgressIndicator;
+import fr.cirad.tools.mgdb.VariantQueryWrapper;
 
 /**
  * The Class AbstractMarkerOrientedExportHandler.
@@ -62,17 +63,18 @@ public abstract class AbstractMarkerOrientedExportHandler implements IExportHand
      * @param individuals2 the individuals in group 2
      * @param progress the progress
      * @param tmpVarCollName the variant collection name (null if not temporary)
-     * @param varQuery query to apply on varColl
+     * @param varQueryWrapper variant query wrapper
      * @param markerCount number of variants to export
      * @param markerSynonyms the marker synonyms
      * @param annotationFieldThresholds the annotation field thresholds for group 1
      * @param annotationFieldThresholds2 the annotation field thresholds for group 2
      * @param samplesToExport the samples to export genotyping data for
      * @param individualMetadataFieldsToExport metadata fields to export for individuals
+     * @param metadataPopField metadata field to use as population String (overriding "fixed" individual-population field if exists)
      * @param readyToExportFiles files to export along with the genotyping data
      * @throws Exception the exception
      */
-    abstract public void exportData(OutputStream outputStream, String sModule, Integer nAssemblyId, String sExportingUser, Collection<String> individuals1, Collection<String> individuals2, ProgressIndicator progress, String tmpVarCollName, Document varQuery, long markerCount, Map<String, String> markerSynonyms, HashMap<String, Float> annotationFieldThresholds, HashMap<String, Float> annotationFieldThresholds2, List<GenotypingSample> samplesToExport, Collection<String> individualMetadataFieldsToExport, Map<String, InputStream> readyToExportFiles) throws Exception;
+    abstract public void exportData(OutputStream outputStream, String sModule, Integer nAssemblyId, String sExportingUser, Collection<String> individuals1, Collection<String> individuals2, ProgressIndicator progress, String tmpVarCollName, VariantQueryWrapper varQueryWrapper, long markerCount, Map<String, String> markerSynonyms, HashMap<String, Float> annotationFieldThresholds, HashMap<String, Float> annotationFieldThresholds2, List<GenotypingSample> samplesToExport, Collection<String> individualMetadataFieldsToExport, String metadataPopField, Map<String, InputStream> readyToExportFiles) throws Exception;
 	
 	/**
 	 * Gets the marker oriented export handlers.
