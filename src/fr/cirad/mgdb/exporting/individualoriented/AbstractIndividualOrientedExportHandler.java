@@ -38,7 +38,6 @@ import java.util.stream.Collectors;
 
 import org.apache.commons.lang.StringUtils;
 import org.apache.log4j.Logger;
-import org.bson.Document;
 import org.springframework.beans.factory.config.BeanDefinition;
 import org.springframework.context.annotation.ClassPathScanningCandidateComponentProvider;
 import org.springframework.core.type.filter.AssignableTypeFilter;
@@ -99,7 +98,7 @@ public abstract class AbstractIndividualOrientedExportHandler implements IExport
 	 * @param sModule the module
      * @param nAssemblyId ID of the assembly to work with
 	 * @param tmpVarCollName the variant collection name (null if not temporary)
-	 * @param varQueryWrapper variant query wrapper
+	 * @param vrdQuery variantRunData
 	 * @param markerCount number of variants to export
 	 * @param individuals1 the individuals in group 1
 	 * @param individuals2 the individuals in group 2
@@ -111,7 +110,7 @@ public abstract class AbstractIndividualOrientedExportHandler implements IExport
 	 * @return a map providing one File per individual
 	 * @throws Exception the exception
 	 */
-	public File[] createExportFiles(String sModule, Integer nAssemblyId, String tmpVarCollName, VariantQueryWrapper varQueryWrapper, long markerCount, Collection<String> individuals1, Collection<String> individuals2, String exportID, HashMap<String, Float> annotationFieldThresholds, HashMap<String, Float> annotationFieldThresholds2, List<GenotypingSample> samplesToExport, final ProgressIndicator progress) throws Exception
+	public File[] createExportFiles(String sModule, Integer nAssemblyId, String tmpVarCollName, BasicDBList vrdQuery, long markerCount, Collection<String> individuals1, Collection<String> individuals2, String exportID, HashMap<String, Float> annotationFieldThresholds, HashMap<String, Float> annotationFieldThresholds2, List<GenotypingSample> samplesToExport, final ProgressIndicator progress) throws Exception
 	{
 		long before = System.currentTimeMillis();
 
@@ -210,8 +209,7 @@ public abstract class AbstractIndividualOrientedExportHandler implements IExport
 			}
 		};
 		
-        Collection<BasicDBList> variantRunDataQueries = varQueryWrapper.getVariantRunDataQueries();
-		ExportManager exportManager = new ExportManager(mongoTemplate, nAssemblyId, collWithPojoCodec, VariantRunData.class, !variantRunDataQueries.isEmpty() ? variantRunDataQueries.iterator().next() : new BasicDBList(), samplesToExport, true, nQueryChunkSize, writingThread, markerCount, null, progress);
+		ExportManager exportManager = new ExportManager(mongoTemplate, nAssemblyId, collWithPojoCodec, VariantRunData.class, vrdQuery, samplesToExport, true, nQueryChunkSize, writingThread, markerCount, null, progress);
 		exportManager.readAndWrite();
 		
 	 	if (!progress.isAborted())
