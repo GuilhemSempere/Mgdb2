@@ -1,5 +1,6 @@
 package fr.cirad.tools.mgdb;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.stream.Collectors;
@@ -16,6 +17,10 @@ public class VariantQueryWrapper {
 		this.bareQueries = bareQueries;
 		this.projectQueryForVar = projectQueryForVar;
 		this.projectQueryForVrd = projectQueryForVrd;
+	}
+
+	public VariantQueryWrapper() {
+		this(new ArrayList<>(), null, null);
 	}
 
 	public Collection<BasicDBList> getBareQueries() {
