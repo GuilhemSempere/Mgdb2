@@ -100,17 +100,15 @@ public abstract class AbstractIndividualOrientedExportHandler implements IExport
 	 * @param tmpVarCollName the variant collection name (null if not temporary)
 	 * @param vrdQuery variantRunData
 	 * @param markerCount number of variants to export
-	 * @param individuals1 the individuals in group 1
-	 * @param individuals2 the individuals in group 2
+	 * @param individuals List of the individuals in each group
 	 * @param exportID the export id
-	 * @param annotationFieldThresholds the annotation field thresholds for group 1
-	 * @param annotationFieldThresholds2 the annotation field thresholds for group 2
+	 * @param annotationFieldThresholds the annotation field thresholds for each group
 	 * @param samplesToExport 
 	 * @param progress the progress
 	 * @return a map providing one File per individual
 	 * @throws Exception the exception
 	 */
-	public File[] createExportFiles(String sModule, Integer nAssemblyId, String tmpVarCollName, BasicDBList vrdQuery, long markerCount, Collection<String> individuals1, Collection<String> individuals2, String exportID, HashMap<String, Float> annotationFieldThresholds, HashMap<String, Float> annotationFieldThresholds2, List<GenotypingSample> samplesToExport, final ProgressIndicator progress) throws Exception
+	public File[] createExportFiles(String sModule, Integer nAssemblyId, String tmpVarCollName, BasicDBList vrdQuery, long markerCount, Collection<Collection<String>> individuals, String exportID, List<HashMap<String, Float>> annotationFieldThresholds, List<GenotypingSample> samplesToExport, final ProgressIndicator progress) throws Exception
 	{
 		long before = System.currentTimeMillis();
 
@@ -158,7 +156,7 @@ public abstract class AbstractIndividualOrientedExportHandler implements IExport
 	                                    continue;   // unwanted sample
 
 									SampleGenotype sampleGenotype = run.getSampleGenotypes().get(sampleId);
-									if (!VariantData.gtPassesVcfAnnotationFilters(individualId, sampleGenotype, individuals1, annotationFieldThresholds, individuals2, annotationFieldThresholds2))
+									if (!VariantData.gtPassesVcfAnnotationFilters(individualId, sampleGenotype, individuals, annotationFieldThresholds))
 										continue;	// skip genotype
 
 				                    String exportedGT = genotypeStringCache.get(sampleGenotype.getCode());
