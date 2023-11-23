@@ -38,12 +38,12 @@ import java.util.stream.Collectors;
 
 import org.apache.commons.lang.StringUtils;
 import org.apache.log4j.Logger;
-import org.bson.Document;
 import org.springframework.beans.factory.config.BeanDefinition;
 import org.springframework.context.annotation.ClassPathScanningCandidateComponentProvider;
 import org.springframework.core.type.filter.AssignableTypeFilter;
 import org.springframework.data.mongodb.core.MongoTemplate;
 
+import com.mongodb.BasicDBList;
 import com.mongodb.client.MongoCollection;
 
 import fr.cirad.mgdb.exporting.AbstractExportWritingThread;
@@ -56,6 +56,7 @@ import fr.cirad.mgdb.model.mongo.subtypes.SampleGenotype;
 import fr.cirad.tools.AlphaNumericComparator;
 import fr.cirad.tools.Helper;
 import fr.cirad.tools.ProgressIndicator;
+import fr.cirad.tools.mgdb.VariantQueryWrapper;
 import fr.cirad.tools.mongo.MongoTemplateManager;
 
 /**
@@ -81,22 +82,23 @@ public abstract class AbstractIndividualOrientedExportHandler implements IExport
 	 * @param fDeleteSampleExportFilesOnExit whether or not to delete sample export files on exit
 	 * @param progress the progress
 	 * @param tmpVarCollName the variant collection name (null if not temporary)
-	 * @param varQuery query to apply on varColl
+	 * @param varQueryWrapper variant query wrapper
 	 * @param markerCount number of variants to export
 	 * @param markerSynonyms the marker synonyms
-	 * @param individualMetadataFieldsToExport metadata fields to export for individuals 
+	 * @param individualMetadataFieldsToExport metadata fields to export for individuals
+	 * @param metadataPopField metadata field to use as population String (overriding "fixed" individual-population field if exists) 
 	 * @param readyToExportFiles the ready to export files
 	 * @throws Exception the exception
 	 */
 	
-	abstract public void exportData(OutputStream outputStream, String sModule, Integer nAssemblyId, String sExportingUser, File[] individualExportFiles, boolean fDeleteSampleExportFilesOnExit, ProgressIndicator progress, String tmpVarCollName, Document varQuery, long markerCount, Map<String, String> markerSynonyms, Collection<String> individualMetadataFieldsToExport, Map<String, InputStream> readyToExportFiles) throws Exception;
+	abstract public void exportData(OutputStream outputStream, String sModule, Integer nAssemblyId, String sExportingUser, File[] individualExportFiles, boolean fDeleteSampleExportFilesOnExit, ProgressIndicator progress, String tmpVarCollName, VariantQueryWrapper varQueryWrapper, long markerCount, Map<String, String> markerSynonyms, Collection<String> individualMetadataFieldsToExport, String metadataPopField, Map<String, InputStream> readyToExportFiles) throws Exception;
 	/**
 	 * Creates the export files.
 	 *
 	 * @param sModule the module
      * @param nAssemblyId ID of the assembly to work with
 	 * @param tmpVarCollName the variant collection name (null if not temporary)
-	 * @param varQuery query to apply on varColl
+	 * @param vrdQuery variantRunData
 	 * @param markerCount number of variants to export
 	 * @param individuals1 the individuals in group 1
 	 * @param individuals2 the individuals in group 2
@@ -108,7 +110,7 @@ public abstract class AbstractIndividualOrientedExportHandler implements IExport
 	 * @return a map providing one File per individual
 	 * @throws Exception the exception
 	 */
-	public File[] createExportFiles(String sModule, Integer nAssemblyId, String tmpVarCollName, Document varQuery, long markerCount, Collection<String> individuals1, Collection<String> individuals2, String exportID, HashMap<String, Float> annotationFieldThresholds, HashMap<String, Float> annotationFieldThresholds2, List<GenotypingSample> samplesToExport, final ProgressIndicator progress) throws Exception
+	public File[] createExportFiles(String sModule, Integer nAssemblyId, String tmpVarCollName, BasicDBList vrdQuery, long markerCount, Collection<String> individuals1, Collection<String> individuals2, String exportID, HashMap<String, Float> annotationFieldThresholds, HashMap<String, Float> annotationFieldThresholds2, List<GenotypingSample> samplesToExport, final ProgressIndicator progress) throws Exception
 	{
 		long before = System.currentTimeMillis();
 
@@ -207,7 +209,7 @@ public abstract class AbstractIndividualOrientedExportHandler implements IExport
 			}
 		};
 		
-		ExportManager exportManager = new ExportManager(mongoTemplate, nAssemblyId, collWithPojoCodec, VariantRunData.class, varQuery, samplesToExport, true, nQueryChunkSize, writingThread, markerCount, null, progress);
+		ExportManager exportManager = new ExportManager(mongoTemplate, nAssemblyId, collWithPojoCodec, VariantRunData.class, vrdQuery, samplesToExport, true, nQueryChunkSize, writingThread, markerCount, null, progress);
 		exportManager.readAndWrite();
 		
 	 	if (!progress.isAborted())
