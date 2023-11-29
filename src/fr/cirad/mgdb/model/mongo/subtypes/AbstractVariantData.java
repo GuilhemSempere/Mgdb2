@@ -656,7 +656,7 @@ abstract public class AbstractVariantData
 	 * @return the variant context
 	 * @throws Exception the exception
 	 */
-	public VariantContext toVariantContext(MongoTemplate mongoTemplate, Collection<VariantRunData> runs, Integer nAssemblyId, boolean exportVariantIDs, List<GenotypingSample> samplesToExport, Map<String, Integer> individualPositions, Collection<Collection<String>> individuals, HashMap<Integer, Object> previousPhasingIds, List<HashMap<String, Float>> annotationFieldThresholds, FileWriter warningFileWriter, String synonym) throws Exception
+	public VariantContext toVariantContext(MongoTemplate mongoTemplate, Collection<VariantRunData> runs, Integer nAssemblyId, boolean exportVariantIDs, List<GenotypingSample> samplesToExport, Map<String, Integer> individualPositions, List<Collection<String>> individuals, HashMap<Integer, Object> previousPhasingIds, List<HashMap<String, Float>> annotationFieldThresholds, FileWriter warningFileWriter, String synonym) throws Exception
 	{
 		ArrayList<Genotype> genotypes = new ArrayList<Genotype>();
 		String sRefAllele = knownAlleles.isEmpty() ? null : knownAlleles.iterator().next();
@@ -865,7 +865,7 @@ abstract public class AbstractVariantData
     }
 
     // tells whether applied filters imply to treat this genotype as missing data
-    public static boolean gtPassesVcfAnnotationFilters(String individualName, SampleGenotype sampleGenotype, Collection<Collection<String>> individuals, List<HashMap<String, Float>> annotationFieldThresholds)
+    public static boolean gtPassesVcfAnnotationFilters(String individualName, SampleGenotype sampleGenotype, List<Collection<String>> individuals, List<HashMap<String, Float>> annotationFieldThresholds)
     {
         if (annotationFieldThresholds == null || annotationFieldThresholds.isEmpty())
             return true;
@@ -873,7 +873,7 @@ abstract public class AbstractVariantData
         List<HashMap<String, Float>> thresholdsToCheck = new ArrayList<HashMap<String, Float>>();
         int i = 0;
         for (HashMap<String, Float> entry : annotationFieldThresholds) {
-            if (!entry.isEmpty() && individuals.stream().toList().get(i).contains(individualName)) {
+            if (!entry.isEmpty() && individuals.get(i).contains(individualName)) {
                 thresholdsToCheck.add(entry);
             }
             i++;

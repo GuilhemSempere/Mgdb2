@@ -71,7 +71,7 @@ public abstract class AbstractMarkerOrientedExportHandler implements IExportHand
      * @param readyToExportFiles files to export along with the genotyping data
      * @throws Exception the exception
      */
-    abstract public void exportData(OutputStream outputStream, String sModule, Integer nAssemblyId, String sExportingUser, Collection<Collection<String>> individuals, ProgressIndicator progress, String tmpVarCollName, VariantQueryWrapper varQueryWrapper, long markerCount, Map<String, String> markerSynonyms, List<HashMap<String, Float>> annotationFieldThresholds, List<GenotypingSample> samplesToExport, Collection<String> individualMetadataFieldsToExport, String metadataPopField, Map<String, InputStream> readyToExportFiles) throws Exception;
+    abstract public void exportData(OutputStream outputStream, String sModule, Integer nAssemblyId, String sExportingUser, List<Collection<String>> individuals, ProgressIndicator progress, String tmpVarCollName, VariantQueryWrapper varQueryWrapper, long markerCount, Map<String, String> markerSynonyms, List<HashMap<String, Float>> annotationFieldThresholds, List<GenotypingSample> samplesToExport, Collection<String> individualMetadataFieldsToExport, String metadataPopField, Map<String, InputStream> readyToExportFiles) throws Exception;
 	
 	/**
 	 * Gets the marker oriented export handlers.

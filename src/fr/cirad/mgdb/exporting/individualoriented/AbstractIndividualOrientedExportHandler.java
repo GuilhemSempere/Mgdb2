@@ -108,7 +108,7 @@ public abstract class AbstractIndividualOrientedExportHandler implements IExport
 	 * @return a map providing one File per individual
 	 * @throws Exception the exception
 	 */
-	public File[] createExportFiles(String sModule, Integer nAssemblyId, String tmpVarCollName, BasicDBList vrdQuery, long markerCount, Collection<Collection<String>> individuals, String exportID, List<HashMap<String, Float>> annotationFieldThresholds, List<GenotypingSample> samplesToExport, final ProgressIndicator progress) throws Exception
+	public File[] createExportFiles(String sModule, Integer nAssemblyId, String tmpVarCollName, BasicDBList vrdQuery, long markerCount, List<Collection<String>> individuals, String exportID, List<HashMap<String, Float>> annotationFieldThresholds, List<GenotypingSample> samplesToExport, final ProgressIndicator progress) throws Exception
 	{
 		long before = System.currentTimeMillis();
 
