@@ -1,5 +1,7 @@
 package fr.cirad.mgdb.importing;
 
+import java.util.HashMap;
+
 public class DartInfo {
 
     private String alleleID;
@@ -19,6 +21,36 @@ public class DartInfo {
     private String alnEvalue;
 
     private String individualName;
+
+    private String snp = null;
+
+    private Integer snpPos = 0;
+
+    private String callRate = null;
+
+    private String oneRatioRef = null;
+
+    private String oneRatioSNP = null;
+
+    private String freqHomSnp = null;
+
+    private String freqHomeRef = null;
+
+    private String freqHets = null;
+
+    private String picRef = null;
+
+    private String picSNP = null;
+
+    private String avgPic = null;
+
+    private String avgCountRef = null;
+
+    private String avgCountSNP = null;
+
+    private String repAvg = null;
+
+    private HashMap<String, Integer> sampleGenotypes = new HashMap<String, Integer>();
 
     public DartInfo(String alleleID, String cloneID, String alleleSequence, String trimmedSequence, String chrom, Integer chromPos, String alnCnt, String alnEvalue, String individualName) {
         this.alleleID = alleleID;
@@ -102,5 +134,125 @@ public class DartInfo {
 
     public void setTrimmedSequence(String trimmedSequence) {
         this.trimmedSequence = trimmedSequence;
+    }
+
+    public Integer getSnpPos() {
+        return snpPos;
+    }
+
+    public void setSnpPos(Integer snpPos) {
+        this.snpPos = snpPos;
+    }
+
+    public String getAvgCountRef() {
+        return avgCountRef;
+    }
+
+    public void setAvgCountRef(String avgCountRef) {
+        this.avgCountRef = avgCountRef;
+    }
+
+    public String getAvgCountSNP() {
+        return avgCountSNP;
+    }
+
+    public void setAvgCountSNP(String avgCountSNP) {
+        this.avgCountSNP = avgCountSNP;
+    }
+
+    public String getAvgPic() {
+        return avgPic;
+    }
+
+    public void setAvgPic(String avgPic) {
+        this.avgPic = avgPic;
+    }
+
+    public String getCallRate() {
+        return callRate;
+    }
+
+    public void setCallRate(String callRate) {
+        this.callRate = callRate;
+    }
+
+    public String getFreqHets() {
+        return freqHets;
+    }
+
+    public void setFreqHets(String freqHets) {
+        this.freqHets = freqHets;
+    }
+
+    public String getFreqHomeRef() {
+        return freqHomeRef;
+    }
+
+    public void setFreqHomeRef(String freqHomeRef) {
+        this.freqHomeRef = freqHomeRef;
+    }
+
+    public String getFreqHomSnp() {
+        return freqHomSnp;
+    }
+
+    public void setFreqHomSnp(String freqHomSnp) {
+        this.freqHomSnp = freqHomSnp;
+    }
+
+    public String getOneRatioRef() {
+        return oneRatioRef;
+    }
+
+    public void setOneRatioRef(String oneRatioRef) {
+        this.oneRatioRef = oneRatioRef;
+    }
+
+    public String getOneRatioSNP() {
+        return oneRatioSNP;
+    }
+
+    public void setOneRatioSNP(String oneRatioSNP) {
+        this.oneRatioSNP = oneRatioSNP;
+    }
+
+    public String getPicRef() {
+        return picRef;
+    }
+
+    public void setPicRef(String picRef) {
+        this.picRef = picRef;
+    }
+
+    public String getPicSNP() {
+        return picSNP;
+    }
+
+    public void setPicSNP(String picSNP) {
+        this.picSNP = picSNP;
+    }
+
+    public String getRepAvg() {
+        return repAvg;
+    }
+
+    public void setRepAvg(String repAvg) {
+        this.repAvg = repAvg;
+    }
+
+    public String getSnp() {
+        return snp;
+    }
+
+    public void setSnp(String snp) {
+        this.snp = snp;
+    }
+
+    public HashMap<String, Integer> getSampleGenotypes() {
+        return sampleGenotypes;
+    }
+
+    public void setSampleGenotypes(HashMap<String, Integer> sampleGenotypes) {
+        this.sampleGenotypes = sampleGenotypes;
     }
 }
