@@ -61,9 +61,7 @@ public class DartImport extends AbstractGenotypeImport {
 
 	private int nNumProc = Runtime.getRuntime().availableProcessors();
 
-    public DartImport(){
-
-    }
+    public DartImport(){}
 
     /**
      * Instantiates a new dart import.
@@ -100,7 +98,7 @@ public class DartImport extends AbstractGenotypeImport {
 //        }
 //        new DartImport().importToMongo(args[0], args[1], args[2], args[3], null, new File(args[4]).toURI().toURL(), args[5], null, false, mode);
         DartImport impor = new DartImport();
-        List<DartInfo> info = impor.getDartInfo("/home/biggio/Bureau/Gigwa/Mgdb2/src/fr/cirad/mgdb/importing/test_dart.csv");
+        List<DartInfo> info = impor.getDartInfo("/home/biggio/Bureau/dart/CIAT_Report_DCob21-5999_2_moreOrders_SNP_3.csv");
         System.out.println("AlleleID,CloneID,AlleleSequence,TrimmedSequence,Chrom_Rice_v9,ChromPos_Rice_v9,AlnCnt_Rice_v9,AlnEvalue_Rice_v9,SNP,SnpPosition,CallRate,OneRatioRef,OneRatioSnp,FreqHomRef,FreqHomSnp,FreqHets,PICRef,PICSnp,AvgPIC,AvgCountRef,AvgCountSnp,RepAvg,A15000001,A15000002,A15000003");
         for (int i = 0; i < info.size(); i++) {
             System.out.print(info.get(i).getAlleleID() + ",");
@@ -163,11 +161,11 @@ public class DartImport extends AbstractGenotypeImport {
             }
             else {
                 if (lineIndex == 1) {
-                    String alleleID1 = line.split(",")[1];
+                    String alleleID1 = line.split(",")[0].split("[^A-Za-z]")[0];
                     String line1 = line;
                     line = bufferedReader.readLine();
                     lineIndex++;
-                    String alleleID2 = line.split(",")[1];
+                    String alleleID2 = line.split(",")[0].split("[^A-Za-z]")[0];
                     tworow = alleleID1 == alleleID2;
                     genericDartLine(line1, result, columnNames, individualName, tworow, lineIndex);
                 }
@@ -182,15 +180,30 @@ public class DartImport extends AbstractGenotypeImport {
 
     private void genericDartLine (String line, List<DartInfo> result, HashMap<String, Integer> columnNames, String individualName, boolean tworow, Integer lineIndex) {
         String[] columns = line.split(",");
+
         String alleleID = columns[columnNames.get("AlleleID")];
-        String cloneID = columns[columnNames.get("CloneID")];
-        String alleleSequence = columns[columnNames.get("AlleleSequence")];
-        String trimmedSequence = columns[columnNames.get("TrimmedSequence")];
-        String chrom = columns[columnNames.get("Chrom_" + individualName)];
-        Integer chromPos =  Integer.parseInt(columns[columnNames.get("ChromPos_" + individualName)]);
-        String alnCnt = columns[columnNames.get("AlnCnt_" + individualName)];
-        String alnEvalue = columns[columnNames.get("AlnEvalue_" + individualName)];
-        DartInfo dart = new DartInfo(alleleID, cloneID, alleleSequence, trimmedSequence, chrom, chromPos, alnCnt, alnEvalue, individualName);
+        DartInfo dart = new DartInfo(alleleID, individualName);
+        if (columnNames.containsKey("CloneID")) {
+            dart.setCloneID(columns[columnNames.get("CloneID")]);
+        }
+        if (columnNames.containsKey("AlleleSequence")) {
+            dart.setAlleleSequence(columns[columnNames.get("AlleleSequence")]);
+        }
+        if (columnNames.containsKey("TrimmedSequence")) {
+            dart.setTrimmedSequence(columns[columnNames.get("TrimmedSequence")]);
+        }
+        if (columnNames.containsKey("Chrom_" + individualName)) {
+            dart.setChrom(columns[columnNames.get("Chrom_" + individualName)]);
+        }
+        if (columnNames.containsKey("ChromPos_" + individualName)) {
+            dart.setChromPos(Integer.parseInt(columns[columnNames.get("ChromPos_" + individualName)]));
+        }
+        if (columnNames.containsKey("AlnCnt_" + individualName)) {
+            dart.setAlnCnt(columns[columnNames.get("AlnCnt_" + individualName)]);
+        }
+        if (columnNames.containsKey("AlnEvalue_" + individualName)) {
+            dart.setAlnEvalue(columns[columnNames.get("AlnEvalue_" + individualName)]);
+        }
         if (columnNames.containsKey("SNP")) {
             dart.setSnp(columns[columnNames.get("SNP")]);
         }
@@ -448,7 +461,7 @@ public class DartImport extends AbstractGenotypeImport {
                                         }
                                     }
 
-//                                    VariantRunData runToSave = addHapMapDataToVariant(finalMongoTemplate, variant, finalAssembly == null ? null : finalAssembly.getId(), variantType, alleleIndexMap, hmFeature, finalProject, sRun, sampleIds);
+                                    VariantRunData runToSave = addDartSeqDataToVariant(finalMongoTemplate, variant, finalAssembly == null ? null : finalAssembly.getId(), variantType, alleleIndexMap, hmFeature, finalProject, sRun, sampleIds);
 
                                     for (Integer asmId : assemblyIDs) {
                                         ReferencePosition rp = variant.getReferencePosition(asmId);
@@ -462,8 +475,8 @@ public class DartImport extends AbstractGenotypeImport {
                                     {	// we only import data related to a variant if we know its alleles
                                         if (!unsavedVariants.contains(variant))
                                             unsavedVariants.add(variant);
-//                                        if (!unsavedRuns.contains(runToSave))
-//                                            unsavedRuns.add(runToSave);
+                                        if (!unsavedRuns.contains(runToSave))
+                                            unsavedRuns.add(runToSave);
                                     }
 
                                     numberOfVariantsProcessedInThread++;
@@ -515,7 +528,7 @@ public class DartImport extends AbstractGenotypeImport {
                 project.getRuns().add(sRun);
             mongoTemplate.save(project);
 
-            LOG.info("HapMapImport took " + (System.currentTimeMillis() - before) / 1000 + "s for " + totalProcessedVariantCount.get() + " records");
+            LOG.info("DartSeqImport took " + (System.currentTimeMillis() - before) / 1000 + "s for " + totalProcessedVariantCount.get() + " records");
 
             return createdProject;
         }
@@ -538,5 +551,24 @@ public class DartImport extends AbstractGenotypeImport {
                 MgdbDao.prepareDatabaseForSearches(sModule);
             }
         }
+    }
+
+    /**
+     * Adds the dartseq data to variant.
+     *
+     * @param mongoTemplate the mongo template
+     * @param variantToFeed the variant to feed
+     * @param nAssemblyId the assembly id
+     * @param variantType variant type
+     * @param alleleIndexMap map providing the numeric index for each allele
+     * @param hmFeature the hm feature
+     * @param project the project
+     * @param runName the run name
+     * @param individuals the individuals
+     * @return the variant run data
+     * @throws Exception the exception
+     */
+    private VariantRunData addDartSeqDataToVariant(MongoTemplate mongoTemplate, VariantData variantToFeed, Integer nAssemblyId, Type variantType, Map<String, Integer> alleleIndexMap, RawHapMapFeature hmFeature, GenotypingProject project, String runName, List<String>individuals) throws Exception {
+        return null;
     }
 }

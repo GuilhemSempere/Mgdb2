@@ -52,6 +52,11 @@ public class DartInfo {
 
     private HashMap<String, Integer> sampleGenotypes = new HashMap<String, Integer>();
 
+    public DartInfo(String alleleID, String individualName) {
+        this.alleleID = alleleID;
+        this.individualName = individualName;
+    }
+
     public DartInfo(String alleleID, String cloneID, String alleleSequence, String trimmedSequence, String chrom, Integer chromPos, String alnCnt, String alnEvalue, String individualName) {
         this.alleleID = alleleID;
         this.cloneID = cloneID;
