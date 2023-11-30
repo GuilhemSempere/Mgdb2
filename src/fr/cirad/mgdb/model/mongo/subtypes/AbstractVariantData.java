@@ -649,14 +649,14 @@ abstract public class AbstractVariantData
 	 * @param samplesToExport overall list of samples involved in the export
 	 * @param individualPositions map providing the index at which each individual must appear in the export file
 	 * @param individuals List of individual IDs for each group
-	 * @param previousPhasingIds the previous phasing ids
 	 * @param annotationFieldThresholds the annotation field thresholds for each group
+	 * @param previousPhasingIds the previous phasing ids
 	 * @param warningFileWriter the warning file writer
 	 * @param synonym the synonym
 	 * @return the variant context
 	 * @throws Exception the exception
 	 */
-	public VariantContext toVariantContext(MongoTemplate mongoTemplate, Collection<VariantRunData> runs, Integer nAssemblyId, boolean exportVariantIDs, List<GenotypingSample> samplesToExport, Map<String, Integer> individualPositions, List<Collection<String>> individuals, HashMap<Integer, Object> previousPhasingIds, List<HashMap<String, Float>> annotationFieldThresholds, FileWriter warningFileWriter, String synonym) throws Exception
+	public VariantContext toVariantContext(MongoTemplate mongoTemplate, Collection<VariantRunData> runs, Integer nAssemblyId, boolean exportVariantIDs, List<GenotypingSample> samplesToExport, Map<String, Integer> individualPositions, Map<String /*population*/, Collection<String>> individuals, Map<String /*population*/, HashMap<String, Float>> annotationFieldThresholds, HashMap<Integer, Object> previousPhasingIds, FileWriter warningFileWriter, String synonym) throws Exception
 	{
 		ArrayList<Genotype> genotypes = new ArrayList<Genotype>();
 		String sRefAllele = knownAlleles.isEmpty() ? null : knownAlleles.iterator().next();
@@ -865,25 +865,31 @@ abstract public class AbstractVariantData
     }
 
     // tells whether applied filters imply to treat this genotype as missing data
-    public static boolean gtPassesVcfAnnotationFilters(String individualName, SampleGenotype sampleGenotype, List<Collection<String>> individuals, List<HashMap<String, Float>> annotationFieldThresholds)
+    public static boolean gtPassesVcfAnnotationFilters(String individualName, SampleGenotype sampleGenotype, Map<String, Collection<String>> individualsByPopulation, Map<String, HashMap<String, Float>> annotationFieldThresholds)
     {
         if (annotationFieldThresholds == null || annotationFieldThresholds.isEmpty())
             return true;
 
         List<HashMap<String, Float>> thresholdsToCheck = new ArrayList<HashMap<String, Float>>();
-        int i = 0;
-        for (HashMap<String, Float> entry : annotationFieldThresholds) {
-            if (!entry.isEmpty() && individuals.get(i).contains(individualName)) {
-                thresholdsToCheck.add(entry);
-            }
-            i++;
-        }
-
-//        if (individuals1.contains(individualName))
-//            thresholdsToCheck.add(annotationFieldThresholds1);
-//        if (!annotationFieldThresholds2.isEmpty() && individuals2.contains(individualName))
-//            thresholdsToCheck.add(annotationFieldThresholds2);
         
+        for (String pop : individualsByPopulation.keySet()) {
+        	Collection<String> popIndividuals = individualsByPopulation.get(pop);
+        	if (!popIndividuals.contains(individualName))
+        		continue;
+        	
+        	HashMap<String, Float> popThresholds = annotationFieldThresholds.get(pop);
+        	if (!popThresholds.isEmpty())
+                thresholdsToCheck.add(popThresholds);
+        }
+//        
+//        int i = 0;
+//        for (HashMap<String, Float> entry : annotationFieldThresholds) {
+//            if (!entry.isEmpty() && individualsByPopulation.get(i).contains(individualName)) {
+//                thresholdsToCheck.add(entry);
+//            }
+//            i++;
+//        }
+
         for (HashMap<String, Float> someThresholdsToCheck : thresholdsToCheck)
             for (String annotationField : someThresholdsToCheck.keySet())
             {

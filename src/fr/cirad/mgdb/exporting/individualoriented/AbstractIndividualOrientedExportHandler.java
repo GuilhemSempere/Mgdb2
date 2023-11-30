@@ -91,7 +91,7 @@ public abstract class AbstractIndividualOrientedExportHandler implements IExport
 	 * @throws Exception the exception
 	 */
 	
-	abstract public void exportData(OutputStream outputStream, String sModule, Integer nAssemblyId, String sExportingUser, File[] individualExportFiles, boolean fDeleteSampleExportFilesOnExit, ProgressIndicator progress, String tmpVarCollName, VariantQueryWrapper varQueryWrapper, long markerCount, Map<String, String> markerSynonyms, Collection<String> individualMetadataFieldsToExport, String metadataPopField, Map<String, InputStream> readyToExportFiles) throws Exception;
+	abstract public void exportData(OutputStream outputStream, String sModule, Integer nAssemblyId, String sExportingUser, File[] individualExportFiles, boolean fDeleteSampleExportFilesOnExit, ProgressIndicator progress, String tmpVarCollName, VariantQueryWrapper varQueryWrapper, long markerCount, Map<String, String> markerSynonyms, Collection<String> individualMetadataFieldsToExport, Map<String, String> individualPopulations, Map<String, InputStream> readyToExportFiles) throws Exception;
 	/**
 	 * Creates the export files.
 	 *
@@ -100,15 +100,15 @@ public abstract class AbstractIndividualOrientedExportHandler implements IExport
 	 * @param tmpVarCollName the variant collection name (null if not temporary)
 	 * @param vrdQuery variantRunData
 	 * @param markerCount number of variants to export
-	 * @param individuals List of the individuals in each group
 	 * @param exportID the export id
+	 * @param individuals List of the individuals in each group
 	 * @param annotationFieldThresholds the annotation field thresholds for each group
 	 * @param samplesToExport 
 	 * @param progress the progress
 	 * @return a map providing one File per individual
 	 * @throws Exception the exception
 	 */
-	public File[] createExportFiles(String sModule, Integer nAssemblyId, String tmpVarCollName, BasicDBList vrdQuery, long markerCount, List<Collection<String>> individuals, String exportID, List<HashMap<String, Float>> annotationFieldThresholds, List<GenotypingSample> samplesToExport, final ProgressIndicator progress) throws Exception
+	public File[] createExportFiles(String sModule, Integer nAssemblyId, String tmpVarCollName, BasicDBList vrdQuery, long markerCount, String exportID, Map<String, Collection<String>> individuals, Map<String, HashMap<String, Float>> annotationFieldThresholds, List<GenotypingSample> samplesToExport, final ProgressIndicator progress) throws Exception
 	{
 		long before = System.currentTimeMillis();
 
