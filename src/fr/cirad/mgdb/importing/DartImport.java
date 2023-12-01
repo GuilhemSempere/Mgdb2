@@ -259,7 +259,8 @@ public class DartImport extends AbstractGenotypeImport {
 
         Integer createdProject = null;
 
-        FeatureReader<RawHapMapFeature> reader = AbstractFeatureReader.getFeatureReader(mainFileUrl.toString(), new RawHapMapCodec(), false);
+        //FeatureReader<RawHapMapFeature> reader = AbstractFeatureReader.getFeatureReader(mainFileUrl.toString(), new RawHapMapCodec(), false);
+        List<DartInfo> infos = getDartInfo(mainFileUrl.getPath());
         GenericXmlApplicationContext ctx = null;
         try
         {
