@@ -68,6 +68,7 @@ import fr.cirad.mgdb.model.mongo.maintypes.VariantRunData;
 import fr.cirad.mgdb.model.mongodao.MgdbDao;
 import fr.cirad.tools.AppConfig;
 import fr.cirad.tools.Helper;
+import fr.cirad.tools.query.GroupedExecutor;
 
 /**
  * The Class MongoTemplateManager.
@@ -109,6 +110,16 @@ public class MongoTemplateManager implements ApplicationContextAware {
      * The mongo clients.
      */
     static private Map<String, MongoClient> mongoClients = new HashMap<>();
+    
+    /**
+     * The Executor to use for asynchronously querying each host
+     */
+    static private Map<String, ExecutorService> hostExecutors = new HashMap<>();
+    
+    /**
+     * The Executor to use for asynchronously querying each module
+     */
+    static private Map<String, ExecutorService> moduleExecutors = new HashMap<>();
     
     /**
      * The datasource  (properties filename)
@@ -156,6 +167,8 @@ public class MongoTemplateManager implements ApplicationContextAware {
 	 *  A null value in the set indicates the whole module is locked (i.e., a dump is being generated or restored)
 	 */
 	private static HashMap<String /*module*/, Set<String> /*projects*/> currentlyImportedProjects = new HashMap<String, Set<String>>();
+
+    static final private int DEFAULT_MAXIMUM_NUMBER_OF_SIMULTANEOUS_QUERY_THREADS = 20;
 
     @Override
     public void setApplicationContext(ApplicationContext ac) throws BeansException {
@@ -281,6 +294,7 @@ public class MongoTemplateManager implements ApplicationContextAware {
                 	
                     MongoTemplate mongoTemplate = createMongoTemplate(datasourceInfo[0], datasourceInfo[1]);
                     templateMap.put(cleanKey, mongoTemplate);
+                    assignExecutorToModule(datasourceInfo[0], cleanKey);
 
                     if (fClearCachedCountsOnStartup)
                     	mongoTemplate.dropCollection(CachedCount.class);
@@ -318,7 +332,24 @@ public class MongoTemplateManager implements ApplicationContextAware {
         executor.shutdown();
     }
 
-    /**
+    private static void assignExecutorToModule(String sHost, String sModule) {
+        ExecutorService executor = hostExecutors.get(sHost);
+        if (executor == null) {
+	        int nExecutorPoolSize;
+	        try {
+	        	nExecutorPoolSize = Integer.parseInt(appConfig.get("maxQueryThreads_" + sHost));
+	        }
+	        catch (Exception e) {
+	        	nExecutorPoolSize = DEFAULT_MAXIMUM_NUMBER_OF_SIMULTANEOUS_QUERY_THREADS;
+	        }
+			LOG.info("maxQueryThreads_" + sHost + ": " + nExecutorPoolSize);
+	        executor = new GroupedExecutor(nExecutorPoolSize);
+	        hostExecutors.put(sHost, executor);
+        }
+        moduleExecutors.put(sModule, executor);
+	}
+
+	/**
      * Creates the mongo template.
      *
      * @param sHost the host
@@ -335,7 +366,7 @@ public class MongoTemplateManager implements ApplicationContextAware {
         ((MappingMongoConverter) mongoTemplate.getConverter()).setMapKeyDotReplacement(DOT_REPLACEMENT_STRING);
 
         MgdbDao.ensurePositionIndexes(mongoTemplate, Arrays.asList(mongoTemplate.getCollection(mongoTemplate.getCollectionName(VariantData.class)), mongoTemplate.getCollection(mongoTemplate.getCollectionName(VariantRunData.class))));	// make sure we have indexes defined as required in v2.4
-        
+
         return mongoTemplate;
     }
 
@@ -410,6 +441,8 @@ public class MongoTemplateManager implements ApplicationContextAware {
 		                dataSourceProperties.store(fos, null);
 
 		                templateMap.put(sModule, mongoTemplate);
+		                assignExecutorToModule(sHost, sModule);
+		                
 		                if (fPublic)
 		                    publicDatabases.add(sModule);
 		                if (fHidden)
@@ -772,4 +805,8 @@ public class MongoTemplateManager implements ApplicationContextAware {
     	MongoTemplate template = MongoTemplateManager.get(sModule);
     	return template.findOne(new Query(), DatabaseInformation.class, "dbInfo");
     }
+
+	public static ExecutorService getExecutor(String sModule) {
+		return moduleExecutors.get(sModule);
+	}
 }
