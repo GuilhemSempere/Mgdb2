@@ -310,7 +310,8 @@ public class MongoTemplateManager implements ApplicationContextAware {
 						MgdbDao.addRunsToVariantCollectionIfNecessary(mongoTemplate);
 						MgdbDao.ensureVariantDataIndexes(mongoTemplate);	// FIXME: move to end of addRunsToVariantCollectionIfNecessary()
 						MgdbDao.ensurePositionIndexes(mongoTemplate, Arrays.asList(mongoTemplate.getCollection(mongoTemplate.getCollectionName(VariantData.class))));	// FIXME: move to end of addRunsToVariantCollectionIfNecessary()
-					} catch (Exception e) {
+						MgdbDao.createGeneCacheIfNecessary(mongoTemplate);
+                    } catch (Exception e) {
 						LOG.error("Error while adding run info to variants colleciton for db " + db, e);
 					}
         		}

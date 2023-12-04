@@ -82,6 +82,7 @@ import fr.cirad.mgdb.model.mongo.maintypes.Individual;
 import fr.cirad.mgdb.model.mongo.maintypes.VariantData;
 import fr.cirad.mgdb.model.mongo.maintypes.VariantRunData;
 import fr.cirad.mgdb.model.mongo.subtypes.ReferencePosition;
+import fr.cirad.mgdb.model.mongo.subtypes.Run;
 import fr.cirad.mgdb.model.mongo.subtypes.VariantRunDataId;
 import fr.cirad.tools.Helper;
 import fr.cirad.tools.SessionAttributeAwareThread;
@@ -108,6 +109,8 @@ public class MgdbDao {
      * The Constant COLLECTION_NAME_TAGGED_VARIANT_IDS.
      */
     static final public String COLLECTION_NAME_TAGGED_VARIANT_IDS = "taggedVariants";
+    
+    static final public String COLLECTION_NAME_GENE_CACHE = "geneCache";
 
     /**
      * The Constant FIELD_NAME_CACHED_COUNT_VALUE.
@@ -1052,4 +1055,31 @@ public class MgdbDao {
         mongoTemplate.getCollection(copyCollectionName).renameCollection(activeNameSpace);
         MongoTemplateManager.updateDatabaseLastModification(mongoTemplate);
     }
+    
+    public static void createGeneCacheIfNecessary(MongoTemplate mongoTemplate) {
+        boolean isCacheCreationNeeded = isCacheCreationNeeded(mongoTemplate);
+        if (isCacheCreationNeeded) {
+        	String aieffge = VariantRunData.SECTION_ADDITIONAL_INFO + "." + VariantRunData.FIELDNAME_ADDITIONAL_INFO_EFFECT_GENE;
+        	String pi = Run.FIELDNAME_PROJECT_ID;
+            Aggregation aggregation = Aggregation.newAggregation(
+                Aggregation.unwind(aieffge),
+                Aggregation.group(aieffge)
+                    .addToSet("_id." + pi).as(pi),
+                Aggregation.out(MgdbDao.COLLECTION_NAME_GENE_CACHE)
+            );
+            mongoTemplate.aggregate(aggregation, "variantRunData", Object.class);
+        }
+    }
+
+    private static boolean isCacheCreationNeeded(MongoTemplate mongoTemplate) {
+    	// Check if geneCache table have tuple
+    	long geneCacheCount = mongoTemplate.count(null, "geneCache");
+
+    	// Check if there is at least one project with the field ("ea") not empty
+        Query projectQuery = new Query(Criteria.where(GenotypingProject.FIELDNAME_EFFECT_ANNOTATIONS).ne(new ArrayList<>()));
+        boolean isEaNotEmpty = mongoTemplate.exists(projectQuery, "projects");
+
+        return geneCacheCount == 0 && isEaNotEmpty;
+    }
+    
 }
