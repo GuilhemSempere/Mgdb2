@@ -301,6 +301,7 @@ public class MongoTemplateManager implements ApplicationContextAware {
             LOG.error("Unable to load " + resource + ".properties, you may need to adjust your classpath", ioe);
         }
         
+        // This is the right place for applying db model updates
 	    ExecutorService executor = Executors.newFixedThreadPool(2);
         for (String db : templateMap.keySet())
         	executor.submit(new Thread() {

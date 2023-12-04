@@ -1057,29 +1057,17 @@ public class MgdbDao {
     }
     
     public static void createGeneCacheIfNecessary(MongoTemplate mongoTemplate) {
-        boolean isCacheCreationNeeded = isCacheCreationNeeded(mongoTemplate);
-        if (isCacheCreationNeeded) {
-        	String aieffge = VariantRunData.SECTION_ADDITIONAL_INFO + "." + VariantRunData.FIELDNAME_ADDITIONAL_INFO_EFFECT_GENE;
-        	String pi = Run.FIELDNAME_PROJECT_ID;
+        if (mongoTemplate.count(new Query(), MgdbDao.COLLECTION_NAME_GENE_CACHE) == 0 && mongoTemplate.exists(new Query(Criteria.where(GenotypingProject.FIELDNAME_EFFECT_ANNOTATIONS).ne(new ArrayList<>())), "projects")) {
+        	LOG.info("Creating gene cache for db " + mongoTemplate.getDb().getName());
+        	long before = System.currentTimeMillis();
+        	String geneFieldPath = VariantRunData.SECTION_ADDITIONAL_INFO + "." + VariantRunData.FIELDNAME_ADDITIONAL_INFO_EFFECT_GENE;
             Aggregation aggregation = Aggregation.newAggregation(
-                Aggregation.unwind(aieffge),
-                Aggregation.group(aieffge)
-                    .addToSet("_id." + pi).as(pi),
+                Aggregation.unwind(geneFieldPath),
+                Aggregation.group(geneFieldPath).addToSet("_id." + Run.FIELDNAME_PROJECT_ID).as(Run.FIELDNAME_PROJECT_ID),
                 Aggregation.out(MgdbDao.COLLECTION_NAME_GENE_CACHE)
             );
-            mongoTemplate.aggregate(aggregation, "variantRunData", Object.class);
+            mongoTemplate.aggregate(aggregation, mongoTemplate.getCollectionName(VariantRunData.class), Object.class);
+            LOG.info("Creation of gene cache for db " + mongoTemplate.getDb().getName() + " took " + (System.currentTimeMillis() - before)/1000 + "s");
         }
-    }
-
-    private static boolean isCacheCreationNeeded(MongoTemplate mongoTemplate) {
-    	// Check if geneCache table have tuple
-    	long geneCacheCount = mongoTemplate.count(null, "geneCache");
-
-    	// Check if there is at least one project with the field ("ea") not empty
-        Query projectQuery = new Query(Criteria.where(GenotypingProject.FIELDNAME_EFFECT_ANNOTATIONS).ne(new ArrayList<>()));
-        boolean isEaNotEmpty = mongoTemplate.exists(projectQuery, "projects");
-
-        return geneCacheCount == 0 && isEaNotEmpty;
-    }
-    
+    }    
 }
