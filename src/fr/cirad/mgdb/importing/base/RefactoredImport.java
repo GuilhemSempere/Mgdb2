@@ -118,8 +118,8 @@ public abstract class RefactoredImport extends AbstractGenotypeImport {
                     mongoTemplate.save(ind);
             }
 
-            if (!individualsWithoutPopulation.isEmpty())
-                LOG.warn("Unable to find 3-letter population code for individuals: " + StringUtils.join(individualsWithoutPopulation, ", "));
+            if (!individualsWithoutPopulation.isEmpty() && populationCodesExpected())
+                LOG.warn("Unable to find population code for individuals: " + StringUtils.join(individualsWithoutPopulation, ", "));
 
             reader = new BufferedReader(new FileReader(tempFile));
 
@@ -166,7 +166,7 @@ public abstract class RefactoredImport extends AbstractGenotypeImport {
                                 String[] seqAndPos = pos == null ? null : pos.split("\t");
                                 if (seqAndPos != null && seqAndPos.length == 2) 
 	                                try {
-	                                    bpPosition = Long.parseLong(seqAndPos[1]);
+	                                    bpPosition = Long.parseLong(seqAndPos[1].replace(",", ""));
 	                                	sequence = seqAndPos[0];
 	                                    if ("0".equals(sequence) || 0 == bpPosition) {
 	                                        sequence = null;
@@ -300,7 +300,11 @@ public abstract class RefactoredImport extends AbstractGenotypeImport {
         return count.get();
     }
 
-    protected VariantRunData addDataToVariant(MongoTemplate mongoTemplate, VariantData variantToFeed, Integer nAssemblyId, String sequence, Long bpPos, LinkedHashMap<String, String> orderedIndOrSpToPopulationMap, Map<String, Type> nonSnpVariantTypeMap, String[][] alleles, GenotypingProject project, String runName, boolean fImportUnknownVariants) throws Exception
+    protected boolean populationCodesExpected() {
+		return false;
+	}
+
+	protected VariantRunData addDataToVariant(MongoTemplate mongoTemplate, VariantData variantToFeed, Integer nAssemblyId, String sequence, Long bpPos, LinkedHashMap<String, String> orderedIndOrSpToPopulationMap, Map<String, Type> nonSnpVariantTypeMap, String[][] alleles, GenotypingProject project, String runName, boolean fImportUnknownVariants) throws Exception
     {
         VariantRunData vrd = new VariantRunData(new VariantRunDataId(project.getId(), runName, variantToFeed.getId()));
 
