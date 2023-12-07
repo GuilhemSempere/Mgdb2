@@ -3,27 +3,34 @@ package fr.cirad.tools.query;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
-import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.Queue;
 import java.util.Spliterator;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Predicate;
 
-import fr.cirad.tools.query.GroupedExecutor.*;
+import fr.cirad.tools.query.GroupedExecutor.GroupedFutureTask;
+import fr.cirad.tools.query.GroupedExecutor.TaskWrapper;
 
 public class GroupedBlockingQueue<E> implements BlockingQueue<E> {
 
-    private Map<String, LinkedBlockingQueue<E>> taskGroups;
+	private HashMap<String, LinkedBlockingQueue<E>> taskGroups;
+    private HashSet<String> shutdownGroups = new HashSet<>();
     private int previousGroupIndex = -1; // Member variable to track the index of the previously selected group
 
     public GroupedBlockingQueue() {
         taskGroups = new HashMap<>();
     }
+    
+	public void shutdown(String group) {
+		shutdownGroups.add(group);
+	}
 
     @Override
     public boolean add(E e) {
@@ -37,6 +44,9 @@ public class GroupedBlockingQueue<E> implements BlockingQueue<E> {
     public boolean offer(E element) {
     	String group = GroupedFutureTask.class.equals(element.getClass()) && TaskWrapper.class.equals(((GroupedFutureTask<?>) element).getTask().getClass()) ?
     			((TaskWrapper) ((GroupedFutureTask<?>) element).getTask()).getGroup() : "";
+    	
+    	if (shutdownGroups.contains(group))
+            throw new RejectedExecutionException("Group " + group + " has already been shutdown");
 
         return offer(group, element);
     }
@@ -81,9 +91,8 @@ public class GroupedBlockingQueue<E> implements BlockingQueue<E> {
     }
 
     public boolean offer(String group, E element, long timeout, TimeUnit unit) throws InterruptedException {
-        if (group == null) {
+        if (group == null)
             throw new NullPointerException("Group cannot be null");
-        }
 
         Queue<E> groupQueue = taskGroups.computeIfAbsent(group, k -> new LinkedBlockingQueue<>());
         boolean offered = groupQueue.offer(element);
@@ -112,7 +121,6 @@ public class GroupedBlockingQueue<E> implements BlockingQueue<E> {
         return false;
     }
 
-    
     @Override
     public E take() throws InterruptedException {
         synchronized (this) {
@@ -131,10 +139,16 @@ public class GroupedBlockingQueue<E> implements BlockingQueue<E> {
 		                E element = groupQueue.poll();
 		                if (element != null) {
 		                    previousGroupIndex = currentIndex; // Update the previousGroupIndex variable
+//		                    System.err.println("picked: " + currentIndex + " / " + taskGroups.size());
 		                    return element;
 		                }
-		                else
-		                	taskGroups.remove(group);
+		                else if (taskGroups.get(group).isEmpty()) {
+		                	if (shutdownGroups.contains(group)) {
+		                		taskGroups.remove(group);
+		                		shutdownGroups.remove(group);
+//		                		System.err.println("removed: " + group + " / " + taskGroups.size());
+		                	}
+		                }
 	                }
 	            }
                 wait();
