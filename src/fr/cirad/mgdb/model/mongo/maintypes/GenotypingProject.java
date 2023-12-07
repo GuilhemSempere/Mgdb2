@@ -442,17 +442,4 @@ public class GenotypingProject {
     public TreeSet<String> getEffectAnnotations() {
         return effectAnnotations;
     }
-
-    public void clearEverythingExceptMetaData()
-    {
-		getRuns().clear();
-		getAlleleCounts().clear();
-		getEffectAnnotations().clear();
-		getVariantTypes().clear();
-		sequences.clear();
-		if (getContigs() != null)
-			getContigs().clear();
-		setPloidyLevel(0);
-		getAdditionalInfo().clear();
-    }
 }

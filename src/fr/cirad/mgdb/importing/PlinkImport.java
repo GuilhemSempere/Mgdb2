@@ -123,6 +123,11 @@ public class PlinkImport extends RefactoredImport {
         m_fCloseContextAfterImport = fCloseContextAfterImport;
         m_fAllowNewAssembly = fAllowNewAssembly;
     }
+    
+    @Override
+    protected boolean populationCodesExpected() {
+		return true;
+	}
 
     /**
      * The main method.
