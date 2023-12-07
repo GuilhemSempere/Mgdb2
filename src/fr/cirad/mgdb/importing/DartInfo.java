@@ -50,6 +50,8 @@ public class DartInfo {
 
     private String repAvg = null;
 
+    private String strand = null;
+
     private HashMap<String, Integer> sampleGenotypes = new HashMap<String, Integer>();
 
     public DartInfo(String alleleID, String individualName) {
@@ -75,6 +77,14 @@ public class DartInfo {
 
     public void setChromPos(Integer chromPos) {
         this.chromPos = chromPos;
+    }
+
+    public String getStrand() {
+        return strand;
+    }
+
+    public void setStrand(String strand) {
+        this.strand = strand;
     }
 
     public String getIndividualName() {
@@ -259,5 +269,20 @@ public class DartInfo {
 
     public void setSampleGenotypes(HashMap<String, Integer> sampleGenotypes) {
         this.sampleGenotypes = sampleGenotypes;
+    }
+
+    public Integer variantPos() {
+        if (strand.equals("-")) {
+            return chromPos - snpPos;
+        }
+        return chromPos + snpPos;
+    }
+
+    public Integer getStart() {
+        return variantPos();
+    }
+
+    public Integer getStop() {
+        return variantPos();
     }
 }

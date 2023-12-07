@@ -243,9 +243,17 @@ public class DartImport extends AbstractGenotypeImport {
         if (columnNames.containsKey("AvgCountSnp")) {
             dart.setAvgCountSNP(columns[columnNames.get("AvgCountSnp")]);
         }
+        if (columnNames.containsKey("Strand")) {
+            dart.setStrand(columns[columnNames.get("Strand")]);
+        }
         if (columnNames.containsKey("RepAvg")) {
             dart.setRepAvg(columns[columnNames.get("RepAvg")]);
+            int sampleIndex = columnNames.entrySet().stream().toList().indexOf("RepAvg") + 1;
+            String[] samplesName = (String[]) Arrays.copyOfRange(columnNames.keySet().toArray(), sampleIndex, columnNames.size());
+            int numberSamples = columnNames.size() - sampleIndex;
+
         }
+
 
         result.add(dart);
     }
