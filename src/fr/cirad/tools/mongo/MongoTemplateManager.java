@@ -114,12 +114,12 @@ public class MongoTemplateManager implements ApplicationContextAware {
     /**
      * The Executor to use for asynchronously querying each host
      */
-    static private Map<String, ExecutorService> hostExecutors = new HashMap<>();
+    static private Map<String, GroupedExecutor> hostExecutors = new HashMap<>();
     
     /**
      * The Executor to use for asynchronously querying each module
      */
-    static private Map<String, ExecutorService> moduleExecutors = new HashMap<>();
+    static private Map<String, GroupedExecutor> moduleExecutors = new HashMap<>();
     
     /**
      * The datasource  (properties filename)
@@ -325,7 +325,7 @@ public class MongoTemplateManager implements ApplicationContextAware {
 						MgdbDao.ensureVariantDataIndexes(mongoTemplate);	// FIXME: move to end of addRunsToVariantCollectionIfNecessary()
 						MgdbDao.ensurePositionIndexes(mongoTemplate, Arrays.asList(mongoTemplate.getCollection(mongoTemplate.getCollectionName(VariantData.class))));	// FIXME: move to end of addRunsToVariantCollectionIfNecessary()
 					} catch (Exception e) {
-						LOG.error("Error while adding run info to variants colleciton for db " + db, e);
+						LOG.error("Error while adding run info to variants collection for db " + db, e);
 					}
         		}
         	});
@@ -333,7 +333,7 @@ public class MongoTemplateManager implements ApplicationContextAware {
     }
 
     private static void assignExecutorToModule(String sHost, String sModule) {
-        ExecutorService executor = hostExecutors.get(sHost);
+    	GroupedExecutor executor = hostExecutors.get(sHost);
         if (executor == null) {
 	        int nExecutorPoolSize;
 	        try {
@@ -806,7 +806,7 @@ public class MongoTemplateManager implements ApplicationContextAware {
     	return template.findOne(new Query(), DatabaseInformation.class, "dbInfo");
     }
 
-	public static ExecutorService getExecutor(String sModule) {
+	public static GroupedExecutor getExecutor(String sModule) {
 		return moduleExecutors.get(sModule);
 	}
 }
