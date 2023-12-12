@@ -1,5 +1,6 @@
 package fr.cirad.mgdb.importing;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 
 public class DartInfo {
@@ -52,7 +53,11 @@ public class DartInfo {
 
     private String strand = null;
 
-    private HashMap<String, Integer> sampleGenotypes = new HashMap<String, Integer>();
+    private ArrayList<String> genotypes = new ArrayList<>();
+
+    private String[] alleles = new String[2];
+
+    private String[] sampleIDs = new String[]{};
 
     public DartInfo(String alleleID, String individualName) {
         this.alleleID = alleleID;
@@ -69,6 +74,30 @@ public class DartInfo {
         this.alnCnt = alnCnt;
         this.alnEvalue = alnEvalue;
         this.individualName = individualName;
+    }
+
+    public String[] getSampleIDs() {
+        return sampleIDs;
+    }
+
+    public void setSampleIDs(String[] sampleIDs) {
+        this.sampleIDs = sampleIDs;
+    }
+
+    public String[] getAlleles() {
+        return alleles;
+    }
+
+    public void setAlleles(String[] alleles) {
+        this.alleles = alleles;
+    }
+
+    public ArrayList<String> getGenotypes() {
+        return genotypes;
+    }
+
+    public void setGenotypes(ArrayList<String> genotypes) {
+        this.genotypes = genotypes;
     }
 
     public Integer getChromPos() {
@@ -263,14 +292,6 @@ public class DartInfo {
         this.snp = snp;
     }
 
-    public HashMap<String, Integer> getSampleGenotypes() {
-        return sampleGenotypes;
-    }
-
-    public void setSampleGenotypes(HashMap<String, Integer> sampleGenotypes) {
-        this.sampleGenotypes = sampleGenotypes;
-    }
-
     public Integer variantPos() {
         if (strand.equals("-")) {
             return chromPos - snpPos;
@@ -282,7 +303,7 @@ public class DartInfo {
         return variantPos();
     }
 
-    public Integer getStop() {
+    public Integer getEnd() {
         return variantPos();
     }
 }
