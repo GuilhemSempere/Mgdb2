@@ -170,4 +170,19 @@ public interface IExportHandler
             os.write("\n".getBytes());
         }
 	}
+	
+    public static Map<String, String> getIndividualPopulations(final Map<String, Collection<String>> individualsByPopulation, boolean fAllowIndividualsInMultipleGroups) throws Exception {
+    	Map<String, String> result = new HashMap<>();
+    	for (String pop : individualsByPopulation.keySet())
+    		for (String ind : individualsByPopulation.get(pop)) {
+    			if (result.containsKey(ind)) {
+    				if (!fAllowIndividualsInMultipleGroups)
+    					throw new Exception("Individual " + ind + " is part of several groups!");
+    				result.put(ind, result.get(ind) + ";" + pop);
+    			}
+    			else
+    				result.put(ind, pop);
+    		}
+        return result;
+    }
 }

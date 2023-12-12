@@ -307,6 +307,17 @@ public class FlapjackImport extends RefactoredImport {
         return allocatableMemory;
     }
 
+    private static String insertMissingDashes(String originalGenotypeData) {
+    	String result = null;
+    	while ((result == null ? originalGenotypeData : result).contains("\t\t"))
+    		result = (result == null ? originalGenotypeData : result).replaceAll("\t\t", "\t-\t");
+    	
+    	if (result == null)
+    		result = originalGenotypeData;
+    	
+    	return result.endsWith("\t") ? result + "-" : result;
+    }
+
     /**
      * 
      * @param genotypeFile
@@ -351,11 +362,8 @@ public class FlapjackImport extends RefactoredImport {
                 continue;
             }
 
-            Matcher initMatcher = allelePattern.matcher(initLine);
-            initMatcher.find();
-
             // Table header, with variant names, that starts with a tab (so the first non-whitespace word is not at index 0)
-            if (initMatcher.start() > 0) {
+            if (variants.isEmpty()) {
             	if (nIndividuals > 0)
             		throw new Exception("Invalid individual name at line " + lineno);
 
@@ -369,6 +377,8 @@ public class FlapjackImport extends RefactoredImport {
 
             // Normal data line
             else {
+                Matcher initMatcher = allelePattern.matcher(insertMissingDashes(initLine));
+                initMatcher.find();
                 String sIndividual = initMatcher.group().trim();
 
                 individualListToFill.add(sIndividual);
@@ -426,7 +436,7 @@ public class FlapjackImport extends RefactoredImport {
                         ArrayList<StringBuilder> transposed = new ArrayList<StringBuilder>();
 
                         while (blockStartMarkers.get(blockStartMarkers.size() - 1) < cVariants && progress.getError() == null && !progress.isAborted()) {
-                            FileReader reader = new FileReader(genotypeFile);
+                        	FileReader reader = new FileReader(genotypeFile);
                             try {
                                 int blockIndex, blockSize, blockStart;
                                 int bufferPosition = 0, bufferLength = 0;
@@ -514,7 +524,7 @@ public class FlapjackImport extends RefactoredImport {
                                         }
                                     // Non-trivial case : INDELs, heterozygotes and multi-characters separators
                                     } else {
-                                        Matcher matcher = allelePattern.matcher(lineBuffer);
+                                        Matcher matcher = allelePattern.matcher(insertMissingDashes(lineBuffer.toString()));
 
                                         // Start at the closest previous block that has already been mapped
                                         int startBlock = Math.min(blockIndex, individualPositions.size() - 1);
