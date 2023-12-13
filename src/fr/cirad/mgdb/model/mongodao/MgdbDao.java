@@ -66,6 +66,7 @@ import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoCursor;
 import com.mongodb.client.model.IndexOptions;
 import com.mongodb.client.result.DeleteResult;
+import com.mongodb.client.result.UpdateResult;
 
 import fr.cirad.mgdb.exporting.IExportHandler;
 import fr.cirad.mgdb.model.mongo.maintypes.Assembly;
@@ -875,6 +876,13 @@ public class MgdbDao {
 			LOG.debug("Removed " + nDeletedVariantSetCacheItems + " previously existing entries in " + VariantSet.BRAPI_CACHE_COLL_VARIANTSET + " in project " + nProjectId + " of module " + sModule);
 			fAnythingRemoved.set(true);
         }
+		
+		if (mongoTemplate.count(new Query(), MgdbDao.COLLECTION_NAME_GENE_CACHE) > 0) {
+	        Update update = new Update();
+	        update.pull(Run.FIELDNAME_PROJECT_ID, nProjectId);
+	        UpdateResult removalResult = mongoTemplate.updateMulti(new Query(), update, MgdbDao.COLLECTION_NAME_GENE_CACHE);
+//	        System.err.println(removalResult.getModifiedCount() + " removed");
+		}
 
         new Thread() {
             public void run() {
@@ -1056,7 +1064,8 @@ public class MgdbDao {
         MongoTemplateManager.updateDatabaseLastModification(mongoTemplate);
     }
     
-    public static void createGeneCacheIfNecessary(MongoTemplate mongoTemplate) {
+    public static void createGeneCacheIfNecessary(String sModule) {
+    	MongoTemplate mongoTemplate = MongoTemplateManager.get(sModule);
         if (mongoTemplate.count(new Query(), MgdbDao.COLLECTION_NAME_GENE_CACHE) == 0 && mongoTemplate.exists(new Query(Criteria.where(GenotypingProject.FIELDNAME_EFFECT_ANNOTATIONS).ne(new ArrayList<>())), "projects")) {
         	LOG.info("Creating gene cache for db " + mongoTemplate.getDb().getName());
         	long before = System.currentTimeMillis();
@@ -1067,6 +1076,7 @@ public class MgdbDao {
                 Aggregation.out(MgdbDao.COLLECTION_NAME_GENE_CACHE)
             );
             mongoTemplate.aggregate(aggregation, mongoTemplate.getCollectionName(VariantRunData.class), Object.class);
+            MongoTemplateManager.updateDatabaseLastModification(sModule);
             LOG.info("Creation of gene cache for db " + mongoTemplate.getDb().getName() + " took " + (System.currentTimeMillis() - before)/1000 + "s");
         }
     }    
