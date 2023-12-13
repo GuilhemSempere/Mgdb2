@@ -19,6 +19,11 @@ public class GroupedExecutor extends ThreadPoolExecutor {
 	public void shutdown(String group) {
 		((GroupedBlockingQueue) getQueue()).shutdown(group);
 	}
+	
+	@Override
+	public void setCorePoolSize(int n) {
+		throw new IllegalArgumentException("setCorePoolSize is disabled in " + this.getClass().getSimpleName());
+	}
     
     static public class GroupedFutureTask<V> extends FutureTask<V> implements Runnable {
         private Runnable task;
