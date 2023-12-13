@@ -39,6 +39,9 @@ import java.util.TreeMap;
 import java.util.TreeSet;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 import org.apache.log4j.Logger;
@@ -168,7 +171,13 @@ public class MongoTemplateManager implements ApplicationContextAware {
 	 */
 	private static HashMap<String /*module*/, Set<String> /*projects*/> currentlyImportedProjects = new HashMap<String, Set<String>>();
 
-    static final private int DEFAULT_MAXIMUM_NUMBER_OF_SIMULTANEOUS_QUERY_THREADS = 20;
+//	// for per-host ExecutorService
+//    static final private int DEFAULT_MAXIMUM_NUMBER_OF_SIMULTANEOUS_QUERY_THREADS = 20;
+    
+    // for old-style queries
+    static final public int INITIAL_NUMBER_OF_SIMULTANEOUS_QUERY_THREADS = 10;
+    static final public int MINIMUM_NUMBER_OF_SIMULTANEOUS_QUERY_THREADS = 5;
+    static final public int MAXIMUM_NUMBER_OF_SIMULTANEOUS_QUERY_THREADS = 50;
 
     @Override
     public void setApplicationContext(ApplicationContext ac) throws BeansException {
@@ -335,16 +344,16 @@ public class MongoTemplateManager implements ApplicationContextAware {
     private static void assignExecutorToModule(String sHost, String sModule) {
     	GroupedExecutor executor = hostExecutors.get(sHost);
         if (executor == null) {
-	        int nExecutorPoolSize;
-	        try {
-	        	nExecutorPoolSize = Integer.parseInt(appConfig.get("maxQueryThreads_" + sHost));
-	        }
-	        catch (Exception e) {
-	        	nExecutorPoolSize = DEFAULT_MAXIMUM_NUMBER_OF_SIMULTANEOUS_QUERY_THREADS;
-	        }
-			LOG.info("maxQueryThreads_" + sHost + ": " + nExecutorPoolSize);
-	        executor = new GroupedExecutor(nExecutorPoolSize);
-	        hostExecutors.put(sHost, executor);
+        	if (!hostExecutors.containsKey(sHost))
+		        try {
+		        	int nExecutorPoolSize = Integer.parseInt(appConfig.get("maxQueryThreads_" + sHost));
+					LOG.info("Found maxQueryThreads_" + sHost + ": " + nExecutorPoolSize);
+			        executor = new GroupedExecutor(nExecutorPoolSize);
+		        }
+		        catch (Exception e) {
+		        	LOG.info("No property maxQueryThreads_" + sHost + ". No ExecutorService will be dedicated to this host.");
+		        }
+	        hostExecutors.put(sHost, executor);	// add it even if null so we don't output the LOG line several times
         }
         moduleExecutors.put(sModule, executor);
 	}
@@ -806,7 +815,8 @@ public class MongoTemplateManager implements ApplicationContextAware {
     	return template.findOne(new Query(), DatabaseInformation.class, "dbInfo");
     }
 
-	public static GroupedExecutor getExecutor(String sModule) {
-		return moduleExecutors.get(sModule);
+	public static ExecutorService getExecutor(String sModule) {
+		GroupedExecutor executor = moduleExecutors.get(sModule);
+		return executor != null ? executor : new ThreadPoolExecutor(INITIAL_NUMBER_OF_SIMULTANEOUS_QUERY_THREADS, MAXIMUM_NUMBER_OF_SIMULTANEOUS_QUERY_THREADS, Long.MAX_VALUE, TimeUnit.DAYS, new LinkedBlockingQueue<>(), new ThreadPoolExecutor.CallerRunsPolicy());
 	}
 }
