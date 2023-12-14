@@ -73,60 +73,6 @@ public class DartImport extends AbstractGenotypeImport {
         m_processID = processID;
     }
 
-    /**
-     * The main method.
-     *
-     * @param args the arguments
-     * @throws Exception the exception
-     */
-    public static void main(String[] args) throws Exception {
-//        if (args.length < 6)
-//            throw new Exception("You must pass 6 parameters as arguments: DATASOURCE name, PROJECT name, RUN name, TECHNOLOGY string, HapMap file, and assembly name! An optional 7th parameter supports values '1' (empty project data before importing) and '2' (empty all variant data before importing, including marker list).");
-//
-//        File mainFile = new File(args[4]);
-//        if (!mainFile.exists() || mainFile.length() == 0)
-//            throw new Exception("File " + args[4] + " is missing or empty!");
-//
-//        int mode = 0;
-//        try
-//        {
-//            mode = Integer.parseInt(args[5]);
-//        }
-//        catch (Exception e)
-//        {
-//            LOG.warn("Unable to parse input mode. Using default (0): overwrite run if exists.");
-//        }
-//        new DartImport().importToMongo(args[0], args[1], args[2], args[3], null, new File(args[4]).toURI().toURL(), args[5], null, false, mode);
-        DartImport impor = new DartImport();
-        List<DartInfo> info = impor.getDartInfo("/home/biggio/Bureau/dart/CIAT_Report_DCob21-5999_2_moreOrders_SNP_3.csv");
-        System.out.println("AlleleID,CloneID,AlleleSequence,TrimmedSequence,Chrom_Rice_v9,ChromPos_Rice_v9,AlnCnt_Rice_v9,AlnEvalue_Rice_v9,SNP,SnpPosition,CallRate,OneRatioRef,OneRatioSnp,FreqHomRef,FreqHomSnp,FreqHets,PICRef,PICSnp,AvgPIC,AvgCountRef,AvgCountSnp,RepAvg,A15000001,A15000002,A15000003");
-        for (int i = 0; i < info.size(); i++) {
-            System.out.print(info.get(i).getAlleleID() + ",");
-            System.out.print(info.get(i).getCloneID() + ",");
-            System.out.print(info.get(i).getAlleleSequence() + ",");
-            System.out.print(info.get(i).getTrimmedSequence() + ",");
-            System.out.print(info.get(i).getChrom() + ",");
-            System.out.print(info.get(i).getChromPos()+ ",");
-            System.out.print(info.get(i).getAlnCnt() + ",");
-            System.out.print(info.get(i).getAlnEvalue() + ",");
-            System.out.print(info.get(i).getSnp() + ",");
-            System.out.print(info.get(i).getSnpPos() + ",");
-            System.out.print(info.get(i).getCallRate() + ",");
-            System.out.print(info.get(i).getOneRatioRef() + ",");
-            System.out.print(info.get(i).getOneRatioSNP() + ",");
-            System.out.print(info.get(i).getFreqHomeRef() + ",");
-            System.out.print(info.get(i).getFreqHomSnp() + ",");
-            System.out.print(info.get(i).getFreqHets() + ",");
-            System.out.print(info.get(i).getPicRef() + ",");
-            System.out.print(info.get(i).getPicSNP() + ",");
-            System.out.print(info.get(i).getAvgPic() + ",");
-            System.out.print(info.get(i).getAvgCountRef() + ",");
-            System.out.print(info.get(i).getAvgCountSNP() + ",");
-            System.out.println(info.get(i).getRepAvg());
-        }
-    }
-
-
     public List<DartInfo> getDartInfo(String path) throws Exception {
         FileReader fileReader = new FileReader(path);
 
@@ -187,9 +133,6 @@ public class DartImport extends AbstractGenotypeImport {
 
         String alleleID = columns[columnNames.get("AlleleID")];
         DartInfo dart = new DartInfo(alleleID, individualName);
-        if (columnNames.containsKey("CloneID")) {
-            dart.setCloneID(columns[columnNames.get("CloneID")]);
-        }
         if (columnNames.containsKey("AlleleSequence")) {
             dart.setAlleleSequence(columns[columnNames.get("AlleleSequence")]);
         }
@@ -202,56 +145,13 @@ public class DartImport extends AbstractGenotypeImport {
         if (columnNames.containsKey("ChromPos_" + individualName)) {
             dart.setChromPos(Integer.parseInt(columns[columnNames.get("ChromPos_" + individualName)]));
         }
-        if (columnNames.containsKey("AlnCnt_" + individualName)) {
-            dart.setAlnCnt(columns[columnNames.get("AlnCnt_" + individualName)]);
-        }
-        if (columnNames.containsKey("AlnEvalue_" + individualName)) {
-            dart.setAlnEvalue(columns[columnNames.get("AlnEvalue_" + individualName)]);
-        }
-        if (columnNames.containsKey("SNP")) {
-            dart.setSnp(columns[columnNames.get("SNP")]);
-        }
         if (columnNames.containsKey("SnpPosition")) {
             dart.setSnpPos(Integer.parseInt(columns[columnNames.get("SnpPosition")]));
         }
-        if (columnNames.containsKey("CallRate")) {
-            dart.setCallRate(columns[columnNames.get("CallRate")]);
-        }
-        if (columnNames.containsKey("OneRatioRef")) {
-            dart.setOneRatioRef(columns[columnNames.get("OneRatioRef")]);
-        }
-        if (columnNames.containsKey("OneRatioSnp")) {
-            dart.setOneRatioSNP(columns[columnNames.get("OneRatioSnp")]);
-        }
-        if (columnNames.containsKey("FreqHomRef")) {
-            dart.setFreqHomeRef(columns[columnNames.get("FreqHomRef")]);
-        }
-        if (columnNames.containsKey("FreqHomSnp")) {
-            dart.setFreqHomSnp(columns[columnNames.get("FreqHomSnp")]);
-        }
-        if (columnNames.containsKey("FreqHets")) {
-            dart.setFreqHets(columns[columnNames.get("FreqHets")]);
-        }
-        if (columnNames.containsKey("PICRef")) {
-            dart.setPicRef(columns[columnNames.get("PICRef")]);
-        }
-        if (columnNames.containsKey("PICSnp")) {
-            dart.setPicSNP(columns[columnNames.get("PICSnp")]);
-        }
-        if (columnNames.containsKey("AvgPIC")) {
-            dart.setAvgPic(columns[columnNames.get("AvgPIC")]);
-        }
-        if (columnNames.containsKey("AvgCountRef")) {
-            dart.setAvgCountRef(columns[columnNames.get("AvgCountRef")]);
-        }
-        if (columnNames.containsKey("AvgCountSnp")) {
-            dart.setAvgCountSNP(columns[columnNames.get("AvgCountSnp")]);
-        }
-        if (columnNames.containsKey("Strand")) {
-            dart.setStrand(columns[columnNames.get("Strand")]);
+        if (columnNames.containsKey("strand")) {
+            dart.setStrand(columns[columnNames.get("strand")]);
         }
         if (columnNames.containsKey("RepAvg")) {
-            dart.setRepAvg(columns[columnNames.get("RepAvg")]);
             int sampleIndex = columnNames.get("RepAvg") + 1;
             String[] samplesName = Arrays.copyOfRange(columnName, sampleIndex, columnName.length);
             dart.setSampleIDs(samplesName);
