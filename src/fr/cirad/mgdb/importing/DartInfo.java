@@ -51,7 +51,7 @@ public class DartInfo {
 
     private String repAvg = null;
 
-    private String strand = null;
+    private String strand = "+";
 
     private ArrayList<String> genotypes = new ArrayList<>();
 

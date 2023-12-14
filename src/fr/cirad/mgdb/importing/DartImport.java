@@ -161,15 +161,19 @@ public class DartImport extends AbstractGenotypeImport {
             }
             else {
                 if (lineIndex == 1) {
-                    String alleleID1 = line.split(",")[0].split("[^A-Za-z]")[0];
+                    String alleleID1 = line.split(",")[0].split("[^0-9]")[0];
                     String line1 = line;
                     line = bufferedReader.readLine();
                     lineIndex++;
-                    String alleleID2 = line.split(",")[0].split("[^A-Za-z]")[0];
-                    tworow = alleleID1 == alleleID2;
-                    genericDartLine(line1, result, columnNames, individualName, tworow, lineIndex);
+                    String alleleID2 = line.split(",")[0].split("[^0-9]")[0];
+                    tworow = alleleID1.equals(alleleID2);
+                    genericDartLine(line1, line, bufferedReader, result, columnNames, individualName, tworow, columnName);
                 }
-                genericDartLine(line, result, columnNames, individualName, tworow, lineIndex);
+                else {
+                    genericDartLine(line, null, bufferedReader, result, columnNames, individualName, tworow, columnName);
+                    if (tworow)
+                        lineIndex++;
+                }
             }
             line = bufferedReader.readLine();
             lineIndex++;
@@ -178,7 +182,7 @@ public class DartImport extends AbstractGenotypeImport {
         return result;
     }
 
-    private void genericDartLine (String line, List<DartInfo> result, HashMap<String, Integer> columnNames, String individualName, boolean tworow, Integer lineIndex) throws Exception {
+    private void genericDartLine (String line, String startLine, BufferedReader bufferedReader, List<DartInfo> result, HashMap<String, Integer> columnNames, String individualName, boolean tworow, String[] columnName) throws Exception {
         String[] columns = line.split(",");
 
         String alleleID = columns[columnNames.get("AlleleID")];
@@ -248,22 +252,48 @@ public class DartImport extends AbstractGenotypeImport {
         }
         if (columnNames.containsKey("RepAvg")) {
             dart.setRepAvg(columns[columnNames.get("RepAvg")]);
-            int sampleIndex = columnNames.entrySet().stream().toList().indexOf("RepAvg") + 1;
-            String[] samplesName = (String[]) Arrays.copyOfRange(columnNames.keySet().toArray(), sampleIndex, columnNames.size());
+            int sampleIndex = columnNames.get("RepAvg") + 1;
+            String[] samplesName = Arrays.copyOfRange(columnName, sampleIndex, columnName.length);
             dart.setSampleIDs(samplesName);
             int numberSamples = columnNames.size() - sampleIndex;
-            String[] samples = Arrays.copyOfRange(columns, sampleIndex, columns.length);
             ArrayList<String> genotypes = new ArrayList<String>();
+            String[] samples = Arrays.copyOfRange(columns, sampleIndex, columns.length);
             int altIndex = dart.getAlleleID().indexOf('>');
             char ref = dart.getAlleleID().charAt(altIndex - 1);
             char alt = dart.getAlleleID().charAt(altIndex + 1);
             dart.setAlleles(new String[]{"" + ref, "" + alt});
-            for (int i = 0; i < numberSamples; i++) {
-                genotypes.add(genotypeOfSample(ref, alt, Integer.parseInt(samples[i])));
-            }
-            dart.setGenotypes(genotypes);
-        }
+            if (!tworow) {
+                for (int i = 0; i < numberSamples; i++) {
+                    if (samples[i].equals("-"))
+                        genotypes.add(genotypeOfSample(ref, alt, 3));
+                    else
+                        genotypes.add(genotypeOfSample(ref, alt, Integer.parseInt(samples[i])));
+                }
+                dart.setGenotypes(genotypes);
+                if (startLine != null){
+                    result.add(dart);
+                    genericDartLine(startLine, null, bufferedReader, result, columnNames, individualName, tworow, columnName);
+                    return;
+                }
 
+            }
+            else {
+                if (startLine != null)
+                    line = startLine;
+                else
+                    line = bufferedReader.readLine();
+                String[] columns2 = line.split(",");
+                String[] samples2 = Arrays.copyOfRange(columns2, sampleIndex, columns2.length);
+                for (int i = 0; i < numberSamples; i++) {
+                    if (samples[i].equals("-") || samples2[i].equals("-"))
+                        genotypes.add(genotypeOfSampleTwoRow(ref, alt, 3, 3));
+                    else
+                        genotypes.add(genotypeOfSampleTwoRow(ref, alt, Integer.parseInt(samples[i]), Integer.parseInt(samples2[i])));
+                }
+                dart.setGenotypes(genotypes);
+            }
+
+        }
 
         result.add(dart);
     }
@@ -276,8 +306,31 @@ public class DartImport extends AbstractGenotypeImport {
                 return "" + alt + alt;
             case 2:
                 return "" + ref + alt;
+            case 3:
+                return "NN";
             default:
                 throw new Exception("Sample's state have to be 0, 1 or 2 on OneRow");
+        }
+    }
+
+    public String genotypeOfSampleTwoRow(char ref, char alt, int state1, int state2) throws Exception {
+        switch (state1) {
+            case 0:
+                if (state2 == 0)
+                    return "" + ref + ref;
+                if (state2 == 1)
+                    return "" + ref + alt;
+                throw new Exception("Sample's state have to be 0 or 1 on TwoRow");
+            case 1:
+                if (state2 == 0)
+                    return "" + alt + ref;
+                if (state2 == 1)
+                    return "" + alt + alt;
+                throw new Exception("Sample's state have to be 0 or 1 on TwoRow");
+            case 3:
+                return "NN";
+            default:
+                throw new Exception("Sample's state have to be 0 or 1 on TwoRow");
         }
     }
 
@@ -421,7 +474,7 @@ public class DartImport extends AbstractGenotypeImport {
                                                     return;
                                                 }
 
-                                                if (!fDbAlreadyContainedIndividuals || finalMongoTemplate.findById(sIndividual, Individual.class) == null)  // we don't have any population data so we don't need to update the Individual if it already exists
+                                                if (!fDbAlreadyContainedIndividuals && finalMongoTemplate.findById(sIndividual, Individual.class) == null)  // we don't have any population data so we don't need to update the Individual if it already exists
                                                     indsToAdd.add(new Individual(sIndividual));
 
                                                 if (!indsToAdd.isEmpty() && indsToAdd.size() % 1000 == 0) {
