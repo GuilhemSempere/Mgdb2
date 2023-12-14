@@ -554,7 +554,7 @@ public class MongoTemplateManager implements ApplicationContextAware {
     	
         new Thread() {
             public void run() {
-                for (String module : MongoTemplateManager.getTemplateMap().keySet()) {
+                for (String module : getTemplateMap().keySet()) {
                     for (String tempCollName : tempCollNames) { // drop all temp collections associated to this token in this module
                         MongoCollection<Document> coll = templateMap.get(module).getCollection(tempCollName);
                         if (coll.estimatedDocumentCount() != 0) {
@@ -758,20 +758,19 @@ public class MongoTemplateManager implements ApplicationContextAware {
     }
     
     public static void updateDatabaseLastModification(MongoTemplate template) {
-    	MongoTemplateManager.updateDatabaseLastModification(template, new Date(), false);
+    	updateDatabaseLastModification(template, new Date(), false);
     }
 
     public static void updateDatabaseLastModification(String sModule) {
-    	MongoTemplateManager.updateDatabaseLastModification(sModule, new Date(), false);
+    	updateDatabaseLastModification(sModule, new Date(), false);
     }
     
     public static void updateDatabaseLastModification(String sModule, Date lastModification, boolean restored) {
-    	MongoTemplateManager.updateDatabaseLastModification(MongoTemplateManager.get(sModule), lastModification, restored);
-    	MongoTemplate template = MongoTemplateManager.get(sModule);
+    	updateDatabaseLastModification(get(sModule), lastModification, restored);
     }
     
     public static DatabaseInformation getDatabaseInformation(String sModule) {
-    	MongoTemplate template = MongoTemplateManager.get(sModule);
+    	MongoTemplate template = get(sModule);
     	return template.findOne(new Query(), DatabaseInformation.class, "dbInfo");
     }
 }
