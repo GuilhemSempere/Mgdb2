@@ -21,7 +21,7 @@ public class DartInfo {
 
     private String strand = "+";
 
-    private ArrayList<String> genotypes = new ArrayList<>();
+    private String[] genotypes = null;
 
     private String[] alleles = new String[2];
 
@@ -57,11 +57,11 @@ public class DartInfo {
         this.alleles = alleles;
     }
 
-    public ArrayList<String> getGenotypes() {
+    public String[] getGenotypes() {
         return genotypes;
     }
 
-    public void setGenotypes(ArrayList<String> genotypes) {
+    public void setGenotypes(String[] genotypes) {
         this.genotypes = genotypes;
     }
 

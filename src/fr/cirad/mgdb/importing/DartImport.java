@@ -156,7 +156,7 @@ public class DartImport extends AbstractGenotypeImport {
             String[] samplesName = Arrays.copyOfRange(columnName, sampleIndex, columnName.length);
             dart.setSampleIDs(samplesName);
             int numberSamples = columnNames.size() - sampleIndex;
-            ArrayList<String> genotypes = new ArrayList<String>();
+            String[] genotypes = new String[numberSamples];
             String[] samples = Arrays.copyOfRange(columns, sampleIndex, columns.length);
             int altIndex = dart.getAlleleID().indexOf('>');
             char ref = dart.getAlleleID().charAt(altIndex - 1);
@@ -165,9 +165,9 @@ public class DartImport extends AbstractGenotypeImport {
             if (!tworow) {
                 for (int i = 0; i < numberSamples; i++) {
                     if (samples[i].equals("-"))
-                        genotypes.add(genotypeOfSample(ref, alt, 3));
+                        genotypes[i] = genotypeOfSample(ref, alt, 3);
                     else
-                        genotypes.add(genotypeOfSample(ref, alt, Integer.parseInt(samples[i])));
+                        genotypes[i] = genotypeOfSample(ref, alt, Integer.parseInt(samples[i]));
                 }
                 dart.setGenotypes(genotypes);
                 if (startLine != null){
@@ -186,9 +186,9 @@ public class DartImport extends AbstractGenotypeImport {
                 String[] samples2 = Arrays.copyOfRange(columns2, sampleIndex, columns2.length);
                 for (int i = 0; i < numberSamples; i++) {
                     if (samples[i].equals("-") || samples2[i].equals("-"))
-                        genotypes.add(genotypeOfSampleTwoRow(ref, alt, 3, 3));
+                        genotypes[i] = genotypeOfSampleTwoRow(ref, alt, 3, 3);
                     else
-                        genotypes.add(genotypeOfSampleTwoRow(ref, alt, Integer.parseInt(samples[i]), Integer.parseInt(samples2[i])));
+                        genotypes[i] = genotypeOfSampleTwoRow(ref, alt, Integer.parseInt(samples[i]), Integer.parseInt(samples2[i]));
                 }
                 dart.setGenotypes(genotypes);
             }
@@ -414,7 +414,7 @@ public class DartImport extends AbstractGenotypeImport {
                                     }
 
                                     if (variantId == null && fSkipMonomorphic) {
-                                        String[] distinctGTs = dartFeature.getGenotypes().stream().filter(gt -> !"NA".equals(gt) && !"NN".equals(gt)).distinct().toArray(String[]::new);
+                                        String[] distinctGTs = Arrays.stream(dartFeature.getGenotypes()).filter(gt -> !"NA".equals(gt) && !"NN".equals(gt)).distinct().toArray(String[]::new);
                                         if (distinctGTs.length == 0 || (distinctGTs.length == 1 && Arrays.stream(distinctGTs[0].split(variantType.equals(Type.SNP) ? "" : "/")).distinct().count() < 2))
                                             continue; // skip non-variant positions that are not already known
                                     }
@@ -568,8 +568,9 @@ public class DartImport extends AbstractGenotypeImport {
 
 		VariantRunData vrd = new VariantRunData(new VariantRunDataId(project.getId(), runName, variantToFeed.getId()));
 		HashSet<Integer> ploidiesFound = new HashSet<>();
-		for (int i=0; i<dartFeature.getGenotypes().size(); i++) {
-            String genotype = dartFeature.getGenotypes().get(i).toUpperCase();
+        String[] genotypes = dartFeature.getGenotypes();
+		for (int i=0; i<genotypes.length; i++) {
+            String genotype = genotypes[i].toUpperCase();
             if (genotype.startsWith("N"))
                 continue;    // we don't add missing genotypes
 
