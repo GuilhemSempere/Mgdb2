@@ -404,7 +404,9 @@ public class VcfImport extends AbstractGenotypeImport {
                                     VariantRunData runToSave = addVcfDataToVariant(finalMongoTemplate, header, variant, nAssemblyId, vcfEntry, finalProject, sRun, phasingGroups, finalEffectAnnotationPos, finalGeneIdAnnotationPos);
                                     if (!unsavedRuns.contains(runToSave)) {
                                         unsavedRuns.add(runToSave);
-                                        distinctEncounteredGeneNames.addAll((Collection<? extends String>) runToSave.getAdditionalInfo().get(VariantRunData.FIELDNAME_ADDITIONAL_INFO_EFFECT_GENE));
+                                        Collection<String> variantGenes = (Collection<String>) runToSave.getAdditionalInfo().get(VariantRunData.FIELDNAME_ADDITIONAL_INFO_EFFECT_GENE);
+                                        if (variantGenes != null)
+                                        	distinctEncounteredGeneNames.addAll((Collection<? extends String>) variantGenes);
                                     }
 
                                     finalProject.getAlleleCounts().add(variant.getKnownAlleles().size());    // it's a Set so it will only be added if it's not already present
