@@ -111,7 +111,7 @@ public class DartInfo {
 
     public void setChrom(String chrom) {
         if (chrom.isEmpty() || chrom.equals("0"))
-            chrom = "Chrom_Un";
+            chrom = "Un";
         if (chrom.contains(" "))
             chrom = chrom.split(" ")[0];
         this.chrom = chrom;
