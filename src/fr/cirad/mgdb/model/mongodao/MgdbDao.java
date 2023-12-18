@@ -66,6 +66,7 @@ import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoCursor;
 import com.mongodb.client.model.IndexOptions;
 import com.mongodb.client.result.DeleteResult;
+import com.mongodb.client.result.UpdateResult;
 
 import fr.cirad.mgdb.exporting.IExportHandler;
 import fr.cirad.mgdb.model.mongo.maintypes.Assembly;
@@ -82,6 +83,7 @@ import fr.cirad.mgdb.model.mongo.maintypes.Individual;
 import fr.cirad.mgdb.model.mongo.maintypes.VariantData;
 import fr.cirad.mgdb.model.mongo.maintypes.VariantRunData;
 import fr.cirad.mgdb.model.mongo.subtypes.ReferencePosition;
+import fr.cirad.mgdb.model.mongo.subtypes.Run;
 import fr.cirad.mgdb.model.mongo.subtypes.VariantRunDataId;
 import fr.cirad.tools.Helper;
 import fr.cirad.tools.SessionAttributeAwareThread;
@@ -108,6 +110,8 @@ public class MgdbDao {
      * The Constant COLLECTION_NAME_TAGGED_VARIANT_IDS.
      */
     static final public String COLLECTION_NAME_TAGGED_VARIANT_IDS = "taggedVariants";
+    
+    static final public String COLLECTION_NAME_GENE_CACHE = "geneCache";
 
     /**
      * The Constant FIELD_NAME_CACHED_COUNT_VALUE.
@@ -872,6 +876,17 @@ public class MgdbDao {
 			LOG.debug("Removed " + nDeletedVariantSetCacheItems + " previously existing entries in " + VariantSet.BRAPI_CACHE_COLL_VARIANTSET + " in project " + nProjectId + " of module " + sModule);
 			fAnythingRemoved.set(true);
         }
+		
+		if (mongoTemplate.count(new Query(), MgdbDao.COLLECTION_NAME_GENE_CACHE) > 0) {
+	        Update update = new Update();
+	        update.pull(Run.FIELDNAME_PROJECT_ID, nProjectId);
+	        UpdateResult projRefRemovalResult = mongoTemplate.updateMulti(new Query(), update, MgdbDao.COLLECTION_NAME_GENE_CACHE);
+	        if (projRefRemovalResult.getModifiedCount() > 0)
+	        	LOG.debug("Removed " + projRefRemovalResult.getModifiedCount() + " project references in gene cache of module " + sModule);
+	        DeleteResult geneCacheRemovalResult = mongoTemplate.remove(new Query(Criteria.where(Run.FIELDNAME_PROJECT_ID).size(0)), MgdbDao.COLLECTION_NAME_GENE_CACHE);
+	        if (geneCacheRemovalResult.getDeletedCount() > 0)
+	        	LOG.debug("Removed " + geneCacheRemovalResult.getDeletedCount() + " gene cache entries from module " + sModule);
+		}
 
         new Thread() {
             public void run() {
@@ -924,6 +939,23 @@ public class MgdbDao {
         if (mongoTemplate.updateFirst(new Query(Criteria.where("_id").is(nProjectId)), new Update().pull(GenotypingProject.FIELDNAME_RUNS, sRun), GenotypingProject.class).getModifiedCount() > 0) {
             LOG.info("Removed run " + sRun + " from project " + nProjectId + " of module " + sModule);
             fAnythingRemoved.set(true);
+            
+    		// we have no other option than re-creating the entire gene-cache because we don't keep track of which project run(s) refer to the genes 
+    		if (Helper.estimDocCount(mongoTemplate, MgdbDao.COLLECTION_NAME_GENE_CACHE) > 0)
+    			new Thread() {
+    				public void run() {
+                    	MongoNamespace activeNameSpace = mongoTemplate.getCollection(MgdbDao.COLLECTION_NAME_GENE_CACHE).getNamespace(), backupNameSpace = new MongoNamespace(activeNameSpace.getDatabaseName(), activeNameSpace.getCollectionName() + "_old");
+                    	mongoTemplate.getCollection(MgdbDao.COLLECTION_NAME_GENE_CACHE).renameCollection(backupNameSpace);
+    	                try {
+    	            		MgdbDao.createGeneCacheIfNecessary(sModule, MgdbDao.COLLECTION_NAME_GENE_CACHE);
+    	            		mongoTemplate.getCollection(backupNameSpace.getCollectionName()).drop();
+    	                } catch (Exception e) {
+    	                	mongoTemplate.getCollection(MgdbDao.COLLECTION_NAME_GENE_CACHE).drop();
+    	                	mongoTemplate.getCollection(backupNameSpace.getCollectionName()).renameCollection(activeNameSpace);
+    						LOG.error("Error while re-creating gene-cache collection for db " + sModule, e);
+    					}
+    	    		}
+    	    	}.start();
         }
 
         if (mongoTemplate.remove(new Query(new Criteria().andOperator(Criteria.where("_id." + DBVCFHeader.VcfHeaderId.FIELDNAME_PROJECT).is(nProjectId), Criteria.where("_id." + DBVCFHeader.VcfHeaderId.FIELDNAME_RUN).is(sRun))), DBVCFHeader.class).getDeletedCount() > 0) {
@@ -935,7 +967,7 @@ public class MgdbDao {
 			LOG.debug("Removed previously existing entry in " + VariantSet.BRAPI_CACHE_COLL_VARIANTSET + " for run " + sRun + " in project " + nProjectId + " of module " + sModule);
 			fAnythingRemoved.set(true);
         }
-
+		
         new Thread() {
             public void run() {
                 long nRemovedVrdCount = mongoTemplate.remove(new Query(new Criteria().andOperator(Criteria.where("_id." + VariantRunDataId.FIELDNAME_PROJECT_ID).is(nProjectId), Criteria.where("_id." + VariantRunDataId.FIELDNAME_RUNNAME).is(sRun))), VariantRunData.class).getDeletedCount();
@@ -1052,4 +1084,21 @@ public class MgdbDao {
         mongoTemplate.getCollection(copyCollectionName).renameCollection(activeNameSpace);
         MongoTemplateManager.updateDatabaseLastModification(mongoTemplate);
     }
+    
+    public static void createGeneCacheIfNecessary(String sModule, String sOutputCollectionName) throws Exception {
+    	MongoTemplate mongoTemplate = MongoTemplateManager.get(sModule);
+        if (mongoTemplate.count(new Query(), sOutputCollectionName) == 0 && mongoTemplate.exists(new Query(Criteria.where(GenotypingProject.FIELDNAME_EFFECT_ANNOTATIONS).ne(new ArrayList<>())), "projects")) {
+        	LOG.info("Creating gene cache for db " + mongoTemplate.getDb().getName());
+        	long before = System.currentTimeMillis();
+        	String geneFieldPath = VariantRunData.SECTION_ADDITIONAL_INFO + "." + VariantRunData.FIELDNAME_ADDITIONAL_INFO_EFFECT_GENE;
+            Aggregation aggregation = Aggregation.newAggregation(
+                Aggregation.unwind(geneFieldPath),
+                Aggregation.group(geneFieldPath).addToSet("_id." + Run.FIELDNAME_PROJECT_ID).as(Run.FIELDNAME_PROJECT_ID),
+                Aggregation.out(sOutputCollectionName)
+            );
+            mongoTemplate.aggregate(aggregation, mongoTemplate.getCollectionName(VariantRunData.class), Object.class);
+            MongoTemplateManager.updateDatabaseLastModification(sModule);
+            LOG.info("Creation of gene cache for db " + mongoTemplate.getDb().getName() + " took " + (System.currentTimeMillis() - before)/1000 + "s");
+        }
+    }    
 }
