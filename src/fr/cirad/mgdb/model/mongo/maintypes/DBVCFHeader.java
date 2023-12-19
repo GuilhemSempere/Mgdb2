@@ -114,6 +114,8 @@ public class DBVCFHeader
 	 *        to be able to reload and save those lines properly */
 	private Map<String, VCFSimpleHeaderLine> mFilterMetaData = new LinkedHashMap<>();
 
+    public final static String FIELDNAME_FORMAT_METADATA = "mFormatMetaData";
+    
 	/** The m other meta data. */
 	private Map<String, VCFHeaderLine> mOtherMetaData = new LinkedHashMap<>();
 
