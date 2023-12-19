@@ -16,6 +16,8 @@
  *******************************************************************************/
 package fr.cirad.mgdb.model.mongo.maintypes;
 
+import java.util.LinkedHashMap;
+
 import org.springframework.data.annotation.Id;
 import org.springframework.data.annotation.TypeAlias;
 import org.springframework.data.mongodb.core.mapping.Document;
@@ -38,6 +40,11 @@ public class Population
 	/** The Constant FIELDNAME_POPULATION_GROUP. */
 	public final static String FIELDNAME_POPULATION_GROUP = "pg";
 	
+	/**
+	* The Constant SECTION_ADDITIONAL_INFO.
+	*/
+	public final static String SECTION_ADDITIONAL_INFO = "ai";
+	
 	/** The id. */
 	@Id
 	private String id;
@@ -53,6 +60,12 @@ public class Population
 	/** The pop group. */
 	@Field(FIELDNAME_POPULATION_GROUP)
 	private String popGroup;	
+
+	/**
+	* The additional info.
+	*/
+	@Field(SECTION_ADDITIONAL_INFO)
+	private LinkedHashMap<String, Object> additionalInfo = null;
 
 	/**
 	 * Instantiates a new population.
@@ -139,4 +152,24 @@ public String getName() {
 		this.popGroup = popGroup;
 	}
 
+	/**
+	* Gets the additional info.
+	*
+	* @return the additional info
+	*/
+	public LinkedHashMap<String, Object> getAdditionalInfo() {
+	    if (additionalInfo == null) {
+	        additionalInfo = new LinkedHashMap<String, Object>();
+	    }
+	    return additionalInfo;
+	}
+
+    	/**
+     	* Sets the additional info.
+     	*
+     	* @param additionalInfo the additional info
+     	*/
+    	public void setAdditionalInfo(LinkedHashMap<String, Object> additionalInfo) {
+	    this.additionalInfo = additionalInfo;
+    	}
 }

@@ -8,7 +8,6 @@ import java.io.FileWriter;
 import java.io.IOException;
 import java.io.PrintStream;
 import java.net.URL;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -33,6 +32,7 @@ import org.snpeff.snpEffect.SnpEffectPredictor;
 import org.snpeff.snpEffect.VariantEffect;
 import org.snpeff.snpEffect.VariantEffects;
 import org.snpeff.util.Download;
+import org.snpeff.util.DownloadWithProgress;
 import org.snpeff.util.Log;
 import org.snpeff.vcf.EffFormatVersion;
 import org.springframework.data.mongodb.core.MongoTemplate;
@@ -45,6 +45,7 @@ import fr.cirad.mgdb.model.mongo.maintypes.DBVCFHeader;
 import fr.cirad.mgdb.model.mongo.maintypes.DBVCFHeader.VcfHeaderId;
 import fr.cirad.mgdb.model.mongo.maintypes.GenotypingProject;
 import fr.cirad.mgdb.model.mongo.maintypes.VariantRunData;
+import fr.cirad.mgdb.model.mongo.subtypes.Run;
 import fr.cirad.tools.ProgressIndicator;
 import fr.cirad.tools.mongo.MongoTemplateManager;
 import htsjdk.variant.vcf.VCFHeaderLineCount;
@@ -83,8 +84,8 @@ public class SnpEffAnnotationService {
 		TreeSet<String> projectEffects = project.getEffectAnnotations();
 
 		BasicDBObject vrdQuery = new BasicDBObject();
-		vrdQuery.put("_id." + VariantRunData.VariantRunDataId.FIELDNAME_PROJECT_ID, projectId);
-		vrdQuery.put("_id." + VariantRunData.VariantRunDataId.FIELDNAME_RUNNAME, run);
+		vrdQuery.put("_id." + Run.FIELDNAME_PROJECT_ID, projectId);
+		vrdQuery.put("_id." + Run.FIELDNAME_RUNNAME, run);
 		FindIterable<Document> variantRunData = template.getCollection(MongoTemplateManager.getMongoCollectionName(VariantRunData.class)).find(vrdQuery).batchSize(100);
 
 		progress.addStep("Processing variants");
@@ -217,7 +218,7 @@ public class SnpEffAnnotationService {
 	private static boolean downloadGenome(Config config, URL url, boolean maskExceptions) {
 		String localFile = System.getProperty("java.io.tmpdir") + "/" + Download.urlBaseName(url.toString());
 
-        Download download = new Download();
+		DownloadWithProgress download = new DownloadWithProgress();
         download.setVerbose(false);
         download.setDebug(false);
         download.setUpdate(false);

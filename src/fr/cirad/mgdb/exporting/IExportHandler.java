@@ -16,20 +16,23 @@
  *******************************************************************************/
 package fr.cirad.mgdb.exporting;
 
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.OutputStream;
+import java.io.*;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.Collection;
 import java.util.Enumeration;
 import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.zip.GZIPOutputStream;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
 import javax.servlet.http.HttpSession;
 
+import htsjdk.samtools.util.BlockCompressedOutputStream;
 import org.apache.log4j.Logger;
 import org.bson.Document;
 import org.springframework.data.mongodb.core.MongoTemplate;
@@ -41,12 +44,11 @@ import com.mongodb.client.MongoCursor;
 import com.mongodb.client.model.Collation;
 
 import fr.cirad.mgdb.model.mongo.maintypes.Individual;
-import fr.cirad.mgdb.model.mongo.maintypes.VariantData;
 import fr.cirad.mgdb.model.mongo.maintypes.VariantRunData;
 import fr.cirad.mgdb.model.mongo.subtypes.AbstractVariantData;
-import fr.cirad.mgdb.model.mongo.subtypes.ReferencePosition;
 import fr.cirad.mgdb.model.mongodao.MgdbDao;
 import fr.cirad.tools.Helper;
+import fr.cirad.tools.security.base.AbstractTokenManager;
 
 /**
  * The Interface IExportHandler.
@@ -57,8 +59,6 @@ public interface IExportHandler
 	/** The Constant LOG. */
 	static final Logger LOG = Logger.getLogger(IExportHandler.class);
 	
-	static final Document projectionDoc = new Document(VariantData.FIELDNAME_REFERENCE_POSITION + "." + ReferencePosition.FIELDNAME_SEQUENCE, 1).append(VariantData.FIELDNAME_REFERENCE_POSITION + "." + ReferencePosition.FIELDNAME_START_SITE, 1);	
-	static final Document sortDoc = new Document(AbstractVariantData.FIELDNAME_REFERENCE_POSITION + "." + ReferencePosition.FIELDNAME_SEQUENCE, 1).append(AbstractVariantData.FIELDNAME_REFERENCE_POSITION + "." + ReferencePosition.FIELDNAME_START_SITE, 1);
 	static final Collation collationObj = Collation.builder().numericOrdering(true).locale("en_US").build();
 	
 	/** The Constant nMaxChunkSizeInMb. */
@@ -105,7 +105,8 @@ public interface IExportHandler
 	/**
 	 * Gets the export files' extensions.
 	 *
-	 * @return the export files' extensions.
+	 * @return the exp@Override
+    ort files' extensions.
 	 */
 	public String[] getExportDataFileExtensions();
 	
@@ -123,8 +124,8 @@ public interface IExportHandler
 	 */
 	public List<String> getSupportedVariantTypes();
 	
-	public static MongoCursor<Document> getMarkerCursorWithCorrectCollation(MongoCollection<Document> varColl, Document varQuery, int nQueryChunkSize) {
-		return varColl.find(varQuery).projection(projectionDoc).sort(sortDoc).noCursorTimeout(true).collation(collationObj).batchSize(nQueryChunkSize).iterator();
+	public static MongoCursor<Document> getMarkerCursorWithCorrectCollation(MongoCollection<Document> varColl, Document varQuery, Document projectionAndSortDoc, int nQueryChunkSize) {
+		return varColl.find(varQuery).projection(projectionAndSortDoc).sort(projectionAndSortDoc).noCursorTimeout(true).collation(collationObj).batchSize(nQueryChunkSize).iterator();
 	}
 
 	public static ZipOutputStream createArchiveOutputStream(OutputStream outputStream, Map<String, InputStream> readyToExportFiles) throws IOException {
@@ -151,13 +152,8 @@ public interface IExportHandler
 		return (int) Math.max(1, Math.min(nExportedVariantCount / 20 /* no more than 5% at a time */, (nMaxChunkSizeInMb*1024*1024 / avgObjSize.doubleValue())));
 	}
 	
-	public static String getLoggedUserName() {
-        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
-        return auth == null || "anonymousUser".equals(auth.getName()) ? "anonymousUser" : auth.getName();	    
-	}
-	
-	public static void writeMetadataFile(String sModule, Collection<String> exportedIndividuals, Collection<String> individualMetadataFieldsToExport, OutputStream os) throws IOException {
-        Collection<Individual> listInd = MgdbDao.getInstance().loadIndividualsWithAllMetadata(sModule, getLoggedUserName(), null, exportedIndividuals).values();
+	public static void writeMetadataFile(String sModule, String sExportingUser, Collection<String> exportedIndividuals, Collection<String> individualMetadataFieldsToExport, OutputStream os) throws IOException {
+		Collection<Individual> listInd = MgdbDao.getInstance().loadIndividualsWithAllMetadata(sModule, sExportingUser, null, exportedIndividuals).values();
         LinkedHashSet<String> mdHeaders = new LinkedHashSet<>();	// definite header collection (avoids empty columns)
         for (Individual ind : listInd)
         	for (String key : individualMetadataFieldsToExport)
@@ -174,24 +170,19 @@ public interface IExportHandler
             os.write("\n".getBytes());
         }
 	}
-
-	/**
-	 * Used for providing access to session attributes when exporting to server (in that case, export runs in a Thread and HttpResponse is returned immediately).
-	 * We don't want to keep a reference to the session itself because it may get invalidated before the thread actually tries to access the attributes.
-	 */
-	public class SessionAttributeAwareExportThread extends Thread {
-		private Map<String, Object> sessionAttributes = new HashMap<>();
-		
-		public SessionAttributeAwareExportThread(HttpSession session) {
-	       Enumeration<String> attrNames = session.getAttributeNames();
-	       while (attrNames.hasMoreElements() ) {
-	            String name = attrNames.nextElement();
-	            sessionAttributes.put(name, session.getAttribute(name));
-	        }
-		}
-		
-		public Map<String, Object> getSessionAttributes() {
-			return sessionAttributes;
-		}
-	}
+	
+    public static Map<String, String> getIndividualPopulations(final Map<String, Collection<String>> individualsByPopulation, boolean fAllowIndividualsInMultipleGroups) throws Exception {
+    	Map<String, String> result = new HashMap<>();
+    	for (String pop : individualsByPopulation.keySet())
+    		for (String ind : individualsByPopulation.get(pop)) {
+    			if (result.containsKey(ind)) {
+    				if (!fAllowIndividualsInMultipleGroups)
+    					throw new Exception("Individual " + ind + " is part of several groups!");
+    				result.put(ind, result.get(ind) + ";" + pop);
+    			}
+    			else
+    				result.put(ind, pop);
+    		}
+        return result;
+    }
 }

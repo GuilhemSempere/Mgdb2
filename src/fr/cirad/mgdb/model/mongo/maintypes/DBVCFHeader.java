@@ -82,6 +82,15 @@ public class DBVCFHeader
 			this.project = project;
 			this.run = run;
 		}
+
+                public Integer getProject() {
+                    return project;
+                }
+
+                public String getRun() {
+                    return run;
+                }
+                
 	}
 
 	/** The id. */

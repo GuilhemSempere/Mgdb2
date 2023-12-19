@@ -17,18 +17,17 @@
 package fr.cirad.mgdb.model.mongo.maintypes;
 
 import java.util.HashMap;
-import java.util.List;
-import java.util.NoSuchElementException;
 
 import org.bson.codecs.pojo.annotations.BsonProperty;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.annotation.TypeAlias;
-import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.mapping.Document;
 import org.springframework.data.mongodb.core.mapping.Field;
 
 import fr.cirad.mgdb.model.mongo.subtypes.AbstractVariantData;
 import fr.cirad.mgdb.model.mongo.subtypes.SampleGenotype;
+import fr.cirad.mgdb.model.mongo.subtypes.VariantRunDataId;
+import fr.cirad.tools.Helper;
 
 /**
  * The Class VariantRunData.
@@ -46,118 +45,6 @@ public class VariantRunData extends AbstractVariantData
 	
 	/** The Constant FIELDNAME_ADDITIONAL_INFO_EFFECT_GENE. */
 	public final static String FIELDNAME_ADDITIONAL_INFO_EFFECT_GENE = "EFF_ge";
-
-	/**
-	 * The Class VariantRunDataId.
-	 */
-	static public class VariantRunDataId
-	{
-		/** The Constant FIELDNAME_PROJECT_ID. */
-		public final static String FIELDNAME_PROJECT_ID = "pi";
-		
-		/** The Constant FIELDNAME_RUNNAME. */
-		public final static String FIELDNAME_RUNNAME = "rn";
-		
-		/** The Constant FIELDNAME_VARIANT_ID. */
-		public final static String FIELDNAME_VARIANT_ID = "vi";
-
-		/** The project id. */
-		@BsonProperty(FIELDNAME_PROJECT_ID)   
-		@Field(FIELDNAME_PROJECT_ID)
-		private int projectId;
-
-		/** The run name. */
-		@BsonProperty(FIELDNAME_RUNNAME)   
-		@Field(FIELDNAME_RUNNAME)
-		private String runName;
-
-		/** The variant id. */
-		@BsonProperty(FIELDNAME_VARIANT_ID)   
-		@Field(FIELDNAME_VARIANT_ID)
-		private String variantId;
-		
-		/**
-		 * Instantiates a new variant run data id.
-		 */
-		public VariantRunDataId( ) {
-		}
-
-		/**
-		 * Instantiates a new variant run data id.
-		 *
-		 * @param projectId the project id
-		 * @param runName the run name
-		 * @param variantId the variant id
-		 */
-		public VariantRunDataId(int projectId, String runName, String variantId) {
-			this.projectId = projectId;
-			this.runName = runName.intern();
-			this.variantId = variantId;
-		}
-		
-		public void setProjectId(int projectId) {
-			this.projectId = projectId;
-		}
-
-		public void setRunName(String runName) {
-			this.runName = runName;
-		}
-
-		public void setVariantId(String variantId) {
-			this.variantId = variantId;
-		}
-
-		/**
-		 * Gets the project id.
-		 *
-		 * @return the project id
-		 */
-		public int getProjectId() {
-			return projectId;
-		}
-
-		/**
-		 * Gets the run name.
-		 *
-		 * @return the run name
-		 */
-		public String getRunName() {
-			return runName;
-		}
-
-		/**
-		 * Gets the variant id.
-		 *
-		 * @return the variant id
-		 */
-		public String getVariantId() {
-			return variantId;
-		}
-		
-		@Override
-		public boolean equals(Object o)	// thanks to this overriding, HashSet.contains will find such objects based on their ID
-		{
-			if (this == o)
-				return true;
-			
-			if (o == null || !(o instanceof VariantRunDataId))
-				return false;
-			
-			return getProjectId() == ((VariantRunDataId)o).getProjectId() && getRunName().equals(((VariantRunDataId)o).getRunName()) && getVariantId().equals(((VariantRunDataId)o).getVariantId());
-		}
-
-		@Override
-		public int hashCode()	// thanks to this overriding, HashSet.contains will find such objects based on their ID
-		{
-			return toString().hashCode();
-		}
-		
-		@Override
-		public String toString()
-		{
-			return projectId + "§" + runName + "§" + variantId;
-		}
-	}
 
 	/** The id. */
 	@BsonProperty("_id")
@@ -202,6 +89,7 @@ public class VariantRunData extends AbstractVariantData
 		this.id = id;
 	}
 	
+        @Override
 	public String getVariantId() {
 		return getId().getVariantId();
 	}

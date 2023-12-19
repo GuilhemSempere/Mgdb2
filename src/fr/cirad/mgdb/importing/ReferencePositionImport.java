@@ -159,7 +159,7 @@ public class ReferencePositionImport {
 								else
 								{
 									ReferencePosition chromPos = new ReferencePosition(cells.get(nMarkerChrColNum), Integer.parseInt(cells.get(nMarkerPosColNum)));
-									if (chromPos.equals(variant.getReferencePosition()))
+									if (chromPos.equals(variant.getReferencePosition(0 /*FIXME : make it multi-assembly?*/)))
 									{
 										LOG.warn("No change to apply: " + cells.get(nMarkerNameColNum) + " (" + nVariantIndex + ")");
 										fSaved = false;

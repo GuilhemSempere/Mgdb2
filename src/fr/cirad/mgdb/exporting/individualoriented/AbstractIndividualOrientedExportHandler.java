@@ -19,14 +19,17 @@ package fr.cirad.mgdb.exporting.individualoriented;
 import java.io.BufferedOutputStream;
 import java.io.File;
 import java.io.FileOutputStream;
+import java.io.FileWriter;
+import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Modifier;
+import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
@@ -35,12 +38,12 @@ import java.util.stream.Collectors;
 
 import org.apache.commons.lang.StringUtils;
 import org.apache.log4j.Logger;
-import org.bson.Document;
 import org.springframework.beans.factory.config.BeanDefinition;
 import org.springframework.context.annotation.ClassPathScanningCandidateComponentProvider;
 import org.springframework.core.type.filter.AssignableTypeFilter;
 import org.springframework.data.mongodb.core.MongoTemplate;
 
+import com.mongodb.BasicDBList;
 import com.mongodb.client.MongoCollection;
 
 import fr.cirad.mgdb.exporting.AbstractExportWritingThread;
@@ -51,7 +54,9 @@ import fr.cirad.mgdb.model.mongo.maintypes.VariantData;
 import fr.cirad.mgdb.model.mongo.maintypes.VariantRunData;
 import fr.cirad.mgdb.model.mongo.subtypes.SampleGenotype;
 import fr.cirad.tools.AlphaNumericComparator;
+import fr.cirad.tools.Helper;
 import fr.cirad.tools.ProgressIndicator;
+import fr.cirad.tools.mgdb.VariantQueryWrapper;
 import fr.cirad.tools.mongo.MongoTemplateManager;
 
 /**
@@ -71,39 +76,39 @@ public abstract class AbstractIndividualOrientedExportHandler implements IExport
 	 *
 	 * @param outputStream the output stream
 	 * @param sModule the module
-	 * @param individualsToExport names of individuals to export
+     * @param nAssemblyId ID of the assembly to work with
+	 * @param sExportingUser the user who launched the export 
 	 * @param individualExportFiles the individual export files
 	 * @param fDeleteSampleExportFilesOnExit whether or not to delete sample export files on exit
 	 * @param progress the progress
 	 * @param tmpVarCollName the variant collection name (null if not temporary)
-	 * @param varQuery query to apply on varColl
+	 * @param varQueryWrapper variant query wrapper
 	 * @param markerCount number of variants to export
 	 * @param markerSynonyms the marker synonyms
-	 * @param individualMetadataFieldsToExport metadata fields to export for individuals 
+	 * @param individualMetadataFieldsToExport metadata fields to export for individuals
+	 * @param metadataPopField metadata field to use as population String (overriding "fixed" individual-population field if exists) 
 	 * @param readyToExportFiles the ready to export files
 	 * @throws Exception the exception
 	 */
-	abstract public void exportData(OutputStream outputStream, String sModule, Collection<String> individualsToExport, File[] individualExportFiles, boolean fDeleteSampleExportFilesOnExit, ProgressIndicator progress, String tmpVarCollName, Document varQuery, long markerCount, Map<String, String> markerSynonyms, Collection<String> individualMetadataFieldsToExport, Map<String, InputStream> readyToExportFiles) throws Exception;
-
+	
+	abstract public void exportData(OutputStream outputStream, String sModule, Integer nAssemblyId, String sExportingUser, File[] individualExportFiles, boolean fDeleteSampleExportFilesOnExit, ProgressIndicator progress, String tmpVarCollName, VariantQueryWrapper varQueryWrapper, long markerCount, Map<String, String> markerSynonyms, Collection<String> individualMetadataFieldsToExport, Map<String, String> individualPopulations, Map<String, InputStream> readyToExportFiles) throws Exception;
 	/**
 	 * Creates the export files.
 	 *
 	 * @param sModule the module
-	 * @param projId the project ID
+     * @param nAssemblyId ID of the assembly to work with
 	 * @param tmpVarCollName the variant collection name (null if not temporary)
-	 * @param varQuery query to apply on varColl
+	 * @param vrdQuery variantRunData
 	 * @param markerCount number of variants to export
-	 * @param individuals1 the individuals in group 1
-	 * @param individuals2 the individuals in group 2
 	 * @param exportID the export id
-	 * @param annotationFieldThresholds the annotation field thresholds for group 1
-	 * @param annotationFieldThresholds2 the annotation field thresholds for group 2
+	 * @param individuals List of the individuals in each group
+	 * @param annotationFieldThresholds the annotation field thresholds for each group
 	 * @param samplesToExport 
 	 * @param progress the progress
 	 * @return a map providing one File per individual
 	 * @throws Exception the exception
 	 */
-	public File[] createExportFiles(String sModule, String tmpVarCollName, Document varQuery, long markerCount, Collection<String> individuals1, Collection<String> individuals2, String exportID, HashMap<String, Float> annotationFieldThresholds, HashMap<String, Float> annotationFieldThresholds2, List<GenotypingSample> samplesToExport, final ProgressIndicator progress) throws Exception
+	public File[] createExportFiles(String sModule, Integer nAssemblyId, String tmpVarCollName, BasicDBList vrdQuery, long markerCount, String exportID, Map<String, Collection<String>> individuals, Map<String, HashMap<String, Float>> annotationFieldThresholds, List<GenotypingSample> samplesToExport, final ProgressIndicator progress) throws Exception
 	{
 		long before = System.currentTimeMillis();
 
@@ -140,7 +145,7 @@ public abstract class AbstractIndividualOrientedExportHandler implements IExport
 							return;
 
 						HashMap<String, String> genotypeStringCache = new HashMap<>();
-						LinkedHashSet<String>[] individualGenotypes = new LinkedHashSet[individualPositions.size()];
+						List<String>[] individualGenotypes = new ArrayList[individualPositions.size()];
 		                if (runsToWrite != null)
 		                	for (Object vrd : runsToWrite) {
 		                    	VariantRunData run = (VariantRunData) vrd;
@@ -151,7 +156,7 @@ public abstract class AbstractIndividualOrientedExportHandler implements IExport
 	                                    continue;   // unwanted sample
 
 									SampleGenotype sampleGenotype = run.getSampleGenotypes().get(sampleId);
-									if (!VariantData.gtPassesVcfAnnotationFilters(individualId, sampleGenotype, individuals1, annotationFieldThresholds, individuals2, annotationFieldThresholds2))
+									if (!VariantData.gtPassesVcfAnnotationFilters(individualId, sampleGenotype, individuals, annotationFieldThresholds))
 										continue;	// skip genotype
 
 				                    String exportedGT = genotypeStringCache.get(sampleGenotype.getCode());
@@ -161,7 +166,7 @@ public abstract class AbstractIndividualOrientedExportHandler implements IExport
 				                    }
 									
 									if (individualGenotypes[individualIndex] == null)
-										individualGenotypes[individualIndex] = new LinkedHashSet<String>();
+										individualGenotypes[individualIndex] = new ArrayList<>();
 									individualGenotypes[individualIndex].add(exportedGT);
 								}
 		                	}
@@ -196,13 +201,13 @@ public abstract class AbstractIndividualOrientedExportHandler implements IExport
 				catch (Exception e)
 				{
 					if (progress.getError() == null)	// only log this once
-						LOG.debug("Error creating temp files", e);
+						LOG.error("Error creating temp files", e);
 					progress.setError("Error creating temp files: " + e.getMessage());
 				}
 			}
 		};
 		
-		ExportManager exportManager = new ExportManager(mongoTemplate, collWithPojoCodec, VariantRunData.class, varQuery, samplesToExport, true, nQueryChunkSize, writingThread, markerCount, null, progress);
+		ExportManager exportManager = new ExportManager(mongoTemplate, nAssemblyId, collWithPojoCodec, VariantRunData.class, vrdQuery, samplesToExport, true, nQueryChunkSize, writingThread, markerCount, null, progress);
 		exportManager.readAndWrite();
 		
 	 	if (!progress.isAborted())
@@ -262,6 +267,40 @@ public abstract class AbstractIndividualOrientedExportHandler implements IExport
 			}
 		}
 		return individualOrientedExportHandlers;
+	}
+	
+	protected String findOutMostFrequentGenotype(String line, FileWriter warningFileWriter, int nMarkerIndex, String individualId) throws IOException {
+        String mostFrequentGenotype = null;
+        if (!line.isEmpty()) {
+            List<String> genotypes = Helper.split(line, "|");
+            if (genotypes.size() == 1)
+                mostFrequentGenotype = genotypes.get(0);
+            else {
+                HashMap<Object, Integer> genotypeCounts = new HashMap<Object, Integer>();   // will help us to keep track of missing genotypes
+                int highestGenotypeCount = 0;
+
+                for (String genotype : genotypes) {
+                    if (genotype == null)
+                        continue;   /* skip missing genotypes */
+
+                    int gtCount = 1 + Helper.getCountForKey(genotypeCounts, genotype);
+                    if (gtCount > highestGenotypeCount) {
+                        highestGenotypeCount = gtCount;
+                        mostFrequentGenotype = genotype;
+                    }
+                    genotypeCounts.put(genotype, gtCount);
+                }
+
+                if (genotypeCounts.size() > 1) {
+                    List<Integer> reverseSortedGtCounts = genotypeCounts.values().stream().sorted(Comparator.reverseOrder()).collect(Collectors.toList());
+                    if (reverseSortedGtCounts.get(0) == reverseSortedGtCounts.get(1))
+                        mostFrequentGenotype = null;
+                    if (warningFileWriter != null)
+                        warningFileWriter.write("- Dissimilar genotypes found for variant n. " + nMarkerIndex + ", individual " + individualId + ". " + (mostFrequentGenotype == null ? "Exporting as missing data" : "Exporting most frequent: " + mostFrequentGenotype.replaceAll(" ", "/")) + "\n");
+                }
+            }
+        }
+        return mostFrequentGenotype;
 	}
 
 	/* (non-Javadoc)

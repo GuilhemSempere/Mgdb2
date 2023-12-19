@@ -25,8 +25,8 @@ import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map.Entry;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.stream.Collectors;
@@ -49,12 +49,13 @@ import com.mongodb.client.MongoCursor;
 
 import fr.cirad.mgdb.exporting.AbstractExportWritingThread;
 import fr.cirad.mgdb.exporting.IExportHandler;
+import fr.cirad.mgdb.model.mongo.maintypes.Assembly;
 import fr.cirad.mgdb.model.mongo.maintypes.GenotypingProject;
 import fr.cirad.mgdb.model.mongo.maintypes.GenotypingSample;
 import fr.cirad.mgdb.model.mongo.maintypes.VariantRunData;
-import fr.cirad.mgdb.model.mongo.maintypes.VariantRunData.VariantRunDataId;
 import fr.cirad.mgdb.model.mongo.subtypes.AbstractVariantData;
 import fr.cirad.mgdb.model.mongo.subtypes.ReferencePosition;
+import fr.cirad.mgdb.model.mongo.subtypes.VariantRunDataId;
 import fr.cirad.tools.AlphaNumericComparator;
 import fr.cirad.tools.Helper;
 import fr.cirad.tools.ProgressIndicator;
@@ -71,22 +72,28 @@ public class ExportManager
     
     static public final AlphaNumericComparator<String> alphaNumericStringComparator = new AlphaNumericComparator<String>();
     
-    static public final Comparator<VariantRunData> vrdComparator = new Comparator<VariantRunData>() {
+    static public final class VariantRunDataComparator implements Comparator<VariantRunData> {
+        private Integer nAssemblyId;
+        
+        public VariantRunDataComparator(Integer nAssemblyId) {
+            this.nAssemblyId = nAssemblyId;
+        }
+        
         @Override
         public int compare(VariantRunData vrd1, VariantRunData vrd2) {
-            if (vrd1.getReferencePosition() == null) {
-                if (vrd2.getReferencePosition() == null)
-                    return vrd1.getId().getVariantId().compareTo(vrd2.getId().getVariantId());     // none is positioned
-                return -1;    // only vrd2 is positioned
+            if (vrd1.getReferencePosition(nAssemblyId) == null) {
+                if (vrd2.getReferencePosition(nAssemblyId) == null)
+                    return vrd1.getVariantId().compareTo(vrd2.getVariantId());  // none is positioned
+                return -1;  // only vrd2 is positioned
             }
-            if (vrd2.getReferencePosition() == null)
-                return 1;    // only vrd1 is positioned
+            if (vrd2.getReferencePosition(nAssemblyId) == null)
+                return 1;   // only vrd1 is positioned
             
             // both are positioned
-            int chrComparison = alphaNumericStringComparator.compare(vrd1.getReferencePosition().getSequence(), vrd2.getReferencePosition().getSequence());
-            return chrComparison != 0 ? chrComparison : (int) (vrd1.getReferencePosition().getStartSite() - vrd2.getReferencePosition().getStartSite());
+            int chrComparison = alphaNumericStringComparator.compare(vrd1.getReferencePosition(nAssemblyId).getSequence(), vrd2.getReferencePosition(nAssemblyId).getSequence());
+            return chrComparison != 0 ? chrComparison : (int) (vrd1.getReferencePosition(nAssemblyId).getStartSite() - vrd2.getReferencePosition(nAssemblyId).getStartSite());
         }
-    };
+    }
 
     private ProgressIndicator progress;
     
@@ -116,15 +123,18 @@ public class ExportManager
     
     private Integer nNumberOfChunksUsedForSpeedEstimation = null;  // if it remains null then we won't attempt any comparison
     
-    private ArrayList<Document> projectFilterList = new ArrayList<>();
+    private ArrayList<BasicDBObject> projectFilterList = new ArrayList<>();
+    
+    private Integer nAssemblyId;
 
     public static final CodecRegistry pojoCodecRegistry = CodecRegistries.fromRegistries(MongoClientSettings.getDefaultCodecRegistry(), CodecRegistries.fromProviders(PojoCodecProvider.builder().register(new IntKeyMapPropertyCodecProvider()).automatic(true).build()));
     
-    public ExportManager(MongoTemplate mongoTemplate, MongoCollection<Document> varColl, Class resultType, Document varQuery, Collection<GenotypingSample> samplesToExport, boolean fIncludeMetadata, int nQueryChunkSize, AbstractExportWritingThread writingThread, Long markerCount, FileWriter warningFileWriter, ProgressIndicator progress) {
+    public ExportManager(MongoTemplate mongoTemplate, Integer nAssemblyId, MongoCollection<Document> varColl, Class resultType, BasicDBList vrdQuery, Collection<GenotypingSample> samplesToExport, boolean fIncludeMetadata, int nQueryChunkSize, AbstractExportWritingThread writingThread, Long markerCount, FileWriter warningFileWriter, ProgressIndicator progress) {
         this.progress = progress;
         this.nQueryChunkSize = nQueryChunkSize;
         this.warningFileWriter = warningFileWriter;
         this.mongoTemplate = mongoTemplate;
+        this.nAssemblyId = nAssemblyId;
         this.writingThread = writingThread;
         this.markerCount = markerCount;
         this.varColl = varColl;
@@ -133,22 +143,19 @@ public class ExportManager
         String varCollName = varColl.getNamespace().getCollectionName();
         fWorkingOnTempColl = varCollName.startsWith(MongoTemplateManager.TEMP_COLL_PREFIX);
 
-        String refPosPath = AbstractVariantData.FIELDNAME_REFERENCE_POSITION;
+        String refPosPath = Assembly.getVariantRefPosPath(nAssemblyId);
         sortStage = new BasicDBObject("$sort", new Document(refPosPath  + "." + ReferencePosition.FIELDNAME_SEQUENCE, 1).append(refPosPath + "." + ReferencePosition.FIELDNAME_START_SITE, 1));
 
         // optimization 1: filling in involvedProjectRuns will provide means to apply filtering on project and/or run fields when exporting from temporary collection
         HashMap<Integer, List<String>> involvedProjectRuns = Helper.getRunsByProjectInSampleCollection(samplesToExport);
         involvedRunCount = involvedProjectRuns.values().stream().mapToInt(b -> b.size()).sum();
 
-        int nDbProjectCount = (int) Helper.estimDocCount(mongoTemplate, GenotypingProject.class);
         for (int projId : involvedProjectRuns.keySet()) {
             List<String> projectInvolvedRuns = involvedProjectRuns.get(projId);
             if (projectInvolvedRuns.size() != mongoTemplate.findDistinct(new Query(Criteria.where("_id").is(projId)), GenotypingProject.FIELDNAME_RUNS, GenotypingProject.class, String.class).size()) {
                 // not all of this project's runs are involved: only match those (in the case of multi-project and/or multi-run databases, it is worth filtering on these fields to avoid parsing records related to unwanted samples)
-                projectFilterList.add(new Document("$and", Arrays.asList(new BasicDBObject("_id." + VariantRunDataId.FIELDNAME_PROJECT_ID, projId), new BasicDBObject("_id." + VariantRunDataId.FIELDNAME_RUNNAME, new BasicDBObject("$in", projectInvolvedRuns)))));
+                projectFilterList.add(new BasicDBObject("$and", Arrays.asList(new BasicDBObject("_id." + VariantRunDataId.FIELDNAME_PROJECT_ID, projId), new BasicDBObject("_id." + VariantRunDataId.FIELDNAME_RUNNAME, new BasicDBObject("$in", projectInvolvedRuns)))));
             }
-            else if (nDbProjectCount != involvedProjectRuns.size())
-                projectFilterList.add(new Document("_id." + VariantRunDataId.FIELDNAME_PROJECT_ID, projId));    // not all of this DB's projects are involved: only match selected ones
         }
 
         // optimization 2: build the $project stage by excluding fields when over 50% of overall samples are selected; even remove that stage when exporting all (or almost all) samples (makes it much faster)
@@ -157,14 +164,8 @@ public class ExportManager
         sampleIDsToExport = samplesToExport == null ? new ArrayList<>() : samplesToExport.stream().map(sp -> sp.getId()).collect(Collectors.toList());
         Collection<Integer> sampleIDsNotToExport = percentageOfExportedSamples >= 98 ? new ArrayList<>() /* if almost all individuals are being exported we directly omit the $project stage */ : (percentageOfExportedSamples > 50 ? mongoTemplate.findDistinct(new Query(Criteria.where("_id").not().in(sampleIDsToExport)), "_id", GenotypingSample.class, Integer.class) : null);
 
-        if (!varQuery.isEmpty()) {
-            if (!fWorkingOnTempColl && !projectFilterList.isEmpty()) {
-                Entry<String, Object> firstMatchEntry = varQuery.entrySet().iterator().next();
-                List<Document> matchAndList = "$and".equals(firstMatchEntry.getKey()) ? (List<Document>) firstMatchEntry.getValue() : Arrays.asList(varQuery);
-                matchAndList.addAll(projectFilterList);
-            }
-            matchStage = new BasicDBObject("$match", varQuery);
-        }
+        if (!fWorkingOnTempColl && !vrdQuery.isEmpty())
+            matchStage = new BasicDBObject("$match",  new BasicDBObject("$and", vrdQuery));
 
         Document projection = new Document();
         if (sampleIDsNotToExport == null) {    // inclusive $project (less than a half of the samples are being exported)
@@ -193,7 +194,7 @@ public class ExportManager
         }
     }
 
-    public void readAndWrite() throws IOException, InterruptedException, ExecutionException {        
+	public void readAndWrite() throws IOException, InterruptedException, ExecutionException {        
         if (fWorkingOnTempColl)
             exportFromTempColl();
         else
@@ -208,12 +209,13 @@ public class ExportManager
      * @throws ExecutionException
      */
     private void exportFromTempColl() throws IOException, InterruptedException, ExecutionException {
-        CompletableFuture<Void> future = null;
-        Collection<Collection<VariantRunData>> tempMarkerRunsToWrite = new ArrayList<>(nQueryChunkSize);
+        CompletableFuture<Void> future = null;        
         List<VariantRunData> currentMarkerRuns = new ArrayList<>(involvedRunCount);
         List<String> currentMarkerIDs = new ArrayList<>(nQueryChunkSize);
         String varId = null, previousVarId = null;
         int nWrittenmarkerCount = 0;
+        
+        VariantRunDataComparator vrdComparator = new VariantRunDataComparator(nAssemblyId);
         
         List<BasicDBObject> pipeline = new ArrayList<>();
         if (matchStage != null)
@@ -221,7 +223,7 @@ public class ExportManager
         pipeline.add(sortStage);
         pipeline.add(new BasicDBObject("$project", new BasicDBObject("_id", 1)));
 
-        MongoCursor markerCursor = varColl.aggregate(pipeline, Document.class).collation(IExportHandler.collationObj).allowDiskUse(true).batchSize(nQueryChunkSize).iterator();   /*FIXME: didn't find a way to set noCursorTimeOut on aggregation cursors*/
+        MongoCursor<Document> markerCursor = varColl.aggregate(pipeline, Document.class).collation(IExportHandler.collationObj).allowDiskUse(true).batchSize(nQueryChunkSize).iterator();   /*FIXME: didn't find a way to set noCursorTimeOut on aggregation cursors*/
 
         // pipeline object will we re-used to query VariantRunData, we won't need the $project stage for that
         pipeline = new ArrayList<>();
@@ -238,9 +240,9 @@ public class ExportManager
                 return;
             }
             
-            currentMarkerIDs.add(((Document) markerCursor.next()).getString("_id"));
-            
-            if (currentMarkerIDs.size() >= nQueryChunkSize || !markerCursor.hasNext()) {
+            currentMarkerIDs.add(markerCursor.next().getString("_id"));
+                        
+            if (currentMarkerIDs.size() >= nQueryChunkSize || !markerCursor.hasNext()) {	// current variant ID list is large enough to start exporting chunk
                 nChunkIndex++;
 
                 BasicDBList matchAndList = new BasicDBList();
@@ -263,23 +265,25 @@ public class ExportManager
                 ArrayList<VariantRunData> runs = runColl.aggregate(pipeline, VariantRunData.class).allowDiskUse(true).into(new ArrayList<>(currentMarkerIDs.size())); // we don't use collation here because it leads to unexpected behaviour (sometimes fetches some additional variants to those in currentMarkerIDs) => we'll have to sort each chunk by hand
                 Collections.sort(runs, vrdComparator);    // make sure variants within this chunk are correctly sorted
                 
+                LinkedHashMap<String /*variant ID*/, Collection<VariantRunData>> chunkMarkerRunsToWrite = new LinkedHashMap<>(currentMarkerIDs.size());
+                for (String variantId : currentMarkerIDs)
+                	chunkMarkerRunsToWrite.put(variantId, null);	// there must be an entry for each exported variant
+                
                 for (VariantRunData vrd : runs) {
                     varId = vrd.getId().getVariantId();
                     
                     if (previousVarId != null && !varId.equals(previousVarId)) {
-                        tempMarkerRunsToWrite.add(currentMarkerRuns);
+                        chunkMarkerRunsToWrite.put(previousVarId, currentMarkerRuns);
                         currentMarkerRuns = new ArrayList<>(involvedRunCount);
-                        nWrittenmarkerCount++;
                     }
                     currentMarkerRuns.add(vrd);
                     previousVarId = varId;
                 }
-
-                if (!markerCursor.hasNext()) {    // special case, when the end of the cursor is being reached
-                    tempMarkerRunsToWrite.add(currentMarkerRuns);
-                    nWrittenmarkerCount++;
+                
+                if (!currentMarkerRuns.isEmpty()) {	// add runs for this chunk's last variant (among those we have data for)
+	                chunkMarkerRunsToWrite.put(previousVarId, currentMarkerRuns);
+	                currentMarkerRuns = new ArrayList<>(involvedRunCount);
                 }
-                currentMarkerIDs.clear();
 
                 if (nNumberOfChunksUsedForSpeedEstimation != null) {  // pipeline contains a $project stage that we need to assess: let's compare execution speed with and without it (best option depends on so many things that we can't find it out otherwise)
                     if (nChunkIndex == nNumberOfChunksUsedForSpeedEstimation) { // we just tested without $project, let's try with it now
@@ -304,10 +308,15 @@ public class ExportManager
 //                        LOG.debug(progress.getProcessId() + " waited " + delay + "ms before writing variant " + nWrittenmarkerCount/* + ", increasing nQueryChunkSize from " + nQueryChunkSize + " to " + nQueryChunkSize*2*/);
                 }
                 
+                nWrittenmarkerCount += currentMarkerIDs.size();
+                previousVarId = null;
+
                 if (markerCount != null)
                     progress.setCurrentStepProgress(nWrittenmarkerCount * 100l / markerCount);
-                future = writingThread.writeRuns(tempMarkerRunsToWrite);
-                tempMarkerRunsToWrite = new ArrayDeque<>(nQueryChunkSize); 
+                future = writingThread.writeChunkRuns(chunkMarkerRunsToWrite.values(), currentMarkerIDs);
+                chunkMarkerRunsToWrite = new LinkedHashMap<>(nQueryChunkSize);
+                
+                currentMarkerIDs = new ArrayList<>(nQueryChunkSize);
             }
         }
 
@@ -323,15 +332,13 @@ public class ExportManager
         Collection<Collection<VariantRunData>> tempMarkerRunsToWrite = new ArrayDeque<>(nQueryChunkSize);
         List<VariantRunData> currentMarkerRuns = new ArrayList<>();
         String varId = null, previousVarId = null;
-        int nWrittenmarkerCount = 0;
+        List<String> orderedVariantIds = new ArrayList<>();
+        int nTotalWrittenMarkerCount = 0;
         
         List<BasicDBObject> pipeline = new ArrayList<>();
-        if (matchStage != null) {
-            Document matchContents = (Document) matchStage.get("$match");
-            BasicDBList filters = matchContents.containsKey("$and") ? (BasicDBList) matchContents.get("$and") : new BasicDBList() {{ add(new BasicDBObject(matchContents)); }};
-            Helper.convertIdFiltersToRunFormat(Arrays.asList(filters));
+        if (matchStage != null)
             pipeline.add(matchStage);
-        }
+        
         pipeline.add(sortStage);
         int nPosAfterSortStage = pipeline.size();
         if (projectStage != null)
@@ -369,18 +376,22 @@ public class ExportManager
             }
 
             VariantRunData vrd = (VariantRunData) markerCursor.next();
-            varId = vrd.getId().getVariantId();
+            varId = vrd.getVariantId();
 
-            if (previousVarId != null && !varId.equals(previousVarId)) {
+            if (previousVarId != null && !varId.equals(previousVarId)) {	// switching to the next variant
                 tempMarkerRunsToWrite.add(currentMarkerRuns);
+                orderedVariantIds.add(previousVarId);
                 currentMarkerRuns = new ArrayList<>();
-                nWrittenmarkerCount++;
+                nTotalWrittenMarkerCount++;
             }
 
             currentMarkerRuns.add(vrd);
 
-            if (!markerCursor.hasNext())
+            if (!markerCursor.hasNext()) {
                 tempMarkerRunsToWrite.add(currentMarkerRuns);    // special case, when the end of the cursor is being reached
+                orderedVariantIds.add(varId);
+                nTotalWrittenMarkerCount++;
+            }
 
             if (tempMarkerRunsToWrite.size() >= nQueryChunkSize || !markerCursor.hasNext()) {
                 nChunkIndex++;
@@ -414,9 +425,10 @@ public class ExportManager
                 }
 
                 if (markerCount != null && markerCount > 0)
-                    progress.setCurrentStepProgress(nWrittenmarkerCount * 100l / markerCount);
-                future = writingThread.writeRuns(tempMarkerRunsToWrite);
-                tempMarkerRunsToWrite = new ArrayDeque<>(nQueryChunkSize); 
+                    progress.setCurrentStepProgress(nTotalWrittenMarkerCount * 100l / markerCount);
+                future = writingThread.writeChunkRuns(tempMarkerRunsToWrite, orderedVariantIds);
+                tempMarkerRunsToWrite = new ArrayDeque<>(nQueryChunkSize);
+                orderedVariantIds = new ArrayList<>();
             }
             previousVarId = varId;
         }
@@ -425,6 +437,6 @@ public class ExportManager
             future.get();
         markerCursor.close();
         if (markerCount != null && markerCount > 0)
-            progress.setCurrentStepProgress(nWrittenmarkerCount * 100l / markerCount);
+            progress.setCurrentStepProgress(nTotalWrittenMarkerCount * 100l / markerCount);
     }
 }

@@ -31,10 +31,6 @@ import retrofit2.http.*;
 
 public interface BrapiV2Service {
 
-    public static final String BRAPI_FIELD_germplasmDbId = "germplasmDbId";
-    public static final String BRAPI_FIELD_germplasmExternalReferenceId = "extRefId";
-    public static final String BRAPI_FIELD_germplasmExternalReferenceSource = "extRefSrc";
-
     //get list of available calls in brapi V2
     @GET(value = "serverinfo")
     public Call<ServerInfoResponse> getServerInfo(@Query(value = "dataType") String var1);

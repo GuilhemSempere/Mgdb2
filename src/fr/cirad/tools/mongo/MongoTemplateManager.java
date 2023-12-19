@@ -32,30 +32,36 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.MissingResourceException;
+import java.util.NoSuchElementException;
 import java.util.Properties;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.TreeSet;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.stream.Collectors;
 
 import org.apache.log4j.Logger;
+import org.bson.Document;
 import org.springframework.beans.BeansException;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.ApplicationContext;
 import org.springframework.context.ApplicationContextAware;
 import org.springframework.core.io.ClassPathResource;
+import org.springframework.data.mongodb.ClientSessionException;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.convert.MappingMongoConverter;
 import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.data.mongodb.core.query.Update;
 import org.springframework.stereotype.Component;
 
-import com.mongodb.BasicDBObject;
 import com.mongodb.ServerAddress;
 import com.mongodb.client.MongoClient;
+import com.mongodb.client.MongoCollection;
 import com.mongodb.connection.ClusterDescription;
 import com.mongodb.connection.ServerDescription;
 
+import fr.cirad.mgdb.model.mongo.maintypes.CachedCount;
 import fr.cirad.mgdb.model.mongo.maintypes.DatabaseInformation;
 import fr.cirad.mgdb.model.mongo.maintypes.VariantData;
 import fr.cirad.mgdb.model.mongo.maintypes.VariantRunData;
@@ -137,7 +143,12 @@ public class MongoTemplateManager implements ApplicationContextAware {
     /**
      * The app config.
      */
-    @Autowired private AppConfig appConfig;
+    static private AppConfig appConfig;
+    
+    @Autowired
+    public void setAppConfig(AppConfig ac) {
+    	appConfig = ac; 
+    }
     
     private static final List<String> addressesConsideredLocal = Arrays.asList("127.0.0.1", "localhost");
     
@@ -149,7 +160,7 @@ public class MongoTemplateManager implements ApplicationContextAware {
     @Override
     public void setApplicationContext(ApplicationContext ac) throws BeansException {
         initialize(ac);
-        String serverCleanupCSV = appConfig.dbServerCleanup();
+        String serverCleanupCSV = appConfig.get("dbServerCleanup");
         List<String> authorizedCleanupServers = serverCleanupCSV == null ? null : Arrays.asList(serverCleanupCSV.split(","));
 
         // we do this cleanup here because it only happens when the webapp is being (re)started
@@ -159,12 +170,17 @@ public class MongoTemplateManager implements ApplicationContextAware {
             if (authorizedCleanupServers == null || (serverDescriptions.size() == 1 && authorizedCleanupServers.contains(serverDescriptions.get(0).getAddress().toString()))) 
                 new Thread() {
                     public void run() {
-                        for (String collName : mongoTemplate.getCollectionNames()) {
-                            if (collName.startsWith(TEMP_COLL_PREFIX)) {
-                                mongoTemplate.dropCollection(collName);
-                                LOG.debug("Dropped collection " + collName + " in module " + sModule);
-                            }
-                        }
+                    	try {
+	                        for (String collName : mongoTemplate.getCollectionNames()) {
+	                            if (collName.startsWith(TEMP_COLL_PREFIX)) {
+	                                mongoTemplate.dropCollection(collName);
+	                                LOG.debug("Dropped collection " + collName + " in module " + sModule);
+	                            }
+	                        }
+                    	}
+                    	catch (ClientSessionException cse) {
+                    		LOG.error("Error cleaning up temporary collections in module " + sModule, cse);
+                    	}
                     }
                 }.start();
         }
@@ -234,6 +250,8 @@ public class MongoTemplateManager implements ApplicationContextAware {
     	    InputStream input = MongoTemplateManager.class.getClassLoader().getResourceAsStream(resource + ".properties");
     	    dataSourceProperties.load(input);
     	    input.close();
+    	    
+    	    boolean fClearCachedCountsOnStartup = appConfig != null && Boolean.TRUE.equals(Boolean.parseBoolean(appConfig.get("clearCachedCountsOnStartup")));
             
             Enumeration<Object> bundleKeys = dataSourceProperties.keys();
             while (bundleKeys.hasMoreElements()) {
@@ -260,7 +278,12 @@ public class MongoTemplateManager implements ApplicationContextAware {
                 try {
                 	if (datasourceInfo.length > 2)
                 		setTaxon(cleanKey, datasourceInfo[2]);
-                    templateMap.put(cleanKey, createMongoTemplate(datasourceInfo[0], datasourceInfo[1]));
+                	
+                    MongoTemplate mongoTemplate = createMongoTemplate(datasourceInfo[0], datasourceInfo[1]);
+                    templateMap.put(cleanKey, mongoTemplate);
+
+                    if (fClearCachedCountsOnStartup)
+                    	mongoTemplate.dropCollection(CachedCount.class);
                     if (fPublic)
                         publicDatabases.add(cleanKey);
                     if (fHidden)
@@ -277,6 +300,24 @@ public class MongoTemplateManager implements ApplicationContextAware {
         } catch (IOException ioe) {
             LOG.error("Unable to load " + resource + ".properties, you may need to adjust your classpath", ioe);
         }
+        
+        // This is the right place for applying db model updates
+	    ExecutorService executor = Executors.newFixedThreadPool(2);
+        for (String db : templateMap.keySet())
+        	executor.submit(new Thread() {
+    			public void run() {
+                    try {
+                    	MongoTemplate mongoTemplate = templateMap.get(db);
+						MgdbDao.addRunsToVariantCollectionIfNecessary(mongoTemplate);
+						MgdbDao.ensureVariantDataIndexes(mongoTemplate);	// FIXME: move to end of addRunsToVariantCollectionIfNecessary()
+						MgdbDao.ensurePositionIndexes(mongoTemplate, Arrays.asList(mongoTemplate.getCollection(mongoTemplate.getCollectionName(VariantData.class))));	// FIXME: move to end of addRunsToVariantCollectionIfNecessary()
+						MgdbDao.createGeneCacheIfNecessary(db, MgdbDao.COLLECTION_NAME_GENE_CACHE);
+                    } catch (Exception e) {
+						LOG.error("Error while adding run info to variants colleciton for db " + db, e);
+					}
+        		}
+        	});
+        executor.shutdown();
     }
 
     /**
@@ -294,9 +335,9 @@ public class MongoTemplateManager implements ApplicationContextAware {
 
         MongoTemplate mongoTemplate = new MongoTemplate(client, sDbName);
         ((MappingMongoConverter) mongoTemplate.getConverter()).setMapKeyDotReplacement(DOT_REPLACEMENT_STRING);
-		mongoTemplate.getDb().runCommand(new BasicDBObject("profile", 0));
 
-		MgdbDao.ensurePositionIndexes(mongoTemplate, Arrays.asList(mongoTemplate.getCollection(mongoTemplate.getCollectionName(VariantData.class)), mongoTemplate.getCollection(mongoTemplate.getCollectionName(VariantRunData.class))));	// make sure we have indexes defined as required in v2.4
+        MgdbDao.ensurePositionIndexes(mongoTemplate, Arrays.asList(mongoTemplate.getCollection(mongoTemplate.getCollectionName(VariantData.class)), mongoTemplate.getCollection(mongoTemplate.getCollectionName(VariantRunData.class))));	// make sure we have indexes defined as required in v2.4
+        
         return mongoTemplate;
     }
 
@@ -513,10 +554,13 @@ public class MongoTemplateManager implements ApplicationContextAware {
     	
         new Thread() {
             public void run() {
-                for (String module : MongoTemplateManager.getTemplateMap().keySet()) {
+                for (String module : getTemplateMap().keySet()) {
                     for (String tempCollName : tempCollNames) { // drop all temp collections associated to this token in this module
-                        templateMap.get(module).getCollection(tempCollName).drop();
-                        LOG.debug("Dropped " + module + "." + tempCollName + " from dropAllTempColls");
+                        MongoCollection<Document> coll = templateMap.get(module).getCollection(tempCollName);
+                        if (coll.estimatedDocumentCount() != 0) {
+                        	coll.drop();
+                        	LOG.debug("Dropped " + module + "." + tempCollName + " from dropAllTempColls");
+                        }
                     }
                 }
             }
@@ -551,28 +595,17 @@ public class MongoTemplateManager implements ApplicationContextAware {
     static public boolean isModuleHidden(String sModule) {
         return hiddenDatabases.contains(sModule);
     }
+    
+    /**
+     * Checks if is module temporary.
+     *
+     * @param sModule the module
+     * @return true, if is module temporary
+     */
+    static public boolean isModuleTemporary(String sModule) {
+        return get(sModule).getDb().getName().contains(EXPIRY_PREFIX);
+    }
 
-//	public void saveRunsIntoProjectRecords()
-//	{
-//		for (String module : getAvailableModules())
-//		{
-//			MongoTemplate mongoTemplate = MongoTemplateManager.get(module);
-//			for (GenotypingProject proj : mongoTemplate.findAll(GenotypingProject.class))
-//				if (proj.getRuns().size() == 0)
-//				{
-//					boolean fRunAdded = false;
-//					for (String run : (List<String>) mongoTemplate.getCollection(MongoTemplateManager.getMongoCollectionName(VariantData.class)).distinct(VariantData.FIELDNAME_PROJECT_DATA + "." + proj.getId() + "." + Run.RUNNAME))
-//						if (!proj.getRuns().contains(run))
-//						{
-//							proj.getRuns().add(run);
-//							LOG.info("run " + run + " added to project " + proj.getName() + " in module " + module);
-//							fRunAdded = true;
-//						}
-//					if (fRunAdded)
-//						mongoTemplate.save(proj);
-//				}
-//		}
-//	}
     /**
      * Gets the mongo collection name.
      *
@@ -693,7 +726,10 @@ public class MongoTemplateManager implements ApplicationContextAware {
 	}
 
 	public static void unlockProjectForWriting(String sModule, String sProject) {
-		currentlyImportedProjects.get(sModule).remove(sProject);
+		Set<String> moduleLockedProjects = currentlyImportedProjects.get(sModule);
+		if (moduleLockedProjects == null)
+			throw new NoSuchElementException("There are currently no locked projects in database " + sModule);
+		moduleLockedProjects.remove(sProject);
 	}
 
 	public static void lockModuleForWriting(String sModule) {
@@ -714,21 +750,27 @@ public class MongoTemplateManager implements ApplicationContextAware {
 		}
 	}
 	
-    public static void updateDatabaseLastModification(String sModule) {
-    	MongoTemplateManager.updateDatabaseLastModification(sModule, new Date(), false);
-    }
-    
-    public static void updateDatabaseLastModification(String sModule, Date lastModification, boolean restored) {
-    	MongoTemplate template = MongoTemplateManager.get(sModule);
-    	
+    public static void updateDatabaseLastModification(MongoTemplate template, Date lastModification, boolean restored) {    	
     	Update update = new Update();
     	update.set(DatabaseInformation.FIELDNAME_LAST_MODIFICATION, lastModification);
     	update.set(DatabaseInformation.FIELDNAME_RESTORE_DATE, restored ? new Date() : null);
     	template.upsert(new Query(), update, "dbInfo");
     }
     
+    public static void updateDatabaseLastModification(MongoTemplate template) {
+    	updateDatabaseLastModification(template, new Date(), false);
+    }
+
+    public static void updateDatabaseLastModification(String sModule) {
+    	updateDatabaseLastModification(sModule, new Date(), false);
+    }
+    
+    public static void updateDatabaseLastModification(String sModule, Date lastModification, boolean restored) {
+    	updateDatabaseLastModification(get(sModule), lastModification, restored);
+    }
+    
     public static DatabaseInformation getDatabaseInformation(String sModule) {
-    	MongoTemplate template = MongoTemplateManager.get(sModule);
+    	MongoTemplate template = get(sModule);
     	return template.findOne(new Query(), DatabaseInformation.class, "dbInfo");
     }
 }

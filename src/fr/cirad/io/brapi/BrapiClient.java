@@ -33,6 +33,7 @@ import javax.net.ssl.SSLSession;
 import javax.net.ssl.SSLSocketFactory;
 import javax.net.ssl.TrustManager;
 import javax.net.ssl.X509TrustManager;
+import javax.security.sasl.AuthenticationException;
 
 import org.apache.log4j.Level;
 import org.apache.log4j.Logger;
@@ -145,7 +146,7 @@ public class BrapiClient {
                         response = chain.proceed(originalRequest);
                     }
                     if (response.code() == 401) {
-                        throw new IOException("Unauthorized error 401");
+                        throw new AuthenticationException("Unauthorized error 401");
                     }
                     return response;
                 }

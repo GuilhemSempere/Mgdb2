@@ -1,18 +1,8 @@
 /*******************************************************************************
- * MGDB - Mongo Genotype DataBase
- * Copyright (C) 2016 - 2019, <CIRAD> <IRD>
- *
- * This program is free software: you can redistribute it and/or modify it under
- * the terms of the GNU Affero General Public License, version 3 as published by
- * the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
- * FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
- * details.
- *
- * See <http://www.gnu.org/licenses/agpl.html> for details about GNU General
- * Public License V3.
+ * 
+ * This class is an adaptation of the public domain code initially found at https://github.com/lemire/externalsortinginjava
+ * Adjustments were made in order to support progress indicators
+ * 
  *******************************************************************************/
 package fr.cirad.tools;
 
@@ -51,14 +41,14 @@ public class ExternalSort {
      * merged later.
      *
      * @param fbr                a BufferedReader (will be closed after execution of this method)
-     * @param inputLength                input length
+     * @param inputLength        input length
      * @param cmp                string comparator
-     * @param progress 				  optional progress indicator that may be fed by this process
+     * @param progress 			 optional progress indicator that may be fed by this process
      * @return a list of temporary flat files
      * @throws IOException Signals that an I/O exception has occurred.
      */
     public static List<File> sortInBatch(BufferedReader fbr, long inputLength, Comparator<String> cmp, ProgressIndicator progress) throws IOException {
-            return sortInBatch(fbr, inputLength, cmp, DEFAULTMAXTEMPFILES, Charset.defaultCharset(), null, false, 0, false, progress);
+        return sortInBatch(fbr, inputLength, cmp, DEFAULTMAXTEMPFILES, Charset.defaultCharset(), null, false, 0, false, progress);
     }
 
     /**
@@ -67,22 +57,18 @@ public class ExternalSort {
      * merged later. You can specify a bound on the number of temporary
      * files that will be created.
      *
-     * @param fbr                a BufferedReader (will be closed after execution of this method)
-     * @param inputLength                input length
-     * @param cmp                string comparator
-     * @param maxtmpfiles                maximal number of temporary files
-     * @param cs the cs
-     * @param tmpdirectory                location of the temporary files (set to null for
-     *                default location)
-     * @param distinct                Pass <code>true</code> if duplicate lines should be
-     *                discarded.
-     * @param numHeader                number of lines to preclude before sorting starts
-     * @param usegzip the usegzip
-     * @param progress 				  optional progress indicator that may be fed by this process
+     * @param fbr           a BufferedReader (will be closed after execution of this method)
+     * @param inputLength   input length
+     * @param cmp           string comparator
+     * @param maxtmpfiles   maximal number of temporary files
+     * @param cs			the cs
+     * @param tmpdirectory  location of the temporary files (set to null for default location)
+     * @param distinct      Pass <code>true</code> if duplicate lines should be discarded.
+     * @param numHeader     number of lines to preclude before sorting starts
+     * @param usegzip 		use gzip compression for the temporary files
+     * @param progress 		optional progress indicator that may be fed by this process
      * @return a list of temporary flat files
      * @throws IOException Signals that an I/O exception has occurred.
-     * @parame usegzip
-     * 				  use gzip compression for the temporary files
      */
     public static List<File> sortInBatch(BufferedReader fbr, long inputLength, Comparator<String> cmp, int maxtmpfiles, Charset cs, File tmpdirectory, boolean distinct, int numHeader, boolean usegzip, ProgressIndicator progress) throws IOException {
             List<File> files = new ArrayList<File>();
@@ -94,7 +80,7 @@ public class ExternalSort {
                     String line = "";
                     try {
                             int counter = 0;
-                            while (line != null) {
+                            mainLoop: while (line != null) {
                                     long currentblocksize = 0;// in bytes
                                     while ((currentblocksize < blocksize)
                                             && ((line = fbr.readLine()) != null)) {
@@ -105,13 +91,14 @@ public class ExternalSort {
                                             }
                                             tmplist.add(line);
                                             totalWrittenByteCount += line.length();
-                                            // ram usage estimation, not
-                                            // very accurate, still more
-                                            // realistic that the simple 2 *
-                                            // String.length
+                                            // ram usage estimation, not very accurate, still more realistic that the simple 2 * String.length
                                             currentblocksize += StringSizeEstimator.estimatedSizeOf(line);
-                                            if (progress != null)
+                                            if (progress != null) {
+                                                if (progress.getError() != null || progress.isAborted())
+                                                    break mainLoop;
+
                                             	progress.setCurrentStepProgress((short) (totalWrittenByteCount*100/inputLength));
+                                            }
                                     }
                                     files.add(sortAndSave(tmplist, cmp, cs, tmpdirectory, distinct, usegzip));                                   
                                     tmplist.clear();
@@ -137,15 +124,12 @@ public class ExternalSort {
     /**
      * Sort a list and save it to a temporary file.
      *
-     * @param tmplist                data to be sorted
-     * @param cmp                string comparator
-     * @param cs                charset to use for output (can use
-     *                Charset.defaultCharset())
-     * @param tmpdirectory                location of the temporary files (set to null for
-     *                default location)
-     * @param distinct                Pass <code>true</code> if duplicate lines should be
-     *                discarded.
-     * @param usegzip the usegzip
+     * @param tmplist       data to be sorted
+     * @param cmp           string comparator
+     * @param cs            charset to use for output (can use Charset.defaultCharset())
+     * @param tmpdirectory  location of the temporary files (set to null for default location)
+     * @param distinct      Pass <code>true</code> if duplicate lines should be discarded.
+     * @param usegzip		use gzip compression for the temporary files
      * @return the file containing the sorted data
      * @throws IOException Signals that an I/O exception has occurred.
      */
@@ -216,20 +200,15 @@ public class ExternalSort {
     /**
      * This merges a bunch of temporary flat files.
      *
-     * @param files                The {@link List} of sorted {@link File}s to be merged.
-     * @param outputfile                The output {@link File} to merge the results to.
-     * @param cmp                The {@link Comparator} to use to compare
-     *                {@link String}s.
-     * @param cs                The {@link Charset} to be used for the byte to
-     *                character conversion.
-     * @param distinct                Pass <code>true</code> if duplicate lines should be
-     *                discarded. (elchetz@gmail.com)
-     * @param append                Pass <code>true</code> if result should append to
-     *                {@link File} instead of overwrite. Default to be false
-     *                for overloading methods.
-     * @param usegzip                assumes we used gzip compression for temporary files
-     * @param progress 				  optional progress indicator that may be fed by this process
-     * @param totalDataSize 				  optional parameter for use with the progress indicator
+     * @param files             The {@link List} of sorted {@link File}s to be merged.
+     * @param outputfile        The output {@link File} to merge the results to.
+     * @param cmp               The {@link Comparator} to use to compare {@link String}s.
+     * @param cs                The {@link Charset} to be used for the byte to character conversion.
+     * @param distinct          Pass <code>true</code> if duplicate lines should be discarded. (elchetz@gmail.com)
+     * @param append            Pass <code>true</code> if result should append to {@link File} instead of overwrite. Default to be false for overloading methods.
+     * @param usegzip           use gzip compression for the temporary files
+     * @param progress 			optional progress indicator that may be fed by this process
+     * @param totalDataSize		optional parameter for use with the progress indicator
      * @return The number of lines sorted. (P. Beaudoin)
      * @throws IOException Signals that an I/O exception has occurred.
      * @since v0.1.4
@@ -273,8 +252,7 @@ public class ExternalSort {
      *
      * @param fbw the fbw
      * @param cmp                A comparator object that tells us how to sort the lines.
-     * @param distinct                Pass <code>true</code> if duplicate lines should be
-     *                discarded. (elchetz@gmail.com)
+     * @param distinct                Pass <code>true</code> if duplicate lines should be discarded. (elchetz@gmail.com)
      * @param buffers                Where the data should be read.
      * @param progress 				  optional progress indicator that may be fed by this process
      * @param totalDataSize 				  optional parameter for use with the progress indicator
@@ -313,8 +291,12 @@ public class ExternalSort {
                             } else {
                                     pq.add(bfb); // add it back
                             }
-                            if (progress != null)
+                            if (progress != null) {
+                                if (progress.getError() != null || progress.isAborted())
+                                    break;
+
                             	progress.setCurrentStepProgress((short) (nTotalWrittenByteCount*100/totalDataSize));
+                            }
                     }
             } finally {
                     fbw.close();

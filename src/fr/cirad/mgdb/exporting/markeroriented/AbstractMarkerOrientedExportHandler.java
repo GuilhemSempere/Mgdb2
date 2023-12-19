@@ -16,18 +16,20 @@
  *******************************************************************************/
 package fr.cirad.mgdb.exporting.markeroriented;
 
+import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Modifier;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
 
 import org.apache.log4j.Logger;
-import org.bson.Document;
 import org.springframework.beans.factory.config.BeanDefinition;
 import org.springframework.context.annotation.ClassPathScanningCandidateComponentProvider;
 import org.springframework.core.type.filter.AssignableTypeFilter;
@@ -35,6 +37,7 @@ import org.springframework.core.type.filter.AssignableTypeFilter;
 import fr.cirad.mgdb.exporting.IExportHandler;
 import fr.cirad.mgdb.model.mongo.maintypes.GenotypingSample;
 import fr.cirad.tools.ProgressIndicator;
+import fr.cirad.tools.mgdb.VariantQueryWrapper;
 
 /**
  * The Class AbstractMarkerOrientedExportHandler.
@@ -48,55 +51,28 @@ public abstract class AbstractMarkerOrientedExportHandler implements IExportHand
 	/** The marker oriented export handlers. */
 	static private TreeMap<String, AbstractMarkerOrientedExportHandler> markerOrientedExportHandlers = null;
 
-	/**
-	 * Export data.
-	 *
-	 * @param outputStream the output stream
-	 * @param sModule the module
-	 * @param individuals1 the individuals in group 1
-	 * @param individuals2 the individuals in group 2
-	 * @param progress the progress
-	 * @param tmpVarCollName the variant collection name (null if not temporary)
-	 * @param varQuery query to apply on varColl
-	 * @param markerCount number of variants to export
-	 * @param markerSynonyms the marker synonyms
-	 * @param annotationFieldThresholds the annotation field thresholds for group 1
-	 * @param annotationFieldThresholds2 the annotation field thresholds for group 2
-	 * @param samplesToExport the samples to export genotyping data for
-	 * @param individualMetadataFieldsToExport metadata fields to export for individuals
-	 * @param readyToExportFiles files to export along with the genotyping data
-	 * @throws Exception the exception
-	 */
-	abstract public void exportData(OutputStream outputStream, String sModule, Collection<String> individuals1, Collection<String> individuals2, ProgressIndicator progress, String tmpVarCollName, Document varQuery, long markerCount, Map<String, String> markerSynonyms, HashMap<String, Float> annotationFieldThresholds, HashMap<String, Float> annotationFieldThresholds2, List<GenotypingSample> samplesToExport, Collection<String> individualMetadataFieldsToExport, Map<String, InputStream> readyToExportFiles) throws Exception;
+    /**
+     * Export data.
+     *
+     * @param outputStream the output stream
+     * @param sModule the module
+     * @param nAssemblyId ID of the assembly to work with
+	 * @param sExportingUser the user who launched the export
+     * @param progress the progress
+     * @param tmpVarCollName the variant collection name (null if not temporary)
+     * @param varQueryWrapper variant query wrapper
+     * @param markerCount number of variants to export
+     * @param markerSynonyms the marker synonyms
+     * @param individuals List of the individuals in each group
+     * @param annotationFieldThresholds the annotation field thresholds for each group
+     * @param samplesToExport the samples to export genotyping data for
+     * @param individualMetadataFieldsToExport metadata fields to export for individuals
+     * @param readyToExportFiles files to export along with the genotyping data
+     * @throws Exception the exception
+     */
+    abstract public void exportData(OutputStream outputStream, String sModule, Integer nAssemblyId, String sExportingUser, ProgressIndicator progress, String tmpVarCollName, VariantQueryWrapper varQueryWrapper, long markerCount, Map<String, String> markerSynonyms, Map<String, Collection<String>> individuals, Map<String, HashMap<String, Float>> annotationFieldThresholds, List<GenotypingSample> samplesToExport, Collection<String> individualMetadataFieldsToExport, Map<String, InputStream> readyToExportFiles) throws Exception;
 
-//	/**
-//	 * Gets the individuals from samples.
-//	 *
-//	 * @param sModule the module
-//	 * @param sampleIDs the sample i ds
-//	 * @return the individuals from samples
-//	 */
-//	protected List<Individual> getIndividualsFromSamples(final String sModule, final List<SampleId> sampleIDs)
-//	{
-//		MongoTemplate mongoTemplate = MongoTemplateManager.get(sModule);
-//		HashMap<Integer, GenotypingProject> loadedProjects = new HashMap<Integer, GenotypingProject>();
-//		ArrayList<Individual> result = new ArrayList<Individual>();
-//		for (SampleId spId : sampleIDs)
-//		{
-//			GenotypingProject project = loadedProjects.get(spId.getProject());
-//			if (project == null)
-//			{
-//				project = mongoTemplate.findById(spId.getProject(), GenotypingProject.class);
-//				loadedProjects.put(spId.getProject(), project);
-//			}
-//			Integer spIndex = spId.getSampleIndex();
-//			String individual = project.getSamples().get(spIndex).getIndividual();
-//			result.add(mongoTemplate.findById(individual, Individual.class));
-//		}
-//		return result;
-//	}
-	
-	/**
+    /**
 	 * Gets the marker oriented export handlers.
 	 *
 	 * @return the marker oriented export handlers
@@ -149,6 +125,26 @@ public abstract class AbstractMarkerOrientedExportHandler implements IExportHand
 		return markerOrientedExportHandlers;
 	}
 	
+	static public LinkedHashMap<Object, Integer> sortGenotypesFromMostFound(Collection<String> genotypes) throws IOException {
+        // Create a LinkedHashMap to maintain the sorted order
+        LinkedHashMap<Object, Integer> sortedMap = new LinkedHashMap<>();
+		if (genotypes != null) {
+	        Map<String, Integer> countMap = new HashMap<>();
+	        
+	        // Count occurrences of strings
+	        for (String str : genotypes)
+	            countMap.put(str, countMap.getOrDefault(str, 0) + 1);
+	        
+	        // Sort the map by values using a custom Comparator
+	        List<Map.Entry<String, Integer>> sortedEntries = new ArrayList<>(countMap.entrySet());
+	        sortedEntries.sort((e1, e2) -> e2.getValue().compareTo(e1.getValue()));
+	        
+	        for (Map.Entry<String, Integer> entry : sortedEntries)
+	            sortedMap.put(entry.getKey(), entry.getValue());
+		}
+        return sortedMap;
+	}
+
 	/* (non-Javadoc)
 	 * @see fr.cirad.mgdb.exporting.IExportHandler#getSupportedVariantTypes()
 	 */
@@ -162,4 +158,5 @@ public abstract class AbstractMarkerOrientedExportHandler implements IExportHand
 	public String getExportContentType() {
 		return "application/zip";
 	}
+
 }
