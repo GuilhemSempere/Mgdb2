@@ -1,5 +1,7 @@
 package org.snpeff.util;
 
+import fr.cirad.tools.ProgressIndicator;
+
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.InputStream;
@@ -13,6 +15,10 @@ public class DownloadWithProgress extends Download {
 
 	@Override
 	public boolean download(URL url, String localFile) {
+
+		ProgressIndicator progressIndicator = new ProgressIndicator("progress_download_genome", new String[] {"Downloading genome..."});
+		ProgressIndicator.registerProgressIndicator(progressIndicator);
+
 	    boolean res = false;
 	    try {
 	        sslSetup(); // Set up SSL for websites having issues with certificates (e.g. Sourceforge)
@@ -75,6 +81,7 @@ public class DownloadWithProgress extends Download {
 	            int newProgressPercentage = (int) (total * 100d / connection.getContentLengthLong());
 	            if (newProgressPercentage != progressPercentage) {
 	            	progressPercentage = newProgressPercentage;
+					progressIndicator.setCurrentStepProgress(progressPercentage);
 	            	System.out.println("Download progress: " + progressPercentage + "%");
 	            }
 	
@@ -90,6 +97,7 @@ public class DownloadWithProgress extends Download {
 	        is.close();
 	        os.close();
 	        if (verbose) Log.info("Download finished. Total " + total + " bytes.");
+			progressIndicator.markAsComplete();
 	
 	        res = true;
 	    } catch (Exception e) {
