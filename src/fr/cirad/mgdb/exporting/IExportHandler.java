@@ -16,20 +16,23 @@
  *******************************************************************************/
 package fr.cirad.mgdb.exporting;
 
-import java.io.IOException;
-import java.io.InputStream;
-import java.io.OutputStream;
+import java.io.*;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.Collection;
 import java.util.Enumeration;
 import java.util.HashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.zip.GZIPOutputStream;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
 import javax.servlet.http.HttpSession;
 
+import htsjdk.samtools.util.BlockCompressedOutputStream;
 import org.apache.log4j.Logger;
 import org.bson.Document;
 import org.springframework.data.mongodb.core.MongoTemplate;
@@ -167,4 +170,19 @@ public interface IExportHandler
             os.write("\n".getBytes());
         }
 	}
+	
+    public static Map<String, String> getIndividualPopulations(final Map<String, Collection<String>> individualsByPopulation, boolean fAllowIndividualsInMultipleGroups) throws Exception {
+    	Map<String, String> result = new HashMap<>();
+    	for (String pop : individualsByPopulation.keySet())
+    		for (String ind : individualsByPopulation.get(pop)) {
+    			if (result.containsKey(ind)) {
+    				if (!fAllowIndividualsInMultipleGroups)
+    					throw new Exception("Individual " + ind + " is part of several groups!");
+    				result.put(ind, result.get(ind) + ";" + pop);
+    			}
+    			else
+    				result.put(ind, pop);
+    		}
+        return result;
+    }
 }

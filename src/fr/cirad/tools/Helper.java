@@ -43,7 +43,7 @@ import com.mongodb.BasicDBList;
 import com.mongodb.BasicDBObject;
 
 import fr.cirad.mgdb.model.mongo.maintypes.GenotypingSample;
-import fr.cirad.mgdb.model.mongo.maintypes.VariantRunData.VariantRunDataId;
+import fr.cirad.mgdb.model.mongo.subtypes.VariantRunDataId;
 import fr.cirad.tools.mongo.MongoTemplateManager;
 
 /**

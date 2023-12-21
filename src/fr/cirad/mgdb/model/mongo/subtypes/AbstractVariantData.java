@@ -642,23 +642,21 @@ abstract public class AbstractVariantData
 	/**
 	 * To variant context.
 	 *
-	 * @param MongoTemplate the mongoTemplate
+	 * @param mongoTemplate the mongoTemplate
 	 * @param runs the runs
      * @param nAssemblyId ID of the assembly to work with
 	 * @param exportVariantIDs the export variant ids
 	 * @param samplesToExport overall list of samples involved in the export
 	 * @param individualPositions map providing the index at which each individual must appear in the export file
-	 * @param individuals1 individual IDs for group 1
-	 * @param individuals2 individual IDs for group 2
+	 * @param individuals List of individual IDs for each group
+	 * @param annotationFieldThresholds the annotation field thresholds for each group
 	 * @param previousPhasingIds the previous phasing ids
-	 * @param annotationFieldThresholds1 the annotation field thresholds for group 1
-	 * @param annotationFieldThresholds2 the annotation field thresholds for group 2
 	 * @param warningFileWriter the warning file writer
 	 * @param synonym the synonym
 	 * @return the variant context
 	 * @throws Exception the exception
 	 */
-	public VariantContext toVariantContext(MongoTemplate mongoTemplate, Collection<VariantRunData> runs, Integer nAssemblyId, boolean exportVariantIDs, List<GenotypingSample> samplesToExport, Map<String, Integer> individualPositions, Collection<String> individuals1, Collection<String> individuals2, HashMap<Integer, Object> previousPhasingIds, HashMap<String, Float> annotationFieldThresholds1, HashMap<String, Float> annotationFieldThresholds2, FileWriter warningFileWriter, String synonym) throws Exception
+	public VariantContext toVariantContext(MongoTemplate mongoTemplate, Collection<VariantRunData> runs, Integer nAssemblyId, boolean exportVariantIDs, List<GenotypingSample> samplesToExport, Map<String, Integer> individualPositions, Map<String /*population*/, Collection<String>> individuals, Map<String /*population*/, HashMap<String, Float>> annotationFieldThresholds, HashMap<Integer, Object> previousPhasingIds, FileWriter warningFileWriter, String synonym) throws Exception
 	{
 		ArrayList<Genotype> genotypes = new ArrayList<Genotype>();
 		String sRefAllele = knownAlleles.isEmpty() ? null : knownAlleles.iterator().next();
@@ -679,7 +677,7 @@ abstract public class AbstractVariantData
                     }
     
                     SampleGenotype sampleGenotype = run.getSampleGenotypes().get(sample.getId());
-                    if (sampleGenotype == null || !gtPassesVcfAnnotationFilters(sample.getIndividual(), sampleGenotype, individuals1, annotationFieldThresholds1, individuals2, annotationFieldThresholds2))
+                    if (sampleGenotype == null || !gtPassesVcfAnnotationFilters(sample.getIndividual(), sampleGenotype, individuals, annotationFieldThresholds))
                         continue;    // run contains no data for this sample, or its annotation values are below filter thresholds
 
                     // keep track of SampleGenotype and Run so we can have access to additional info later on
@@ -867,17 +865,31 @@ abstract public class AbstractVariantData
     }
 
     // tells whether applied filters imply to treat this genotype as missing data
-    public static boolean gtPassesVcfAnnotationFilters(String individualName, SampleGenotype sampleGenotype, Collection<String> individuals1, HashMap<String, Float> annotationFieldThresholds, Collection<String> individuals2, HashMap<String, Float> annotationFieldThresholds2)
+    public static boolean gtPassesVcfAnnotationFilters(String individualName, SampleGenotype sampleGenotype, Map<String, Collection<String>> individualsByPopulation, Map<String, HashMap<String, Float>> annotationFieldThresholds)
     {
-        if ((annotationFieldThresholds == null || annotationFieldThresholds.isEmpty()) && annotationFieldThresholds2 == null)
+        if (annotationFieldThresholds == null || annotationFieldThresholds.isEmpty())
             return true;
 
         List<HashMap<String, Float>> thresholdsToCheck = new ArrayList<HashMap<String, Float>>();
-        if (!annotationFieldThresholds.isEmpty() && individuals1.contains(individualName))
-            thresholdsToCheck.add(annotationFieldThresholds);
-        if (!annotationFieldThresholds2.isEmpty() && individuals2.contains(individualName))
-            thresholdsToCheck.add(annotationFieldThresholds2);
         
+        for (String pop : individualsByPopulation.keySet()) {
+        	Collection<String> popIndividuals = individualsByPopulation.get(pop);
+        	if (!popIndividuals.contains(individualName))
+        		continue;
+        	
+        	HashMap<String, Float> popThresholds = annotationFieldThresholds.get(pop);
+        	if (!popThresholds.isEmpty())
+                thresholdsToCheck.add(popThresholds);
+        }
+//        
+//        int i = 0;
+//        for (HashMap<String, Float> entry : annotationFieldThresholds) {
+//            if (!entry.isEmpty() && individualsByPopulation.get(i).contains(individualName)) {
+//                thresholdsToCheck.add(entry);
+//            }
+//            i++;
+//        }
+
         for (HashMap<String, Float> someThresholdsToCheck : thresholdsToCheck)
             for (String annotationField : someThresholdsToCheck.keySet())
             {

@@ -53,7 +53,9 @@ import fr.cirad.mgdb.model.mongo.maintypes.Individual;
 import fr.cirad.mgdb.model.mongo.maintypes.VariantData;
 import fr.cirad.mgdb.model.mongo.maintypes.VariantRunData;
 import fr.cirad.mgdb.model.mongo.subtypes.ReferencePosition;
+import fr.cirad.mgdb.model.mongo.subtypes.Run;
 import fr.cirad.mgdb.model.mongo.subtypes.SampleGenotype;
+import fr.cirad.mgdb.model.mongo.subtypes.VariantRunDataId;
 import fr.cirad.mgdb.model.mongodao.MgdbDao;
 import fr.cirad.tools.ProgressIndicator;
 import fr.cirad.tools.mongo.AutoIncrementCounter;
@@ -374,13 +376,14 @@ public class IntertekImport extends AbstractGenotypeImport {
 						continue; // skip non-variant positions that are not already known
                 }
                 
-                VariantRunData vrd = new VariantRunData(new VariantRunData.VariantRunDataId(project.getId(), sRun, variant.getVariantId()));
+                VariantRunData vrd = new VariantRunData(new VariantRunDataId(project.getId(), sRun, variant.getVariantId()));
                 vrd.setKnownAlleles(variant.getKnownAlleles());
                 vrd.setSampleGenotypes(variantToSampleToGenotypeMap.get(variant.getVariantId()));
                 vrd.setType(variant.getType());
                 vrd.setPositions(variant.getPositions());
                 vrd.setReferencePosition(variant.getReferencePosition());         
                 vrd.setSynonyms(variant.getSynonyms());
+                variant.getRuns().add(new Run(project.getId(), sRun));
                 
                 for (Integer asmId : assemblyIDs) {
                     ReferencePosition rp = variant.getReferencePosition(asmId);

@@ -27,7 +27,6 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map.Entry;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.stream.Collectors;
@@ -54,9 +53,9 @@ import fr.cirad.mgdb.model.mongo.maintypes.Assembly;
 import fr.cirad.mgdb.model.mongo.maintypes.GenotypingProject;
 import fr.cirad.mgdb.model.mongo.maintypes.GenotypingSample;
 import fr.cirad.mgdb.model.mongo.maintypes.VariantRunData;
-import fr.cirad.mgdb.model.mongo.maintypes.VariantRunData.VariantRunDataId;
 import fr.cirad.mgdb.model.mongo.subtypes.AbstractVariantData;
 import fr.cirad.mgdb.model.mongo.subtypes.ReferencePosition;
+import fr.cirad.mgdb.model.mongo.subtypes.VariantRunDataId;
 import fr.cirad.tools.AlphaNumericComparator;
 import fr.cirad.tools.Helper;
 import fr.cirad.tools.ProgressIndicator;
@@ -124,13 +123,13 @@ public class ExportManager
     
     private Integer nNumberOfChunksUsedForSpeedEstimation = null;  // if it remains null then we won't attempt any comparison
     
-    private ArrayList<Document> projectFilterList = new ArrayList<>();
+    private ArrayList<BasicDBObject> projectFilterList = new ArrayList<>();
     
     private Integer nAssemblyId;
 
     public static final CodecRegistry pojoCodecRegistry = CodecRegistries.fromRegistries(MongoClientSettings.getDefaultCodecRegistry(), CodecRegistries.fromProviders(PojoCodecProvider.builder().register(new IntKeyMapPropertyCodecProvider()).automatic(true).build()));
     
-    public ExportManager(MongoTemplate mongoTemplate, Integer nAssemblyId, MongoCollection<Document> varColl, Class resultType, Document varQuery, Collection<GenotypingSample> samplesToExport, boolean fIncludeMetadata, int nQueryChunkSize, AbstractExportWritingThread writingThread, Long markerCount, FileWriter warningFileWriter, ProgressIndicator progress) {
+    public ExportManager(MongoTemplate mongoTemplate, Integer nAssemblyId, MongoCollection<Document> varColl, Class resultType, BasicDBList vrdQuery, Collection<GenotypingSample> samplesToExport, boolean fIncludeMetadata, int nQueryChunkSize, AbstractExportWritingThread writingThread, Long markerCount, FileWriter warningFileWriter, ProgressIndicator progress) {
         this.progress = progress;
         this.nQueryChunkSize = nQueryChunkSize;
         this.warningFileWriter = warningFileWriter;
@@ -151,15 +150,12 @@ public class ExportManager
         HashMap<Integer, List<String>> involvedProjectRuns = Helper.getRunsByProjectInSampleCollection(samplesToExport);
         involvedRunCount = involvedProjectRuns.values().stream().mapToInt(b -> b.size()).sum();
 
-        int nDbProjectCount = (int) Helper.estimDocCount(mongoTemplate, GenotypingProject.class);
         for (int projId : involvedProjectRuns.keySet()) {
             List<String> projectInvolvedRuns = involvedProjectRuns.get(projId);
             if (projectInvolvedRuns.size() != mongoTemplate.findDistinct(new Query(Criteria.where("_id").is(projId)), GenotypingProject.FIELDNAME_RUNS, GenotypingProject.class, String.class).size()) {
                 // not all of this project's runs are involved: only match those (in the case of multi-project and/or multi-run databases, it is worth filtering on these fields to avoid parsing records related to unwanted samples)
-                projectFilterList.add(new Document("$and", Arrays.asList(new BasicDBObject("_id." + VariantRunDataId.FIELDNAME_PROJECT_ID, projId), new BasicDBObject("_id." + VariantRunDataId.FIELDNAME_RUNNAME, new BasicDBObject("$in", projectInvolvedRuns)))));
+                projectFilterList.add(new BasicDBObject("$and", Arrays.asList(new BasicDBObject("_id." + VariantRunDataId.FIELDNAME_PROJECT_ID, projId), new BasicDBObject("_id." + VariantRunDataId.FIELDNAME_RUNNAME, new BasicDBObject("$in", projectInvolvedRuns)))));
             }
-            else if (nDbProjectCount != involvedProjectRuns.size())
-                projectFilterList.add(new Document("_id." + VariantRunDataId.FIELDNAME_PROJECT_ID, projId));    // not all of this DB's projects are involved: only match selected ones
         }
 
         // optimization 2: build the $project stage by excluding fields when over 50% of overall samples are selected; even remove that stage when exporting all (or almost all) samples (makes it much faster)
@@ -168,14 +164,8 @@ public class ExportManager
         sampleIDsToExport = samplesToExport == null ? new ArrayList<>() : samplesToExport.stream().map(sp -> sp.getId()).collect(Collectors.toList());
         Collection<Integer> sampleIDsNotToExport = percentageOfExportedSamples >= 98 ? new ArrayList<>() /* if almost all individuals are being exported we directly omit the $project stage */ : (percentageOfExportedSamples > 50 ? mongoTemplate.findDistinct(new Query(Criteria.where("_id").not().in(sampleIDsToExport)), "_id", GenotypingSample.class, Integer.class) : null);
 
-        if (!varQuery.isEmpty()) {
-            if (!fWorkingOnTempColl && !projectFilterList.isEmpty()) {
-                Entry<String, Object> firstMatchEntry = varQuery.entrySet().iterator().next();
-                List<Document> matchAndList = "$and".equals(firstMatchEntry.getKey()) ? (List<Document>) firstMatchEntry.getValue() : Arrays.asList(varQuery);
-                matchAndList.addAll(projectFilterList);
-            }
-            matchStage = new BasicDBObject("$match", varQuery);
-        }
+        if (!fWorkingOnTempColl && !vrdQuery.isEmpty())
+            matchStage = new BasicDBObject("$match",  new BasicDBObject("$and", vrdQuery));
 
         Document projection = new Document();
         if (sampleIDsNotToExport == null) {    // inclusive $project (less than a half of the samples are being exported)
@@ -204,7 +194,7 @@ public class ExportManager
         }
     }
 
-    public void readAndWrite() throws IOException, InterruptedException, ExecutionException {        
+	public void readAndWrite() throws IOException, InterruptedException, ExecutionException {        
         if (fWorkingOnTempColl)
             exportFromTempColl();
         else
@@ -346,12 +336,9 @@ public class ExportManager
         int nTotalWrittenMarkerCount = 0;
         
         List<BasicDBObject> pipeline = new ArrayList<>();
-        if (matchStage != null) {
-            Document matchContents = (Document) matchStage.get("$match");
-            BasicDBList filters = matchContents.containsKey("$and") ? (BasicDBList) matchContents.get("$and") : new BasicDBList() {{ add(new BasicDBObject(matchContents)); }};
-            Helper.convertIdFiltersToRunFormat(Arrays.asList(filters));
+        if (matchStage != null)
             pipeline.add(matchStage);
-        }
+        
         pipeline.add(sortStage);
         int nPosAfterSortStage = pipeline.size();
         if (projectStage != null)
@@ -389,7 +376,7 @@ public class ExportManager
             }
 
             VariantRunData vrd = (VariantRunData) markerCursor.next();
-            varId = vrd.getId().getVariantId();
+            varId = vrd.getVariantId();
 
             if (previousVarId != null && !varId.equals(previousVarId)) {	// switching to the next variant
                 tempMarkerRunsToWrite.add(currentMarkerRuns);

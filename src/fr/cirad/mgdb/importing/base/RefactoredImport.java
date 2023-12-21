@@ -41,7 +41,9 @@ import fr.cirad.mgdb.model.mongo.maintypes.Individual;
 import fr.cirad.mgdb.model.mongo.maintypes.VariantData;
 import fr.cirad.mgdb.model.mongo.maintypes.VariantRunData;
 import fr.cirad.mgdb.model.mongo.subtypes.ReferencePosition;
+import fr.cirad.mgdb.model.mongo.subtypes.Run;
 import fr.cirad.mgdb.model.mongo.subtypes.SampleGenotype;
+import fr.cirad.mgdb.model.mongo.subtypes.VariantRunDataId;
 import fr.cirad.tools.ProgressIndicator;
 import fr.cirad.tools.mongo.AutoIncrementCounter;
 import fr.cirad.tools.mongo.MongoTemplateManager;
@@ -116,8 +118,8 @@ public abstract class RefactoredImport extends AbstractGenotypeImport {
                     mongoTemplate.save(ind);
             }
 
-            if (!individualsWithoutPopulation.isEmpty())
-                LOG.warn("Unable to find 3-letter population code for individuals: " + StringUtils.join(individualsWithoutPopulation, ", "));
+            if (!individualsWithoutPopulation.isEmpty() && populationCodesExpected())
+                LOG.warn("Unable to find population code for individuals: " + StringUtils.join(individualsWithoutPopulation, ", "));
 
             reader = new BufferedReader(new FileReader(tempFile));
 
@@ -133,6 +135,8 @@ public abstract class RefactoredImport extends AbstractGenotypeImport {
             if (assemblyIDs.isEmpty())
             	assemblyIDs.add(null);	// old-style, assembly-less DB
             AtomicInteger nLineIndex = new AtomicInteger(-1);
+            
+            final int projId = project.getId();
 
             for (int threadIndex = 0; threadIndex < nImportThreads; threadIndex++) {
                 importThreads[threadIndex] = new Thread() {
@@ -162,7 +166,7 @@ public abstract class RefactoredImport extends AbstractGenotypeImport {
                                 String[] seqAndPos = pos == null ? null : pos.split("\t");
                                 if (seqAndPos != null && seqAndPos.length == 2) 
 	                                try {
-	                                    bpPosition = Long.parseLong(seqAndPos[1]);
+	                                    bpPosition = Long.parseLong(seqAndPos[1].replace(",", ""));
 	                                	sequence = seqAndPos[0];
 	                                    if ("0".equals(sequence) || 0 == bpPosition) {
 	                                        sequence = null;
@@ -200,9 +204,11 @@ public abstract class RefactoredImport extends AbstractGenotypeImport {
                                 else
                                 {
                                     VariantData variant = mongoTemplate.findById(variantId == null ? providedVariantId : variantId, VariantData.class);
-                                    if (variant == null)
+                                    if (variant == null) 
                                         variant = new VariantData((ObjectId.isValid(providedVariantId) ? "_" : "") + providedVariantId);
 
+                                    variant.getRuns().add(new Run(projId, sRun));
+                                    
                                     String[][] alleles = new String[individuals.length][m_ploidy];
                                     int nIndividualIndex = 0;
                                     while (nIndividualIndex < individuals.length) {
@@ -223,15 +229,6 @@ public abstract class RefactoredImport extends AbstractGenotypeImport {
                                     }
 
                                     VariantRunData runToSave = addDataToVariant(mongoTemplate, variant, nAssemblyId, sequence, bpPosition, orderedIndividualToPopulationMap, nonSnpVariantTypeMap, alleles, project, sRun, m_fImportUnknownVariants);
-                                    
-                                    for (Integer asmId : assemblyIDs) {
-                                        ReferencePosition rp = variant.getReferencePosition(asmId);
-                                        if (rp != null)
-                                        	project.getContigs(asmId).add(rp.getSequence());
-                                    }
-
-                                    project.getVariantTypes().add(variant.getType());					// it's a TreeSet so it will only be added if it's not already present
-                                    project.getAlleleCounts().add(variant.getKnownAlleles().size());	// it's a TreeSet so it will only be added if it's not already present
                                     if (m_maxExpectedAlleleCount != null && variant.getKnownAlleles().size() > m_maxExpectedAlleleCount)
                                         LOG.warn("Variant " + variant.getId() + " (" + providedVariantId + ") has more than " + m_maxExpectedAlleleCount + " alleles!");
 
@@ -240,6 +237,15 @@ public abstract class RefactoredImport extends AbstractGenotypeImport {
                                             unsavedVariants.add(variant);
                                         if (!unsavedRuns.contains(runToSave))
                                             unsavedRuns.add(runToSave);
+                                        
+                                        for (Integer asmId : assemblyIDs) {
+                                            ReferencePosition rp = variant.getReferencePosition(asmId);
+                                            if (rp != null)
+                                            	project.getContigs(asmId).add(rp.getSequence());
+                                        }
+                                        
+                                        project.getVariantTypes().add(variant.getType());					// it's a TreeSet so it will only be added if it's not already present
+                                        project.getAlleleCounts().add(variant.getKnownAlleles().size());	// it's a TreeSet so it will only be added if it's not already present
                                     }
                                     else {
                                     	ReferencePosition rp = variant.getReferencePosition(nAssemblyId);
@@ -294,9 +300,13 @@ public abstract class RefactoredImport extends AbstractGenotypeImport {
         return count.get();
     }
 
-    protected VariantRunData addDataToVariant(MongoTemplate mongoTemplate, VariantData variantToFeed, Integer nAssemblyId, String sequence, Long bpPos, LinkedHashMap<String, String> orderedIndOrSpToPopulationMap, Map<String, Type> nonSnpVariantTypeMap, String[][] alleles, GenotypingProject project, String runName, boolean fImportUnknownVariants) throws Exception
+    protected boolean populationCodesExpected() {
+		return false;
+	}
+
+	protected VariantRunData addDataToVariant(MongoTemplate mongoTemplate, VariantData variantToFeed, Integer nAssemblyId, String sequence, Long bpPos, LinkedHashMap<String, String> orderedIndOrSpToPopulationMap, Map<String, Type> nonSnpVariantTypeMap, String[][] alleles, GenotypingProject project, String runName, boolean fImportUnknownVariants) throws Exception
     {
-        VariantRunData vrd = new VariantRunData(new VariantRunData.VariantRunDataId(project.getId(), runName, variantToFeed.getId()));
+        VariantRunData vrd = new VariantRunData(new VariantRunDataId(project.getId(), runName, variantToFeed.getId()));
 
         // genotype fields
         AtomicInteger allIdx = new AtomicInteger(0);

@@ -24,27 +24,18 @@ import java.io.InputStreamReader;
 import java.net.URL;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.BlockingQueue;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.LinkedBlockingQueue;
-import java.util.concurrent.ThreadPoolExecutor;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
-import java.util.function.Function;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
-import org.apache.commons.lang.StringUtils;
 import org.apache.log4j.Logger;
-import org.bson.types.ObjectId;
 import org.springframework.beans.factory.BeanDefinitionStoreException;
 import org.springframework.context.support.GenericXmlApplicationContext;
 import org.springframework.data.mongodb.core.MongoTemplate;
@@ -55,12 +46,7 @@ import fr.cirad.mgdb.importing.base.AbstractGenotypeImport;
 import fr.cirad.mgdb.importing.base.RefactoredImport;
 import fr.cirad.mgdb.model.mongo.maintypes.Assembly;
 import fr.cirad.mgdb.model.mongo.maintypes.GenotypingProject;
-import fr.cirad.mgdb.model.mongo.maintypes.GenotypingSample;
-import fr.cirad.mgdb.model.mongo.maintypes.Individual;
 import fr.cirad.mgdb.model.mongo.maintypes.VariantData;
-import fr.cirad.mgdb.model.mongo.maintypes.VariantRunData;
-import fr.cirad.mgdb.model.mongo.subtypes.ReferencePosition;
-import fr.cirad.mgdb.model.mongo.subtypes.SampleGenotype;
 import fr.cirad.mgdb.model.mongodao.MgdbDao;
 import fr.cirad.tools.ProgressIndicator;
 import fr.cirad.tools.mongo.AutoIncrementCounter;
@@ -321,6 +307,17 @@ public class FlapjackImport extends RefactoredImport {
         return allocatableMemory;
     }
 
+    private static String insertMissingDashes(String originalGenotypeData) {
+    	String result = null;
+    	while ((result == null ? originalGenotypeData : result).contains("\t\t"))
+    		result = (result == null ? originalGenotypeData : result).replaceAll("\t\t", "\t-\t");
+    	
+    	if (result == null)
+    		result = originalGenotypeData;
+    	
+    	return result.endsWith("\t") ? result + "-" : result;
+    }
+
     /**
      * 
      * @param genotypeFile
@@ -365,11 +362,8 @@ public class FlapjackImport extends RefactoredImport {
                 continue;
             }
 
-            Matcher initMatcher = allelePattern.matcher(initLine);
-            initMatcher.find();
-
             // Table header, with variant names, that starts with a tab (so the first non-whitespace word is not at index 0)
-            if (initMatcher.start() > 0) {
+            if (variants.isEmpty()) {
             	if (nIndividuals > 0)
             		throw new Exception("Invalid individual name at line " + lineno);
 
@@ -383,6 +377,8 @@ public class FlapjackImport extends RefactoredImport {
 
             // Normal data line
             else {
+                Matcher initMatcher = allelePattern.matcher(insertMissingDashes(initLine));
+                initMatcher.find();
                 String sIndividual = initMatcher.group().trim();
 
                 individualListToFill.add(sIndividual);
@@ -440,7 +436,7 @@ public class FlapjackImport extends RefactoredImport {
                         ArrayList<StringBuilder> transposed = new ArrayList<StringBuilder>();
 
                         while (blockStartMarkers.get(blockStartMarkers.size() - 1) < cVariants && progress.getError() == null && !progress.isAborted()) {
-                            FileReader reader = new FileReader(genotypeFile);
+                        	FileReader reader = new FileReader(genotypeFile);
                             try {
                                 int blockIndex, blockSize, blockStart;
                                 int bufferPosition = 0, bufferLength = 0;
@@ -528,7 +524,7 @@ public class FlapjackImport extends RefactoredImport {
                                         }
                                     // Non-trivial case : INDELs, heterozygotes and multi-characters separators
                                     } else {
-                                        Matcher matcher = allelePattern.matcher(lineBuffer);
+                                        Matcher matcher = allelePattern.matcher(insertMissingDashes(lineBuffer.toString()));
 
                                         // Start at the closest previous block that has already been mapped
                                         int startBlock = Math.min(blockIndex, individualPositions.size() - 1);

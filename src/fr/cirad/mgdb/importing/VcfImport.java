@@ -43,9 +43,13 @@ import org.apache.log4j.Logger;
 import org.bson.types.ObjectId;
 import org.springframework.beans.factory.BeanDefinitionStoreException;
 import org.springframework.context.support.GenericXmlApplicationContext;
+import org.springframework.data.mongodb.core.BulkOperations;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
+import org.springframework.data.mongodb.core.query.Update;
+
+import com.mongodb.bulk.BulkWriteResult;
 
 import fr.cirad.mgdb.importing.base.AbstractGenotypeImport;
 import fr.cirad.mgdb.model.mongo.maintypes.Assembly;
@@ -58,7 +62,9 @@ import fr.cirad.mgdb.model.mongo.maintypes.Sequence;
 import fr.cirad.mgdb.model.mongo.maintypes.VariantData;
 import fr.cirad.mgdb.model.mongo.maintypes.VariantRunData;
 import fr.cirad.mgdb.model.mongo.subtypes.ReferencePosition;
+import fr.cirad.mgdb.model.mongo.subtypes.Run;
 import fr.cirad.mgdb.model.mongo.subtypes.SampleGenotype;
+import fr.cirad.mgdb.model.mongo.subtypes.VariantRunDataId;
 import fr.cirad.mgdb.model.mongodao.MgdbDao;
 import fr.cirad.tools.Helper;
 import fr.cirad.tools.ProgressIndicator;
@@ -339,6 +345,8 @@ public class VcfImport extends AbstractGenotypeImport {
 
             // loop over each variation
             final Integer nAssemblyId = assembly == null ? null : assembly.getId();
+            final int projId = project.getId();
+            HashSet<String> distinctEncounteredGeneNames = new HashSet<>();
             while (variantIterator.hasNext()) {
                 if (progress.getError() != null || progress.isAborted())
                     break;
@@ -389,11 +397,17 @@ public class VcfImport extends AbstractGenotypeImport {
                                     }
                                     else
                                         totalProcessedVariantCount.getAndIncrement();
-
+                                    
+                                    variant.getRuns().add(new Run(projId, sRun));
+                                    
                                     unsavedVariants.add(variant);
                                     VariantRunData runToSave = addVcfDataToVariant(finalMongoTemplate, header, variant, nAssemblyId, vcfEntry, finalProject, sRun, phasingGroups, finalEffectAnnotationPos, finalGeneIdAnnotationPos);
-                                    if (!unsavedRuns.contains(runToSave))
+                                    if (!unsavedRuns.contains(runToSave)) {
                                         unsavedRuns.add(runToSave);
+                                        Collection<String> variantGenes = (Collection<String>) runToSave.getAdditionalInfo().get(VariantRunData.FIELDNAME_ADDITIONAL_INFO_EFFECT_GENE);
+                                        if (variantGenes != null)
+                                        	distinctEncounteredGeneNames.addAll((Collection<? extends String>) variantGenes);
+                                    }
 
                                     finalProject.getAlleleCounts().add(variant.getKnownAlleles().size());    // it's a Set so it will only be added if it's not already present
                                     finalProject.getVariantTypes().add(vcfEntry.getType().toString());   // it's a Set so it will only be added if it's not already present
@@ -448,7 +462,22 @@ public class VcfImport extends AbstractGenotypeImport {
                 mongoTemplate.save(project);
             else
                 mongoTemplate.insert(project);
-
+            
+            if (!distinctEncounteredGeneNames.isEmpty()) {
+	            BulkOperations bulkOperations = mongoTemplate.bulkOps(BulkOperations.BulkMode.UNORDERED, MgdbDao.COLLECTION_NAME_GENE_CACHE);
+	            for (String geneName : distinctEncounteredGeneNames) {
+	                Update update = new Update();
+	                update.addToSet(Run.FIELDNAME_PROJECT_ID, project.getId());
+	            	bulkOperations.upsert(new Query(Criteria.where("_id").is(geneName)), update);
+	            }
+	
+	            BulkWriteResult wr = bulkOperations.execute();
+	            if (wr.getUpserts().size() > 0)
+	            	LOG.info("Database " + sModule + ": " + wr.getUpserts().size() + " documents inserted into " + MgdbDao.COLLECTION_NAME_GENE_CACHE);
+	            if (wr.getModifiedCount() > 0)
+	            	LOG.info("Database " + sModule + ": " + wr.getModifiedCount() + " documents updated in " + MgdbDao.COLLECTION_NAME_GENE_CACHE);
+	        }
+            
             LOG.info("VcfImport took " + (System.currentTimeMillis() - before) / 1000 + "s for " + totalProcessedVariantCount + " records");
             return createdProject;
         }
@@ -510,7 +539,7 @@ public class VcfImport extends AbstractGenotypeImport {
         if (variantToFeed.getReferencePosition(nAssemblyId) == null) // otherwise we leave it as it is (had some trouble with overridden end-sites)
             variantToFeed.setReferencePosition(nAssemblyId, new ReferencePosition(vc.getContig(), vc.getStart(), (long) vc.getEnd()));
 
-        VariantRunData vrd = new VariantRunData(new VariantRunData.VariantRunDataId(project.getId(), runName, variantToFeed.getId()));
+        VariantRunData vrd = new VariantRunData(new VariantRunDataId(project.getId(), runName, variantToFeed.getId()));
 
         // main VCF fields that are stored as additional info in the DB
         if (vc.isFullyDecoded())
