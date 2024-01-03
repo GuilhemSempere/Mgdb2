@@ -67,6 +67,7 @@ import fr.cirad.mgdb.model.mongo.maintypes.CustomIndividualMetadata;
 import fr.cirad.mgdb.model.mongo.maintypes.CustomIndividualMetadata.CustomIndividualMetadataId;
 import fr.cirad.mgdb.model.mongo.maintypes.CustomSampleMetadata;
 import fr.cirad.mgdb.model.mongo.maintypes.CustomSampleMetadata.CustomSampleMetadataId;
+import fr.cirad.mgdb.model.mongodao.MgdbDao;
 import fr.cirad.mgdb.model.mongo.maintypes.GenotypingSample;
 import fr.cirad.mgdb.model.mongo.maintypes.Individual;
 import fr.cirad.tools.Helper;
@@ -254,6 +255,8 @@ public class IndividualMetadataImport {
             }
             if (!fIsAnonymous) {
                 BulkWriteResult wr = bulkOperations.execute();
+                if (targetTypeColName.equals("individual"))
+                	MgdbDao.ensureCustomMetadataIndexes(mongoTemplate);
                 if (targetEntityList.size() == 0)
                     LOG.info("Database " + sModule + ": metadata was deleted for " + wr.getModifiedCount() + " " + targetTypeColName + "s");
                 else if (wr.getUpserts().size() > 0)

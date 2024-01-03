@@ -332,7 +332,7 @@ public class MongoTemplateManager implements ApplicationContextAware {
                     try {
                     	MongoTemplate mongoTemplate = templateMap.get(db);
 						MgdbDao.addRunsToVariantCollectionIfNecessary(mongoTemplate);
-						MgdbDao.ensureVariantDataIndexes(mongoTemplate);	// FIXME: move to end of addRunsToVariantCollectionIfNecessary()
+						MgdbDao.ensureCustomMetadataIndexes(mongoTemplate);
 						MgdbDao.ensurePositionIndexes(mongoTemplate, Arrays.asList(mongoTemplate.getCollection(mongoTemplate.getCollectionName(VariantData.class))));	// FIXME: move to end of addRunsToVariantCollectionIfNecessary()
 						MgdbDao.createGeneCacheIfNecessary(db, MgdbDao.COLLECTION_NAME_GENE_CACHE);
                     } catch (Exception e) {
