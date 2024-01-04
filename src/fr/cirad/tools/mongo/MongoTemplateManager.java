@@ -31,6 +31,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Map.Entry;
 import java.util.MissingResourceException;
 import java.util.NoSuchElementException;
 import java.util.Properties;
@@ -43,6 +44,8 @@ import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
+
+import javax.annotation.PreDestroy;
 
 import org.apache.log4j.Logger;
 import org.bson.Document;
@@ -820,4 +823,13 @@ public class MongoTemplateManager implements ApplicationContextAware {
 		GroupedExecutor executor = moduleExecutors.get(sModule);
 		return executor != null ? executor : new ThreadPoolExecutor(INITIAL_NUMBER_OF_SIMULTANEOUS_QUERY_THREADS, MAXIMUM_NUMBER_OF_SIMULTANEOUS_QUERY_THREADS, Long.MAX_VALUE, TimeUnit.DAYS, new LinkedBlockingQueue<>(), new ThreadPoolExecutor.CallerRunsPolicy());
 	}
+	
+    @PreDestroy
+    public void shutdownExecutors() {
+    	for (Entry<String, GroupedExecutor> ge : hostExecutors.entrySet())
+    		if (!ge.getValue().isShutdown()) {
+    			LOG.debug("Shutting down executor for host " + ge.getKey());
+    			ge.getValue().shutdownNow();
+    		}
+    }
 }
