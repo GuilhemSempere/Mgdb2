@@ -3,7 +3,7 @@
     <modelVersion>4.0.0</modelVersion>
     
     <properties>
-	    <project.version>2.6.2-RELEASE</project.version>
+	    <project.version>2.7-RELEASE</project.version>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <maven.compiler.source>17</maven.compiler.source>
@@ -182,7 +182,7 @@
         <dependency>
             <groupId>org.springframework.data</groupId>
             <artifactId>spring-data-mongodb</artifactId>
-            <version>4.0.2</version>
+            <version>4.1.7</version>
             <exclusions>
                 <exclusion>
                     <groupId>org.mongodb</groupId>
@@ -202,7 +202,7 @@
             <artifactId>Mgdb2BrapiModel</artifactId>
             <version>1.0.4-RELEASE</version>
         </dependency>
-        
+
     </dependencies>
 
 	<repositories>

@@ -23,9 +23,11 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Map.Entry;
 import java.util.NoSuchElementException;
 import java.util.Set;
 import java.util.TreeMap;
@@ -34,6 +36,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import javax.ejb.ObjectNotFoundException;
@@ -50,9 +53,13 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.aggregation.Aggregation;
+import org.springframework.data.mongodb.core.aggregation.AggregationOperation;
 import org.springframework.data.mongodb.core.aggregation.AggregationOptions;
 import org.springframework.data.mongodb.core.aggregation.AggregationResults;
 import org.springframework.data.mongodb.core.aggregation.Fields;
+import org.springframework.data.mongodb.core.aggregation.LookupOperation;
+import org.springframework.data.mongodb.core.aggregation.ObjectOperators.MergeObjects;
+import org.springframework.data.mongodb.core.aggregation.VariableOperators.Let.ExpressionVariable;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.data.mongodb.core.query.Update;
@@ -262,7 +269,7 @@ public class MgdbDao {
         MongoCollection<Document> variantColl = mongoTemplate.getCollection(mongoTemplate.getCollectionName(VariantData.class));
         
         boolean fFoundTypeIndex = false;
-        Collection<String> missingSynonymIndexes = new java.util.HashSet<>() {{ 
+        Collection<String> missingSynonymIndexes = new HashSet<>() {{ 
         	add(VariantData.FIELDNAME_SYNONYMS + "." + VariantData.FIELDNAME_SYNONYM_TYPE_ID_ILLUMINA);
         	add(VariantData.FIELDNAME_SYNONYMS + "." + VariantData.FIELDNAME_SYNONYM_TYPE_ID_INTERNAL);
         	add(VariantData.FIELDNAME_SYNONYMS + "." + VariantData.FIELDNAME_SYNONYM_TYPE_ID_NCBI);
@@ -592,7 +599,7 @@ public class MgdbDao {
      * Gets the individuals from samples.
      *
      * @param sModule the module
-     * @param sampleIDs the sample ids
+     * @param samples the sample ids
      * @return the individuals from samples
      */
     public static List<Individual> getIndividualsFromSamples(final String sModule, final Collection<GenotypingSample> samples) {
@@ -689,43 +696,92 @@ public class MgdbDao {
      * @param module the database name (mandatory)
      * @param sCurrentUser username for whom to get custom metadata (optional)
      * @param projIDs a list of project IDs (optional)
-     * @param indIDs a list of individual IDs (optional)
+     * @param indIDs a list of individual IDs (optional), has priority over projIDs
+     * @param filters the filters to apply (optional)
      * @return Individual IDs mapped to Individual objects with static metada +
      * custom metadata (if available). If indIDs is specified the list is
      * restricted by it, otherwise if projIDs is specified the list is
      * restricted by it, otherwise all database Individuals are returned
      */
-    public LinkedHashMap<String, Individual> loadIndividualsWithAllMetadata(String module,/* HttpSession session, */ String sCurrentUser, Collection<Integer> projIDs, Collection<String> indIDs) {
+    public LinkedHashMap<String, Individual> loadIndividualsWithAllMetadata(String module, String sCurrentUser, Collection<Integer> projIDs, Collection<String> indIDs, LinkedHashMap<String, Set<String>> filters) {
         MongoTemplate mongoTemplate = MongoTemplateManager.get(module);
-
-        // build the initial list of Individual objects
-        if (indIDs == null) {
+        List<Criteria> crits = new ArrayList<>();
+        
+        if (indIDs == null && Helper.estimDocCount(mongoTemplate, GenotypingProject.class) != 1)	// if no list of individuals is provided we may select them by project
             indIDs = mongoTemplate.findDistinct(projIDs == null || projIDs.isEmpty() ? new Query() : new Query(Criteria.where(GenotypingSample.FIELDNAME_PROJECT_ID).in(projIDs)), GenotypingSample.FIELDNAME_INDIVIDUAL, GenotypingSample.class, String.class);
-        }
-        Query q = new Query(Criteria.where("_id").in(indIDs));
-        q.with(Sort.by(Sort.Direction.ASC, "_id"));
-        Map<String, Individual> indMap = mongoTemplate.find(q, Individual.class).stream().collect(Collectors.toMap(Individual::getId, ind -> ind));
-        LinkedHashMap<String, Individual> result = new LinkedHashMap<>();	// this one will be sorted according to the provided list
-        for (String indId : indIDs) {
-            result.put(indId, indMap.get(indId));
-        }
+        if (indIDs != null)
+        	crits.add(Criteria.where("_id").in(indIDs));
+ 
+        if (sCurrentUser != null && !"anonymousUser".equals(sCurrentUser)) {	// merge with custom metadata if available
+        	LinkedHashMap<String, Individual> result = new LinkedHashMap<>();
+            List<AggregationOperation> pipeline = new ArrayList<>();
+        	
+        	if (!crits.isEmpty()) 
+        		pipeline.add(Aggregation.match(new Criteria().andOperator(crits.toArray(new Criteria[crits.size()]))));
+ 
+        	pipeline.add(LookupOperation.newLookup()
+                    .from(MongoTemplateManager.getMongoCollectionName(CustomIndividualMetadata.class))
+                    .let(ExpressionVariable.newVariable("id").forField("$_id"))
+                    .pipeline(context -> {
+                        return new Document("$match",
+                                new Document("$expr",
+                                        new Document("$and", Arrays.asList(
+                                                new Document("$eq", Arrays.asList("$$id", "$_id." + CustomIndividualMetadataId.FIELDNAME_INDIVIDUAL_ID)),
+                                                new Document("$eq", Arrays.asList("$_id." + CustomIndividualMetadataId.FIELDNAME_USER, sCurrentUser))
+                                        ))
+                                ));
+                    })
+        	.as("cimd"));            	
+        	
+        	pipeline.add(Aggregation.unwind("$cimd", true));
+        	pipeline.add(Aggregation.project().and(MergeObjects.mergeValuesOf("$" + Individual.SECTION_ADDITIONAL_INFO, "$cimd." + Individual.SECTION_ADDITIONAL_INFO)).as(Individual.SECTION_ADDITIONAL_INFO));
 
-        boolean fGrabSessionAttributesFromThread = SessionAttributeAwareThread.class.isAssignableFrom(Thread.currentThread().getClass());
-        LinkedHashMap<String, LinkedHashMap<String, Object>> sessionMetaData = (LinkedHashMap<String, LinkedHashMap<String, Object>>) (fGrabSessionAttributesFromThread ? ((SessionAttributeAwareThread) Thread.currentThread()).getSessionAttributes().get("individuals_metadata_" + module) : httpSessionFactory.getObject().getAttribute("individuals_metadata_" + module));
-        if (sCurrentUser != null) {	// merge with custom metadata if available
-            if ("anonymousUser".equals(sCurrentUser)) {
-            	if (sessionMetaData != null)
-	                for (String indId : indIDs) {
-	                    LinkedHashMap<String, Object> indSessionMetadata = sessionMetaData.get(indId);
-	                    if (indSessionMetadata != null && !indSessionMetadata.isEmpty())
-	                        result.get(indId).getAdditionalInfo().putAll(indSessionMetadata);
-	                }
-            } else
-                for (CustomIndividualMetadata cimd : mongoTemplate.find(new Query(new Criteria().andOperator(Criteria.where("_id." + CustomIndividualMetadataId.FIELDNAME_USER).is(sCurrentUser), Criteria.where("_id." + CustomIndividualMetadataId.FIELDNAME_INDIVIDUAL_ID).in(indIDs))), CustomIndividualMetadata.class))
-                    if (cimd.getAdditionalInfo() != null && !cimd.getAdditionalInfo().isEmpty())
-                        result.get(cimd.getId().getIndividualId()).getAdditionalInfo().putAll(cimd.getAdditionalInfo());
+            if (filters != null)
+    	        for (Entry<String, Set<String>> filterEntry : filters.entrySet()) {
+    	            Set<String> filterValues = filterEntry.getValue();
+    	            if (!filterValues.isEmpty())
+    	            	pipeline.add(Aggregation.match(Criteria.where(Individual.SECTION_ADDITIONAL_INFO + "." + filterEntry.getKey()).in(filterValues)));
+    	        }
+
+            AggregationResults<Individual> aggregationResults = mongoTemplate.aggregate(Aggregation.newAggregation(pipeline), MongoTemplateManager.getMongoCollectionName(Individual.class), Individual.class);
+            for (Individual ind : aggregationResults.getMappedResults())
+            	result.put(ind.getId(), ind);
+            return result;
         }
-        return result;
+        else {
+            boolean fGrabSessionAttributesFromThread = SessionAttributeAwareThread.class.isAssignableFrom(Thread.currentThread().getClass());
+            LinkedHashMap<String, LinkedHashMap<String, Object>> sessionMetaData = (LinkedHashMap<String, LinkedHashMap<String, Object>>) (fGrabSessionAttributesFromThread ? ((SessionAttributeAwareThread) Thread.currentThread()).getSessionAttributes().get("individuals_metadata_" + module) : httpSessionFactory.getObject().getAttribute("individuals_metadata_" + module));
+            boolean fMergeSessionData = sCurrentUser != null && sessionMetaData != null;
+
+            if (filters != null && !fMergeSessionData)
+    	        for (Entry<String, Set<String>> filterEntry : filters.entrySet()) {
+    	            Set<String> filterValues = filterEntry.getValue();
+    	            if (!filterValues.isEmpty())
+    	            	crits.add(Criteria.where(Individual.SECTION_ADDITIONAL_INFO + "." + filterEntry.getKey()).in(filterValues));
+    	        }
+            
+        	// load "official" metadata (that is, those attached to Individual objects)
+            Query q = crits.size() == 0 ? new Query() : new Query(new Criteria().andOperator(crits.toArray(new Criteria[crits.size()])));
+            q.with(Sort.by(Sort.Direction.ASC, "_id"));
+            LinkedHashMap<String, Individual> result = mongoTemplate.find(q, Individual.class).stream().collect(Collectors.toMap(Individual::getId, Function.identity(), (u, v) -> u, LinkedHashMap::new));
+            
+            if (fMergeSessionData) {	// filters will be applied "by hand" after merging
+            	sessionMetaData.entrySet().stream().forEach(indEntry -> {
+                    LinkedHashMap<String, Object> indSessionMetadata = sessionMetaData.get(indEntry.getKey());
+                    Individual ind = result.computeIfAbsent(indEntry.getKey(), k -> new Individual(indEntry.getKey()));
+                    ind.getAdditionalInfo().putAll(indSessionMetadata);
+	
+	                if (filters != null)
+                		for (Entry<String, Set<String>> filterEntry : filters.entrySet()) {
+    	            		if (!filterEntry.getValue().isEmpty() && !filterEntry.getValue().contains(ind.getAdditionalInfo().get(filterEntry.getKey()))) {
+    	            			result.remove(indEntry.getKey());
+    	            			return;
+    	            		}
+	                }
+            	});
+            }
+            return result;
+        }
     }
 
     /**
@@ -1016,7 +1072,25 @@ public class MgdbDao {
     	MongoTemplateManager.unlockModuleForWriting(sModule);
     	return n;
     }
-    
+
+    /**
+     * @param module the database name (mandatory)
+     * @param sCurrentUser username for whom to get custom metadata (optional)
+     * @param projID a project ID (optional)
+     * @param indIDs a list of individual IDs (optional)
+     * @return LinkedHashMap which contains all different metadata of the project
+     */
+    public LinkedHashMap<String, Set<String>> distinctIndividualMetadata(String module, String sCurrentUser, Integer projID, Collection<String> indIDs) {
+        LinkedHashMap<String, Set<String>> result = new LinkedHashMap<>();	// this one will be sorted according to the provided list
+        MgdbDao.getInstance().loadIndividualsWithAllMetadata(module, sCurrentUser, Arrays.asList(projID), indIDs, null).values().stream().filter(ind -> ind.getAdditionalInfo() != null).map(ind -> {
+        	for (String fieldName : ind.getAdditionalInfo().keySet())
+        		result.computeIfAbsent(fieldName, k -> new HashSet<>()).add((String) ind.getAdditionalInfo().get(fieldName));
+			return null;
+        }).count();
+
+        return result;
+    }
+
     public static void addRunsToVariantCollectionIfNecessary(MongoTemplate mongoTemplate) throws Exception {
         String variantDataCollName = mongoTemplate.getCollectionName(VariantData.class), copyCollectionName = variantDataCollName + "_copy";
         String info = "Ensuring presence of run info in variants collection for db " + mongoTemplate.getDb().getName();
@@ -1082,6 +1156,8 @@ public class MgdbDao {
         }
 
         mongoTemplate.getCollection(copyCollectionName).renameCollection(activeNameSpace);
+		ensureVariantDataIndexes(mongoTemplate);
+
         MongoTemplateManager.updateDatabaseLastModification(mongoTemplate);
     }
     
@@ -1100,5 +1176,23 @@ public class MgdbDao {
             MongoTemplateManager.updateDatabaseLastModification(sModule);
             LOG.info("Creation of gene cache for db " + mongoTemplate.getDb().getName() + " took " + (System.currentTimeMillis() - before)/1000 + "s");
         }
-    }    
+    }
+
+	public static void ensureCustomMetadataIndexes(MongoTemplate mongoTemplate) {
+		MongoCollection<Document> coll = mongoTemplate.getCollection(mongoTemplate.getCollectionName(CustomIndividualMetadata.class));
+		if (coll.estimatedDocumentCount() == 0)
+			return;	// no such data
+
+		String individualIdField = "_id." + CustomIndividualMetadataId.FIELDNAME_INDIVIDUAL_ID;
+        MongoCursor<Document> indexCursor = coll.listIndexes().cursor();
+        while (indexCursor.hasNext()) {
+            Document doc = (Document) indexCursor.next();
+            Document keyDoc = ((Document) doc.get("key"));
+            Set<String> keyIndex = (Set<String>) keyDoc.keySet();
+            if (keyIndex.size() == 1 && individualIdField.equals(keyIndex.iterator().next()))
+            	return;	// index already exists
+        }
+        LOG.debug("Creating index on field " + individualIdField + " of collection " + coll.getNamespace());
+        coll.createIndex(new BasicDBObject(individualIdField, 1));
+	}
 }

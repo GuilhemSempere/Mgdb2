@@ -39,6 +39,9 @@ import java.util.TreeMap;
 import java.util.TreeSet;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 import org.apache.log4j.Logger;
@@ -68,6 +71,7 @@ import fr.cirad.mgdb.model.mongo.maintypes.VariantRunData;
 import fr.cirad.mgdb.model.mongodao.MgdbDao;
 import fr.cirad.tools.AppConfig;
 import fr.cirad.tools.Helper;
+import fr.cirad.tools.query.GroupedExecutor;
 
 /**
  * The Class MongoTemplateManager.
@@ -109,6 +113,16 @@ public class MongoTemplateManager implements ApplicationContextAware {
      * The mongo clients.
      */
     static private Map<String, MongoClient> mongoClients = new HashMap<>();
+    
+    /**
+     * The Executor to use for asynchronously querying each host
+     */
+    static private Map<String, GroupedExecutor> hostExecutors = new HashMap<>();
+    
+    /**
+     * The Executor to use for asynchronously querying each module
+     */
+    static private Map<String, GroupedExecutor> moduleExecutors = new HashMap<>();
     
     /**
      * The datasource  (properties filename)
@@ -156,6 +170,14 @@ public class MongoTemplateManager implements ApplicationContextAware {
 	 *  A null value in the set indicates the whole module is locked (i.e., a dump is being generated or restored)
 	 */
 	private static HashMap<String /*module*/, Set<String> /*projects*/> currentlyImportedProjects = new HashMap<String, Set<String>>();
+
+//	// for per-host ExecutorService
+//    static final private int DEFAULT_MAXIMUM_NUMBER_OF_SIMULTANEOUS_QUERY_THREADS = 20;
+    
+    // for old-style queries
+    static final public int INITIAL_NUMBER_OF_SIMULTANEOUS_QUERY_THREADS = 10;
+    static final public int MINIMUM_NUMBER_OF_SIMULTANEOUS_QUERY_THREADS = 5;
+    static final public int MAXIMUM_NUMBER_OF_SIMULTANEOUS_QUERY_THREADS = 50;
 
     @Override
     public void setApplicationContext(ApplicationContext ac) throws BeansException {
@@ -281,6 +303,7 @@ public class MongoTemplateManager implements ApplicationContextAware {
                 	
                     MongoTemplate mongoTemplate = createMongoTemplate(datasourceInfo[0], datasourceInfo[1]);
                     templateMap.put(cleanKey, mongoTemplate);
+                    assignExecutorToModule(datasourceInfo[0], cleanKey);
 
                     if (fClearCachedCountsOnStartup)
                     	mongoTemplate.dropCollection(CachedCount.class);
@@ -309,7 +332,7 @@ public class MongoTemplateManager implements ApplicationContextAware {
                     try {
                     	MongoTemplate mongoTemplate = templateMap.get(db);
 						MgdbDao.addRunsToVariantCollectionIfNecessary(mongoTemplate);
-						MgdbDao.ensureVariantDataIndexes(mongoTemplate);	// FIXME: move to end of addRunsToVariantCollectionIfNecessary()
+						MgdbDao.ensureCustomMetadataIndexes(mongoTemplate);
 						MgdbDao.ensurePositionIndexes(mongoTemplate, Arrays.asList(mongoTemplate.getCollection(mongoTemplate.getCollectionName(VariantData.class))));	// FIXME: move to end of addRunsToVariantCollectionIfNecessary()
 						MgdbDao.createGeneCacheIfNecessary(db, MgdbDao.COLLECTION_NAME_GENE_CACHE);
                     } catch (Exception e) {
@@ -320,7 +343,24 @@ public class MongoTemplateManager implements ApplicationContextAware {
         executor.shutdown();
     }
 
-    /**
+    private static void assignExecutorToModule(String sHost, String sModule) {
+    	GroupedExecutor executor = hostExecutors.get(sHost);
+        if (executor == null) {
+        	if (!hostExecutors.containsKey(sHost))
+		        try {
+		        	int nExecutorPoolSize = Integer.parseInt(appConfig.get("maxQueryThreads_" + sHost));
+					LOG.info("Found maxQueryThreads_" + sHost + ": " + nExecutorPoolSize);
+			        executor = new GroupedExecutor(nExecutorPoolSize);
+		        }
+		        catch (Exception e) {
+		        	LOG.info("No property maxQueryThreads_" + sHost + ". No ExecutorService will be dedicated to this host.");
+		        }
+	        hostExecutors.put(sHost, executor);	// add it even if null so we don't output the LOG line several times
+        }
+        moduleExecutors.put(sModule, executor);
+	}
+
+	/**
      * Creates the mongo template.
      *
      * @param sHost the host
@@ -337,7 +377,7 @@ public class MongoTemplateManager implements ApplicationContextAware {
         ((MappingMongoConverter) mongoTemplate.getConverter()).setMapKeyDotReplacement(DOT_REPLACEMENT_STRING);
 
         MgdbDao.ensurePositionIndexes(mongoTemplate, Arrays.asList(mongoTemplate.getCollection(mongoTemplate.getCollectionName(VariantData.class)), mongoTemplate.getCollection(mongoTemplate.getCollectionName(VariantRunData.class))));	// make sure we have indexes defined as required in v2.4
-        
+
         return mongoTemplate;
     }
 
@@ -412,6 +452,8 @@ public class MongoTemplateManager implements ApplicationContextAware {
 		                dataSourceProperties.store(fos, null);
 
 		                templateMap.put(sModule, mongoTemplate);
+		                assignExecutorToModule(sHost, sModule);
+		                
 		                if (fPublic)
 		                    publicDatabases.add(sModule);
 		                if (fHidden)
@@ -773,4 +815,9 @@ public class MongoTemplateManager implements ApplicationContextAware {
     	MongoTemplate template = get(sModule);
     	return template.findOne(new Query(), DatabaseInformation.class, "dbInfo");
     }
+
+	public static ExecutorService getExecutor(String sModule) {
+		GroupedExecutor executor = moduleExecutors.get(sModule);
+		return executor != null ? executor : new ThreadPoolExecutor(INITIAL_NUMBER_OF_SIMULTANEOUS_QUERY_THREADS, MAXIMUM_NUMBER_OF_SIMULTANEOUS_QUERY_THREADS, Long.MAX_VALUE, TimeUnit.DAYS, new LinkedBlockingQueue<>(), new ThreadPoolExecutor.CallerRunsPolicy());
+	}
 }
