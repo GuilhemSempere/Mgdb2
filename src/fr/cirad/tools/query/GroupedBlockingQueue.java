@@ -132,16 +132,15 @@ public class GroupedBlockingQueue<E> implements BlockingQueue<E> {
         synchronized (this) {
 	        while (true) {
 	            for (int i = 0; i < taskGroups.size(); i++) {
-	                int currentIndex = (previousGroupIndex + 1) % taskGroups.size(); // Calculate the index of the next group
-	
-	                String group = new ArrayList<>(taskGroups.keySet()).get(currentIndex);
+	        		int currentIndex = (previousGroupIndex + 1) % taskGroups.size(); // Calculate the index of the next group
+	        		String group = new ArrayList<>(taskGroups.keySet()).get(currentIndex);
 	                Queue<E> groupQueue = taskGroups.get(group);
 	                if (groupQueue == null) {	// it may have been removed because it ran empty
 	                	currentIndex = 0;
 		                group = taskGroups.keySet().iterator().next();
 		                groupQueue = taskGroups.get(group);
 	                }
-	                if (groupQueue != null) {
+	                else {
 		                E element = groupQueue.poll();
 		                if (element != null) {
 		                    previousGroupIndex = currentIndex; // Update the previousGroupIndex variable
@@ -151,10 +150,11 @@ public class GroupedBlockingQueue<E> implements BlockingQueue<E> {
 		                else if (taskGroups.get(group).isEmpty() && shutdownGroups.contains(group)) {
 	                		shutdownGroups.remove(group);
 	                		taskGroups.remove(group);
-//	                		LOG.debug("Removed group: " + group + " / " + taskGroups.size());
+//		                	LOG.debug("Removed group: " + group + " / " + taskGroups.size());
 		                }
 	                }
 	            }
+//	            LOG.info("wait(): "  + taskGroups.values().stream().map(list -> list.size()).toList());
                 wait();
             }
         }
@@ -272,8 +272,8 @@ public class GroupedBlockingQueue<E> implements BlockingQueue<E> {
 
     @Override
     public void clear() {
-    	taskGroups.clear();
     	shutdownGroups.clear();
+    	taskGroups.clear();
     }
 
     @Override
