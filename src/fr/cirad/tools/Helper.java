@@ -251,7 +251,7 @@ public class Helper {
      * @param string the string
      * @return md5 checksum 32 char long
      */
-    public static String convertToMD5(String string) {
+    public static synchronized String convertToMD5(String string) {
         if (md == null) {
             return string;
         }
