@@ -33,7 +33,9 @@ public class GroupedBlockingQueue<E> implements BlockingQueue<E> {
     }
     
 	public void shutdown(String group) {
-    	shutdownGroups.add(group);
+		synchronized (shutdownGroups) {
+			shutdownGroups.add(group);
+		}
 	}
 
     @Override
@@ -59,16 +61,19 @@ public class GroupedBlockingQueue<E> implements BlockingQueue<E> {
     	if (shutdownGroups.contains(group))
             throw new RejectedExecutionException("Group " + group + " has already been shutdown (" + taskGroups.size() + ")");
 
-        LinkedBlockingQueue<E> groupQueue = taskGroups.computeIfAbsent(group, k -> {
-    		shutdownGroups.remove(group);
-    		return new LinkedBlockingQueue<>();
-    	} );
-        boolean offered = groupQueue.offer(element);
-        if (offered) {
-            synchronized (this) {
-                notifyAll();
-            }
-            return true;
+    	synchronized (taskGroups) {
+	        LinkedBlockingQueue<E> groupQueue = taskGroups.computeIfAbsent(group, k -> {
+	    		shutdownGroups.remove(group);
+	    		return new LinkedBlockingQueue<>();
+	    	} );
+	        
+	        boolean offered = groupQueue.offer(element);
+	        if (offered) {
+	            synchronized (this) {
+	                notifyAll();
+	            }
+	            return true;
+	        }
         }
 
         return false;
@@ -84,11 +89,13 @@ public class GroupedBlockingQueue<E> implements BlockingQueue<E> {
             throw new NullPointerException("Group cannot be null");
         }
 
-        LinkedBlockingQueue<E> groupQueue = taskGroups.computeIfAbsent(group, k -> {
-        		shutdownGroups.remove(group);
-        		return new LinkedBlockingQueue<>();
-        	} );
-        groupQueue.put(element);
+        synchronized (taskGroups) {
+	        LinkedBlockingQueue<E> groupQueue = taskGroups.computeIfAbsent(group, k -> {
+	        		shutdownGroups.remove(group);
+	        		return new LinkedBlockingQueue<>();
+	        	} );
+	        groupQueue.put(element);
+        }
         notifyAll();
     }
 
@@ -101,29 +108,30 @@ public class GroupedBlockingQueue<E> implements BlockingQueue<E> {
         if (group == null)
             throw new NullPointerException("Group cannot be null");
 
-        LinkedBlockingQueue<E> groupQueue = taskGroups.computeIfAbsent(group, k -> {
-    		shutdownGroups.remove(group);
-    		return new LinkedBlockingQueue<>();
-    	} );
-        boolean offered = groupQueue.offer(element);
-        if (offered) {
-            notifyAll();
-            return true;
+        synchronized (taskGroups) {
+	        LinkedBlockingQueue<E> groupQueue = taskGroups.computeIfAbsent(group, k -> {
+	    		shutdownGroups.remove(group);
+	    		return new LinkedBlockingQueue<>();
+	    	} );
+	        boolean offered = groupQueue.offer(element);
+	        if (offered) {
+	            notifyAll();
+	            return true;
+	        }
+	
+	        long endTime = System.currentTimeMillis() + unit.toMillis(timeout);
+	        long remainingTime = unit.toMillis(timeout);
+	
+	        while (remainingTime > 0) {
+	            wait(remainingTime);
+	            remainingTime = endTime - System.currentTimeMillis();
+	            offered = groupQueue.offer(element);
+	            if (offered) {
+	                notifyAll();
+	                return true;
+	            }
+	        }
         }
-
-        long endTime = System.currentTimeMillis() + unit.toMillis(timeout);
-        long remainingTime = unit.toMillis(timeout);
-
-        while (remainingTime > 0) {
-            wait(remainingTime);
-            remainingTime = endTime - System.currentTimeMillis();
-            offered = groupQueue.offer(element);
-            if (offered) {
-                notifyAll();
-                return true;
-            }
-        }
-
         return false;
     }
 
@@ -144,10 +152,10 @@ public class GroupedBlockingQueue<E> implements BlockingQueue<E> {
 		                E element = groupQueue.poll();
 		                if (element != null) {
 		                    previousGroupIndex = currentIndex; // Update the previousGroupIndex variable
-//		                    LOG.debug("Took task from group: " + currentIndex + " / " + taskGroups.get(group).size());
+//		                    LOG.debug("Took task from group: " + currentIndex + " / " + groupQueue.size());
 		                    return element;
 		                }
-		                else if (taskGroups.get(group).isEmpty() && shutdownGroups.contains(group)) {
+		                else if (groupQueue.isEmpty() && shutdownGroups.contains(group)) {
 	                		shutdownGroups.remove(group);
 	                		taskGroups.remove(group);
 //		                	LOG.debug("Removed group: " + group + " / " + taskGroups.size());
