@@ -21,6 +21,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
+import fr.cirad.mgdb.model.mongo.maintypes.Assembly;
 import org.apache.log4j.Logger;
 import org.bson.Document;
 import org.snpeff.SnpEff;
@@ -150,7 +151,8 @@ public class SnpEffAnnotationService {
 	}
 
 	private static Chromosome getParentChromosome(VariantRunData vrd, Genome genome) {
-		String sequence = vrd.getReferencePosition().getSequence();
+		int nAssembly = Assembly.getThreadBoundAssembly();
+		String sequence = vrd.getReferencePosition(nAssembly).getSequence();
 		Chromosome chromosome = genome.getChromosome(sequence);
 		if (chromosome != null) return chromosome;
 

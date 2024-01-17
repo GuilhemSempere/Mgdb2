@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 
+import fr.cirad.mgdb.model.mongo.maintypes.Assembly;
 import org.snpeff.interval.Chromosome;
 import org.snpeff.interval.Variant;
 import org.snpeff.snpEffect.VariantEffect;
@@ -34,7 +35,8 @@ public class SnpEffEntryWrapper {
 	}
 
 	public List<Variant> variants() {
-		return Variant.factory(parent, (int)entry.getReferencePosition().getStartSite(), entry.getKnownAlleles().get(0),
+		int nAssembly = Assembly.getThreadBoundAssembly();
+		return Variant.factory(parent, (int)entry.getReferencePosition(nAssembly).getStartSite(), entry.getKnownAlleles().get(0),
 				String.join(",", entry.getKnownAlleles().subList(1, entry.getKnownAlleles().size())), entry.getVariantId(), true);
 	}
 
