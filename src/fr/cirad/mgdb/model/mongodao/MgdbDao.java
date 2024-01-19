@@ -1082,9 +1082,15 @@ public class MgdbDao {
      */
     public LinkedHashMap<String, Set<String>> distinctIndividualMetadata(String module, String sCurrentUser, Integer projID, Collection<String> indIDs) {
         LinkedHashMap<String, Set<String>> result = new LinkedHashMap<>();	// this one will be sorted according to the provided list
+        HashSet<String> wrongFormatFields = new HashSet<>();
         MgdbDao.getInstance().loadIndividualsWithAllMetadata(module, sCurrentUser, Arrays.asList(projID), indIDs, null).values().stream().filter(ind -> ind.getAdditionalInfo() != null).map(ind -> {
-        	for (String fieldName : ind.getAdditionalInfo().keySet())
-        		result.computeIfAbsent(fieldName, k -> new HashSet<>()).add((String) ind.getAdditionalInfo().get(fieldName));
+        	for (String fieldName : ind.getAdditionalInfo().keySet()) {
+        		Object val = ind.getAdditionalInfo().get(fieldName);
+        		if (val instanceof String)
+        			result.computeIfAbsent(fieldName, k -> new HashSet<>()).add((String) val);
+        		else if (wrongFormatFields.add(fieldName))
+        			LOG.info("Database " + module + ": Metadata type is not String for field " + fieldName);
+        	}
 			return null;
         }).count();
 
