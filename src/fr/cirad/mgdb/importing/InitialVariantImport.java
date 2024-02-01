@@ -46,11 +46,15 @@ public class InitialVariantImport {
     
     /** The Constant LOG. */
     private static final Logger LOG = Logger.getLogger(InitialVariantImport.class);
-    
+
+    static public final String VARIANT_LIST_COLNAME_ID = "id";
+    static public final String VARIANT_LIST_COLNAME_TYPE = "type";
+    static public final String VARIANT_LIST_COLNAME_CHIP = "chip";
+
     /** The Constant twoDecimalNF. */
     static private final NumberFormat twoDecimalNF = NumberFormat.getInstance();
     
-    static private final List<String> synonymColNames = Arrays.asList(VariantData.FIELDNAME_SYNONYM_TYPE_ID_ILLUMINA, VariantData.FIELDNAME_SYNONYM_TYPE_ID_NCBI, VariantData.FIELDNAME_SYNONYM_TYPE_ID_INTERNAL);
+    static public final List<String> synonymColNames = Arrays.asList(VariantData.FIELDNAME_SYNONYM_TYPE_ID_ILLUMINA, VariantData.FIELDNAME_SYNONYM_TYPE_ID_NCBI, VariantData.FIELDNAME_SYNONYM_TYPE_ID_INTERNAL);
     
     static private final String ASSEMBLY_POSITION_PREFIX = "pos-";
     
@@ -173,8 +177,8 @@ public class InitialVariantImport {
                         throw new Exception("No position column could be found");
                     assemblies.add(null);   // means default, unnamed assembly
                 }
-                
-                int idColIndex = header.indexOf("id"), typeColIndex = header.indexOf("type"), chipColIndex = header.indexOf("chip");
+
+                int idColIndex = header.indexOf(VARIANT_LIST_COLNAME_ID), typeColIndex = header.indexOf(VARIANT_LIST_COLNAME_TYPE), chipColIndex = header.indexOf(VARIANT_LIST_COLNAME_CHIP);
                 long count = 0;
                 int nNumberOfVariantsToSaveAtOnce = 50000;
                 ArrayList<VariantData> unsavedVariants = new ArrayList<VariantData>();
