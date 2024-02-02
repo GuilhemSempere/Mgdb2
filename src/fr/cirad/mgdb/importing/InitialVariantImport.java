@@ -152,8 +152,8 @@ public class InitialVariantImport {
                     sLine = sLine.trim();
                 List<String> header = splitByComaSpaceOrTab(sLine);
                 sLine = in.readLine();
-                if (sLine != null)
-                    sLine = sLine.trim();
+//                if (sLine != null)
+//                    sLine = sLine.trim();
                 
                 List<String> fieldsExceptSynonyms = new ArrayList<>();
                 List<Assembly> assemblies = new ArrayList<>();
@@ -192,7 +192,8 @@ public class InitialVariantImport {
                         VariantData variant = new VariantData(cells.get(idColIndex));
                         variant.setType(cells.get(typeColIndex));
                         for (Assembly assembly : assemblies) {
-                            String[] seqAndPos = cells.get(header.indexOf(assembly == null ? "pos" : (ASSEMBLY_POSITION_PREFIX + assembly.getName()))).split(":");
+                        	int cellIndex = header.indexOf(assembly == null ? "pos" : (ASSEMBLY_POSITION_PREFIX + assembly.getName()));
+                            String[] seqAndPos = /*cellIndex >= cells.size() ? new String[0] : */cells.get(cellIndex).split(":");
                             if (seqAndPos.length == 2 && !seqAndPos[0].equals("0"))
                                 variant.setReferencePosition(assembly == null ? 0 : assembly.getId(), new ReferencePosition(seqAndPos[0], Long.parseLong(seqAndPos[1])));
                         }
@@ -242,8 +243,8 @@ public class InitialVariantImport {
                         count++;
                     }
                     sLine = in.readLine();
-                    if (sLine != null)
-                        sLine = sLine.trim();
+//                    if (sLine != null)
+//                        sLine = sLine.trim();
                 }
                 while (sLine != null);
                 
