@@ -20,20 +20,46 @@ import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileReader;
 import java.text.NumberFormat;
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collection;
+import java.util.Date;
 import java.util.List;
 import java.util.TreeSet;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.BiConsumer;
+import java.util.function.Consumer;
 
 import org.apache.log4j.Logger;
+import org.bson.Document;
+import org.bson.codecs.pojo.annotations.BsonProperty;
 import org.springframework.context.support.GenericXmlApplicationContext;
+import org.springframework.data.mongodb.core.BulkOperations;
 import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.data.mongodb.core.mapping.Field;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
+import org.springframework.data.mongodb.core.query.Update;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.introspect.AnnotatedMember;
+import com.fasterxml.jackson.databind.introspect.JacksonAnnotationIntrospector;
+import com.mongodb.MongoNamespace;
+import com.mongodb.bulk.BulkWriteResult;
+import com.mongodb.client.MongoCollection;
 
 import fr.cirad.mgdb.model.mongo.maintypes.Assembly;
+import fr.cirad.mgdb.model.mongo.maintypes.GenotypingProject;
 import fr.cirad.mgdb.model.mongo.maintypes.VariantData;
+import fr.cirad.mgdb.model.mongo.maintypes.VariantRunData;
 import fr.cirad.mgdb.model.mongo.subtypes.ReferencePosition;
+import fr.cirad.mgdb.model.mongo.subtypes.VariantRunDataId;
 import fr.cirad.tools.Helper;
 import fr.cirad.tools.ProgressIndicator;
 import fr.cirad.tools.mongo.AutoIncrementCounter;
@@ -106,41 +132,41 @@ public class InitialVariantImport {
 //      }
 //      sc.close();
 //      fw.close();
-        
-        new InitialVariantImport(null).insertVariantsAndSynonyms(args);
-    }
-
-    /**
-     * Insert reference positions.
-     *
-     * @param args the args
-     * @throws Exception the exception
-     */
-    public void insertVariantsAndSynonyms(String[] args) throws Exception
-    {
+     
         if (args.length < 2)
-            throw new Exception("You must pass 2 parameters as arguments: DATASOURCE name, exhaustive variant list TSV file. This TSV file is expected to be formatted as follows: id, chr:pos, colon-separated list of containing chips, zero or more colon-separated lists of synonyms (their type being defined in the header)");
+            throw new Exception("You must pass 2 parameters as arguments: DATASOURCE name, exhaustive variant list TSV file.");
 
-        File chipInfoFile = new File(args[1]);
+        new InitialVariantImport(null).insertVariantsAndSynonyms(args[0], args[1]);
+    }
+    
+    public void insertVariantsAndSynonyms(String sModule, String sImportFilePath) throws Exception
+    {
+        File chipInfoFile = new File(sImportFilePath);
         if (!chipInfoFile.exists() || chipInfoFile.isDirectory())
             throw new Exception("Data file does not exist: " + chipInfoFile.getAbsolutePath());
         
         GenericXmlApplicationContext ctx = null;
         try
         {
-            MongoTemplate mongoTemplate = MongoTemplateManager.get(args[0]);
+            MongoTemplate mongoTemplate = MongoTemplateManager.get(sModule);
             if (mongoTemplate == null)
             {   // we are probably being invoked offline
                 ctx = new GenericXmlApplicationContext("applicationContext-data.xml");
     
                 MongoTemplateManager.initialize(ctx);
-                mongoTemplate = MongoTemplateManager.get(args[0]);
+                mongoTemplate = MongoTemplateManager.get(sModule);
                 if (mongoTemplate == null)
-                    throw new Exception("DATASOURCE '" + args[0] + "' is not supported!");
+                    throw new Exception("DATASOURCE '" + sModule + "' is not supported!");
             }
 
-            if (Helper.estimDocCount(mongoTemplate, VariantData.class) > 0)
-                throw new Exception("There are already some variants in this database!");
+//          if (Helper.estimDocCount(mongoTemplate, VariantData.class) > 0)
+//          	throw new Exception("There are already some variants in this database!");
+            
+            MongoCollection<Document> varColl = mongoTemplate.getCollection(mongoTemplate.getCollectionName(VariantData.class)), vrdColl = mongoTemplate.getCollection(mongoTemplate.getCollectionName(VariantRunData.class));
+            boolean fUpdateExistingList = Helper.estimDocCount(sModule, VariantData.class) > 0;
+            String backupCollName = !fUpdateExistingList ? null : varColl.getNamespace().getCollectionName() + "_backup_" + new SimpleDateFormat("yyyy-MM-dd_HH-mm-ss").format(new Date());
+            if (fUpdateExistingList)
+            	varColl.renameCollection(new MongoNamespace(varColl.getNamespace().getDatabaseName(), backupCollName));
             
             long before = System.currentTimeMillis();
 
@@ -167,7 +193,7 @@ public class InitialVariantImport {
                             assembly = new Assembly(AutoIncrementCounter.getNextSequence(mongoTemplate, Assembly.class));
                             assembly.setName(assemblyName);
                             mongoTemplate.save(assembly);
-                            LOG.info("Assembly \"" + assemblyName + "\" created for module " + args[0]);
+                            LOG.info("Assembly \"" + assemblyName + "\" created for module " + sModule);
                         }
                         assemblies.add(assembly);
                     }
@@ -179,9 +205,34 @@ public class InitialVariantImport {
                 }
 
                 int idColIndex = header.indexOf(VARIANT_LIST_COLNAME_ID), typeColIndex = header.indexOf(VARIANT_LIST_COLNAME_TYPE), chipColIndex = header.indexOf(VARIANT_LIST_COLNAME_CHIP);
-                long count = 0;
-                int nNumberOfVariantsToSaveAtOnce = 50000;
-                ArrayList<VariantData> unsavedVariants = new ArrayList<VariantData>();
+                AtomicLong count = new AtomicLong();
+                int nCurrentVariant = 0, nNumberOfVariantsToSaveAtOnce = fUpdateExistingList ? 10000 : 50000;
+                AtomicReference<ArrayList<VariantData>> unsavedVariants = new AtomicReference<>(new ArrayList<>(nNumberOfVariantsToSaveAtOnce));
+                AtomicReference<BulkOperations> vrdBulkOps = !fUpdateExistingList ? null : new AtomicReference<>(mongoTemplate.bulkOps(BulkOperations.BulkMode.UNORDERED, VariantRunData.class));
+                ExecutorService executor = Executors.newFixedThreadPool(8);
+                
+                // in order to avoid Spring adding _class fields to each persisted ReferencePosition, we need to convert them to Documents ourselves
+                ObjectMapper objectMapper = new ObjectMapper();
+                objectMapper.setSerializationInclusion(com.fasterxml.jackson.annotation.JsonInclude.Include.NON_NULL);
+                objectMapper.setAnnotationIntrospector(new JacksonAnnotationIntrospector() {
+                    @Override
+                    public String findImplicitPropertyName(AnnotatedMember member) {
+                        String fieldName = super.findImplicitPropertyName(member);
+                        if (fieldName == null) {
+                            Field fieldAnnotation = member.getAnnotation(Field.class);
+                            if (fieldAnnotation != null)
+                            	fieldName = fieldAnnotation.value();
+                            else {
+                            	BsonProperty bsonPropertyAnnotation = member.getAnnotation(BsonProperty.class);
+                            	if (bsonPropertyAnnotation != null)
+                            		fieldName = bsonPropertyAnnotation.value();
+                            }
+                        }
+                        return fieldName;
+                    }
+                });
+
+                final MongoTemplate finalMongoTemplate = mongoTemplate;
                 do
                 {
                     if (sLine.length() > 0)
@@ -225,22 +276,39 @@ public class InitialVariantImport {
                                 variant.putSynonyms(header.get(i), synSet);
                             }
                         }
-                        unsavedVariants.add(variant);
+                        
+                        unsavedVariants.get().add(variant);
+                        if (fUpdateExistingList && variant.getPositions() != null) {
+                            Update update = new Update();
+                            update.set(VariantRunData.FIELDNAME_POSITIONS, Document.parse(objectMapper.writeValueAsString(variant.getPositions())));
+                            vrdBulkOps.get().updateMulti(new Query(Criteria.where("_id." + VariantRunDataId.FIELDNAME_VARIANT_ID).is(variant.getId())), update);
+                        }
                                                 
-                        if (count % nNumberOfVariantsToSaveAtOnce == 0)
-                        {
-                            mongoTemplate.insert(unsavedVariants, VariantData.class);
-                            unsavedVariants.clear();
-                            if (count > 0)
-                            {
-                                String info = count + " lines processed"/*"(" + (System.currentTimeMillis() - before) / 1000 + ")\t"*/;
-                                if (progress != null)
-                                	progress.setCurrentStepProgress(count);
-                                LOG.debug(info);
-                            }
+                        if ((nCurrentVariant + 1) % nNumberOfVariantsToSaveAtOnce == 0) {
+                        	ArrayList<VariantData> variantsToSave = unsavedVariants.get();
+                        	BulkOperations chunkBulkOps = !fUpdateExistingList ? null : vrdBulkOps.get();
+                        	if (fUpdateExistingList)
+	                        	vrdBulkOps.set(finalMongoTemplate.bulkOps(BulkOperations.BulkMode.UNORDERED, VariantRunData.class));
+
+                        	unsavedVariants.set(new ArrayList<>(nNumberOfVariantsToSaveAtOnce));
+                        	executor.execute(new Thread() {
+                        		public void run() {
+	                                if (fUpdateExistingList) {
+	                                	BulkWriteResult runBwr = chunkBulkOps.execute();
+	                                	int nVrdModifCount = runBwr.getModifiedCount();
+	                                	if (nVrdModifCount > 0)
+	                                		LOG.debug(nVrdModifCount + " variantRunData records' position fields were updated");
+	                                }
+	                                count.addAndGet(finalMongoTemplate.insert(variantsToSave, VariantData.class).size());
+                                    String info = count + " variants imported";
+                                    if (progress != null)
+                                    	progress.setCurrentStepProgress(count.get());
+                                    LOG.debug(info);
+                        		}
+                        	});
                         }
                         
-                        count++;
+                        nCurrentVariant++;
                     }
                     sLine = in.readLine();
 //                    if (sLine != null)
@@ -248,11 +316,75 @@ public class InitialVariantImport {
                 }
                 while (sLine != null);
                 
-                if (unsavedVariants.size() > 0)
-                {
-                    mongoTemplate.insert(unsavedVariants, VariantData.class);
-                    unsavedVariants.clear();
+                if (unsavedVariants.get().size() > 0) {
+                	ArrayList<VariantData> variantsToSave = unsavedVariants.get();
+                	BulkOperations chunkBulkOps = !fUpdateExistingList ? null : vrdBulkOps.get();
+                	executor.execute(new Thread() {
+                		public void run() {
+                            if (fUpdateExistingList) {
+                            	BulkWriteResult runBwr = chunkBulkOps.execute();
+                            	int nVrdModifCount = runBwr.getModifiedCount();
+                            	if (nVrdModifCount > 0)
+                            		LOG.debug(nVrdModifCount + " variantRunData records' position fields were updated");
+                            }
+                            count.addAndGet(finalMongoTemplate.insert(variantsToSave, VariantData.class).size());
+                            String info = count + " variants imported";
+                            if (progress != null)
+                            	progress.setCurrentStepProgress(count.get());
+                            LOG.debug(info);
+                		}
+                	});
                 }
+
+                executor.shutdown();
+                executor.awaitTermination(Integer.MAX_VALUE, TimeUnit.DAYS);
+
+                if (fUpdateExistingList) {	// we need to make sure known-alleles info is not lost, and to update projects' sequence lists
+                	executor = Executors.newFixedThreadPool(8);
+                    if (progress != null) {
+	                	progress.addStep("Making sure known alleles are conserved");
+	                	progress.moveToNextStep();
+                    }
+                	
+                	executor.execute(new Thread() {
+                		public void run() {
+                        	Query q = new Query(Criteria.where(VariantData.FIELDNAME_KNOWN_ALLELES).exists(true));
+                        	q.fields().include(VariantData.FIELDNAME_KNOWN_ALLELES);
+                        	 finalMongoTemplate.getCollection(backupCollName).find(q.getQueryObject()).projection(q.getFieldsObject()).forEach(withCounter((i, v) -> {
+                        		Update update = new Update().set(VariantData.FIELDNAME_KNOWN_ALLELES, v.get(VariantData.FIELDNAME_KNOWN_ALLELES));
+                        		finalMongoTemplate.updateFirst(new Query(Criteria.where("_id").is(v.get("_id"))), update, VariantData.class);
+                        		if (i > 0 && i % 10000 == 0) {
+        	                        String info = i + " lines processed in conserving known alleles";
+        	                        if (progress != null)
+        	                        	progress.setCurrentStepProgress(i);
+                                    LOG.debug(info);
+                        		}
+                        	}));	
+                		}
+                	});
+
+                	List<GenotypingProject> projects = mongoTemplate.find(new Query(), GenotypingProject.class);
+                	for (GenotypingProject project : projects) {
+                        if (progress != null) {
+    	                	progress.addStep("Updating project " + project.getName() + "'s sequence lists");
+    	                	progress.moveToNextStep();
+                        }
+	                	for (Assembly assembly : assemblies)
+	                    	executor.execute(new Thread() {
+	                    		public void run() {
+		                		Collection<String> sequencesUsed = finalMongoTemplate.findDistinct(new Query(Criteria.where("_id." + VariantRunDataId.FIELDNAME_PROJECT_ID).is(project.getId())), VariantData.FIELDNAME_POSITIONS + "." + assembly.getId() + "." + ReferencePosition.FIELDNAME_SEQUENCE, VariantRunData.class, String.class);
+		                		project.getContigs().put(assembly.getId(), new TreeSet<>(sequencesUsed));
+                                LOG.debug("Updated used sequence list for project '" + project.getName() + "' and assembly '" + assembly.getName() + "' -> " + sequencesUsed);
+		                	}
+	                    });
+                	}
+                    executor.shutdown();
+                    executor.awaitTermination(Integer.MAX_VALUE, TimeUnit.DAYS);
+                    
+                    for (GenotypingProject project : projects)
+                		finalMongoTemplate.save(project);
+                }
+
                 LOG.info("InitialVariantImport took " + (System.currentTimeMillis() - before) / 1000 + "s for " + count + " records");
             }
             finally
@@ -277,4 +409,14 @@ public class InitialVariantImport {
     {
         return Helper.split(s, s.contains(",") ? "," : (s.contains(" ") ? " " : "\t"));
     }
+
+	public void updateExistingVariantList(String[] args) {
+		// TODO Auto-generated method stub
+		
+	}
+	
+	public static <T> Consumer<T> withCounter(BiConsumer<Integer, T> consumer) {
+	    AtomicInteger counter = new AtomicInteger(0);
+	    return item -> consumer.accept(counter.getAndIncrement(), item);
+	}
 }

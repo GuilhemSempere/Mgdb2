@@ -17,11 +17,13 @@
 package fr.cirad.mgdb.model.mongo.subtypes;
 
 import org.bson.codecs.pojo.annotations.BsonProperty;
+import org.codehaus.jackson.annotate.JsonIgnoreProperties;
 import org.springframework.data.mongodb.core.mapping.Field;
 
 /**
  * The Class ReferencePosition.
  */
+@JsonIgnoreProperties(ignoreUnknown=true)
 public class ReferencePosition
 {
 	
@@ -48,7 +50,7 @@ public class ReferencePosition
 	@BsonProperty(FIELDNAME_END_SITE)
 	@Field(FIELDNAME_END_SITE)
 	private Long endSite = null;
-	
+
 	/**
 	 * Instantiates a new reference position.
 	 */
@@ -86,6 +88,7 @@ public class ReferencePosition
 	 *
 	 * @return the sequence
 	 */
+	@BsonProperty(FIELDNAME_SEQUENCE)
 	public String getSequence() {
 		return sequence;
 	}
@@ -95,6 +98,7 @@ public class ReferencePosition
 	 *
 	 * @param sequence the new sequence
 	 */
+	@BsonProperty(FIELDNAME_SEQUENCE)
 	public void setSequence(String sequence) {
 		this.sequence = sequence;
 	}
@@ -104,6 +108,7 @@ public class ReferencePosition
 	 *
 	 * @return the start site
 	 */
+	@BsonProperty(FIELDNAME_START_SITE)
 	public long getStartSite() {
 		return startSite;
 	}
@@ -113,6 +118,7 @@ public class ReferencePosition
 	 *
 	 * @param startSite the new start site
 	 */
+	@BsonProperty(FIELDNAME_START_SITE)
 	public void setStartSite(long startSite) {
 		this.startSite = startSite;
 	}
@@ -122,6 +128,7 @@ public class ReferencePosition
 	 *
 	 * @return the end site
 	 */
+	@BsonProperty(FIELDNAME_END_SITE)
 	public Long getEndSite() {
 		return endSite;
 	}
@@ -131,6 +138,7 @@ public class ReferencePosition
 	 *
 	 * @param endSite the new end site
 	 */
+	@BsonProperty(FIELDNAME_END_SITE)
 	public void setEndSite(Long endSite) {
 		this.endSite = endSite;
 	}
