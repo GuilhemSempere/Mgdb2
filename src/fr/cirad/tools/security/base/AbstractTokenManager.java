@@ -36,7 +36,9 @@ public abstract class AbstractTokenManager {
 	static public final String ENTITY_PROJECT = "project";
 	static public final String ENTITY_RUN = "project.run";
 	static public final String ENTITY_DATASET = "dataset";
-	static public final String ROLE_READER = "READER";
+	static final public String ENTITY_SNPCLUST_EDITOR_ROLE = "SNPCLUST_EDITOR";
+	static public final String ENTITY_READER_ROLE = "READER";
+
 
 //    abstract public String createAndAttachToken(String username, String password) throws IllegalArgumentException, IOException;
     
