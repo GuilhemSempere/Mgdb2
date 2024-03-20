@@ -16,28 +16,22 @@
  *******************************************************************************/
 package fr.cirad.mgdb.exporting;
 
-import java.io.*;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
 import java.util.Collection;
-import java.util.Enumeration;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.zip.GZIPOutputStream;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
-import javax.servlet.http.HttpSession;
-
-import htsjdk.samtools.util.BlockCompressedOutputStream;
 import org.apache.log4j.Logger;
 import org.bson.Document;
 import org.springframework.data.mongodb.core.MongoTemplate;
-import org.springframework.security.core.Authentication;
-import org.springframework.security.core.context.SecurityContextHolder;
 
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoCursor;
@@ -45,10 +39,8 @@ import com.mongodb.client.model.Collation;
 
 import fr.cirad.mgdb.model.mongo.maintypes.Individual;
 import fr.cirad.mgdb.model.mongo.maintypes.VariantRunData;
-import fr.cirad.mgdb.model.mongo.subtypes.AbstractVariantData;
 import fr.cirad.mgdb.model.mongodao.MgdbDao;
 import fr.cirad.tools.Helper;
-import fr.cirad.tools.security.base.AbstractTokenManager;
 
 /**
  * The Interface IExportHandler.
@@ -124,6 +116,20 @@ public interface IExportHandler
 	 */
 	public List<String> getSupportedVariantTypes();
 	
+	public static boolean addMetadataEntryIfAny(String fileName, String sModule, String sExportingUser, Collection<String> exportedIndividuals, Collection<String> individualMetadataFieldsToExport, ZipOutputStream zos, String initialContents) throws IOException {
+		ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        if (!writeMetadataFile(sModule, sExportingUser, exportedIndividuals, individualMetadataFieldsToExport, baos))
+        	return false;
+
+    	zos.putNextEntry(new ZipEntry(fileName));
+    	if (initialContents != null)
+    		zos.write(initialContents.getBytes());
+    	byte[] byteArray = baos.toByteArray();
+    	zos.write(byteArray, 0, byteArray.length);
+    	zos.closeEntry();
+    	return true;
+	}
+	
 	public static MongoCursor<Document> getMarkerCursorWithCorrectCollation(MongoCollection<Document> varColl, Document varQuery, Document projectionAndSortDoc, int nQueryChunkSize) {
 		return varColl.find(varQuery).projection(projectionAndSortDoc).sort(projectionAndSortDoc).noCursorTimeout(true).collation(collationObj).batchSize(nQueryChunkSize).iterator();
 	}
@@ -152,13 +158,17 @@ public interface IExportHandler
 		return (int) Math.max(1, Math.min(nExportedVariantCount / 20 /* no more than 5% at a time */, (nMaxChunkSizeInMb*1024*1024 / avgObjSize.doubleValue())));
 	}
 	
-	public static void writeMetadataFile(String sModule, String sExportingUser, Collection<String> exportedIndividuals, Collection<String> individualMetadataFieldsToExport, OutputStream os) throws IOException {
+	public static boolean writeMetadataFile(String sModule, String sExportingUser, Collection<String> exportedIndividuals, Collection<String> individualMetadataFieldsToExport, OutputStream os) throws IOException {
 		Collection<Individual> listInd = MgdbDao.getInstance().loadIndividualsWithAllMetadata(sModule, sExportingUser, null, exportedIndividuals, null).values();
         LinkedHashSet<String> mdHeaders = new LinkedHashSet<>();	// definite header collection (avoids empty columns)
-        for (Individual ind : listInd)
-        	for (String key : individualMetadataFieldsToExport)
-        		if (!mdHeaders.contains(key) && !Helper.isNullOrEmptyString(ind.getAdditionalInfo().get(key)))
+        for (Individual ind : listInd) {
+        	LinkedHashMap<String, Object> ai = ind.getAdditionalInfo();
+        	Collection<String> fieldsToAccountFor = individualMetadataFieldsToExport == null ? ai.keySet() : individualMetadataFieldsToExport;
+        	for (String key : fieldsToAccountFor)
+        		if (!Helper.isNullOrEmptyString(ai.get(key)))
         			mdHeaders.add(key);
+        }
+
         for (String headerKey : mdHeaders)
         	os.write(("\t" + headerKey).getBytes());
         os.write("\n".getBytes());
@@ -169,6 +179,7 @@ public interface IExportHandler
             	os.write(("\t" + Helper.nullToEmptyString(ind.getAdditionalInfo().get(headerKey))).getBytes());
             os.write("\n".getBytes());
         }
+        return !mdHeaders.isEmpty();
 	}
 	
     public static Map<String, String> getIndividualPopulations(final Map<String, Collection<String>> individualsByPopulation, boolean fAllowIndividualsInMultipleGroups) throws Exception {

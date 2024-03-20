@@ -29,6 +29,7 @@ import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.TreeMap;
 import java.util.TreeSet;
+import java.util.Map.Entry;
 import java.util.stream.Collectors;
 
 import org.apache.commons.lang3.StringUtils;
@@ -974,6 +975,41 @@ abstract public class AbstractVariantData
         //     return Type.INDEL;
         // else
         //     return Type.MIXED;
+    }
+    
+
+    @Override
+    public String toString()
+    {
+    	StringBuffer sb = new StringBuffer("{");
+    	
+    	if (getVariantId() != null)
+    		sb.append("id:").append(getVariantId()).append("; ");
+    	sb.append("syn:");
+    	
+    	if (getSynonyms() != null && !getSynonyms().isEmpty()) {
+	    	StringBuffer synSB = new StringBuffer();
+	    	for (TreeSet<String> syns : getSynonyms().values()) {
+	    		if (!synSB.isEmpty())
+	    			synSB.append(",");
+	    		synSB.append(StringUtils.join(syns, ","));
+	    	}
+	    	sb.append(synSB.toString());
+	    	sb.append("; ");
+    	}
+    	
+    	if (!getPositions().isEmpty()) {
+	    	sb.append("pos:");
+	    	for (Entry<Integer, ReferencePosition> positionEntry : getPositions().entrySet())
+	    		sb.append("(").append(positionEntry.getKey()).append(")").append(positionEntry.getValue().getSequence()).append(":").append(positionEntry.getValue().getStartSite());
+	    	sb.append("; ");
+    	}
+    	
+    	if (!getKnownAlleles().isEmpty())
+    		sb.append("all:").append(StringUtils.join(getKnownAlleles(), "/"));
+    	
+    	sb.append("}");
+        return sb.toString();
     }
 
     abstract public String getVariantId();

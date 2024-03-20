@@ -107,6 +107,10 @@ public class AppConfig {
         return props.containsKey(sPropertyName) ? props.getString(sPropertyName) : null;
     }
     
+    public Set<String> keySet() {
+        return props.keySet();
+    }
+    
     synchronized public String getInstanceUUID() throws IOException {
         String instanceUUID = get("instanceUUID");
         if (instanceUUID == null) { // generate it

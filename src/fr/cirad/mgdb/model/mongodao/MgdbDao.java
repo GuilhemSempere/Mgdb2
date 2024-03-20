@@ -258,13 +258,18 @@ public class MgdbDao {
         List<String> res = mongoTemplate.findDistinct(q, GenotypingProject.FIELDNAME_VARIANT_TYPES, GenotypingProject.class, String.class);
         return res;
     }
+    
+    public static int ensureVariantDataIndexes(MongoTemplate mongoTemplate) {
+    	return ensureVariantDataIndexes(mongoTemplate, false);	
+    }
 
     /**
      * Ensures VariantData indexes are correct
      *
      * @param mongoTemplate the mongoTemplate
+     * @param mongoTemplate if false, skips synonym index creation if none such synonyms found in the first 100000 documents 
      */
-    public static int ensureVariantDataIndexes(MongoTemplate mongoTemplate) {
+    public static int ensureVariantDataIndexes(MongoTemplate mongoTemplate, boolean fEvenIfNoSuchSynonyms) {
     	int nResult = 0;
         MongoCollection<Document> variantColl = mongoTemplate.getCollection(mongoTemplate.getCollectionName(VariantData.class));
         
@@ -291,17 +296,17 @@ public class MgdbDao {
         }
         missingSynonymIndexes.removeAll(foundSynonymIndexes);
 
-        if (missingSynonymIndexes.contains(VariantData.FIELDNAME_SYNONYMS + "." + VariantData.FIELDNAME_SYNONYM_TYPE_ID_ILLUMINA) && variantColl.aggregate(Arrays.asList( new BasicDBObject("$limit", 100000), new BasicDBObject("$match", new BasicDBObject(VariantData.FIELDNAME_SYNONYMS + "." + VariantData.FIELDNAME_SYNONYM_TYPE_ID_ILLUMINA + ".0", new BasicDBObject("$exists", true))) )).iterator().hasNext()) {
+        if (missingSynonymIndexes.contains(VariantData.FIELDNAME_SYNONYMS + "." + VariantData.FIELDNAME_SYNONYM_TYPE_ID_ILLUMINA) && (fEvenIfNoSuchSynonyms || variantColl.aggregate(Arrays.asList( new BasicDBObject("$limit", 100000), new BasicDBObject("$match", new BasicDBObject(VariantData.FIELDNAME_SYNONYMS + "." + VariantData.FIELDNAME_SYNONYM_TYPE_ID_ILLUMINA + ".0", new BasicDBObject("$exists", true))) )).iterator().hasNext())) {
             LOG.debug("Creating index on field " + VariantData.FIELDNAME_SYNONYMS + "." + VariantData.FIELDNAME_SYNONYM_TYPE_ID_ILLUMINA + " of collection " + variantColl.getNamespace());
             variantColl.createIndex(new BasicDBObject(VariantData.FIELDNAME_SYNONYMS + "." + VariantData.FIELDNAME_SYNONYM_TYPE_ID_ILLUMINA, 1));
             nResult++;
         }
-        if (missingSynonymIndexes.contains(VariantData.FIELDNAME_SYNONYMS + "." + VariantData.FIELDNAME_SYNONYM_TYPE_ID_INTERNAL) && variantColl.aggregate(Arrays.asList( new BasicDBObject("$limit", 100000), new BasicDBObject("$match", new BasicDBObject(VariantData.FIELDNAME_SYNONYMS + "." + VariantData.FIELDNAME_SYNONYM_TYPE_ID_INTERNAL + ".0", new BasicDBObject("$exists", true))) )).iterator().hasNext()) {
+        if (missingSynonymIndexes.contains(VariantData.FIELDNAME_SYNONYMS + "." + VariantData.FIELDNAME_SYNONYM_TYPE_ID_INTERNAL) && (fEvenIfNoSuchSynonyms || variantColl.aggregate(Arrays.asList( new BasicDBObject("$limit", 100000), new BasicDBObject("$match", new BasicDBObject(VariantData.FIELDNAME_SYNONYMS + "." + VariantData.FIELDNAME_SYNONYM_TYPE_ID_INTERNAL + ".0", new BasicDBObject("$exists", true))) )).iterator().hasNext())) {
         	LOG.debug("Creating index on field " + VariantData.FIELDNAME_SYNONYMS + "." + VariantData.FIELDNAME_SYNONYM_TYPE_ID_INTERNAL + " of collection " + variantColl.getNamespace());
         	variantColl.createIndex(new BasicDBObject(VariantData.FIELDNAME_SYNONYMS + "." + VariantData.FIELDNAME_SYNONYM_TYPE_ID_INTERNAL, 1));
         	nResult++;
         }
-        if (missingSynonymIndexes.contains(VariantData.FIELDNAME_SYNONYMS + "." + VariantData.FIELDNAME_SYNONYM_TYPE_ID_NCBI) && variantColl.aggregate(Arrays.asList( new BasicDBObject("$limit", 100000), new BasicDBObject("$match", new BasicDBObject(VariantData.FIELDNAME_SYNONYMS + "." + VariantData.FIELDNAME_SYNONYM_TYPE_ID_NCBI + ".0", new BasicDBObject("$exists", true))) )).iterator().hasNext()) {
+        if (missingSynonymIndexes.contains(VariantData.FIELDNAME_SYNONYMS + "." + VariantData.FIELDNAME_SYNONYM_TYPE_ID_NCBI) && (fEvenIfNoSuchSynonyms || variantColl.aggregate(Arrays.asList( new BasicDBObject("$limit", 100000), new BasicDBObject("$match", new BasicDBObject(VariantData.FIELDNAME_SYNONYMS + "." + VariantData.FIELDNAME_SYNONYM_TYPE_ID_NCBI + ".0", new BasicDBObject("$exists", true))) )).iterator().hasNext())) {
             LOG.debug("Creating index on field " + VariantData.FIELDNAME_SYNONYMS + "." + VariantData.FIELDNAME_SYNONYM_TYPE_ID_NCBI + " of collection " + variantColl.getNamespace());
             variantColl.createIndex(new BasicDBObject(VariantData.FIELDNAME_SYNONYMS + "." + VariantData.FIELDNAME_SYNONYM_TYPE_ID_NCBI, 1));
             nResult++;
@@ -319,6 +324,10 @@ public class MgdbDao {
         return nResult;
     }
     
+    public static int ensurePositionIndexes(MongoTemplate mongoTemplate, Collection<MongoCollection<Document>> varColls) {
+        return ensurePositionIndexes(mongoTemplate, varColls, false);
+    }
+    
     /**
      * Ensures position indexes are correct in passed collections. Supports
      * variants, variantRunData and temporary collections Removes incorrect
@@ -326,9 +335,10 @@ public class MgdbDao {
      *
      * @param mongoTemplate the mongoTemplate
      * @param varColls variant collections to ensure indexes on
+     * @param fEvenIfCollectionIsEmpty if true, create indexes no matter if collections contains documents
      * @return the number of indexes that were created
      */
-    public static int ensurePositionIndexes(MongoTemplate mongoTemplate, Collection<MongoCollection<Document>> varColls) {
+    public static int ensurePositionIndexes(MongoTemplate mongoTemplate, Collection<MongoCollection<Document>> varColls, boolean fEvenIfCollectionIsEmpty) {
         int nResult = 0;
         
         List<String> variantTypes = getVariantTypes(mongoTemplate, null);
@@ -343,7 +353,7 @@ public class MgdbDao {
 	
 	        for (MongoCollection<Document> coll : varColls) {
 	            boolean fIsTmpColl = coll.getNamespace().getCollectionName().startsWith(MongoTemplateManager.TEMP_COLL_PREFIX);
-	            if (!fIsTmpColl && coll.estimatedDocumentCount() == 0)
+	            if (!fIsTmpColl && (!fEvenIfCollectionIsEmpty && coll.estimatedDocumentCount() == 0))
 	                continue;	// database seems empty: indexes will be created after imports (faster this way) 
 
 	            boolean fFoundStartCompoundIndex = false, fFoundCorrectStartCompoundIndex = false, fFoundStartSiteIndex = false, fFoundEndCompoundIndex = false, fFoundCorrectEndCompoundIndex = false, fFoundEndSiteIndex = false;
