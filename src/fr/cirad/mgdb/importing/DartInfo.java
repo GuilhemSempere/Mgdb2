@@ -15,7 +15,7 @@ public class DartInfo {
 
     private Integer chromPos;
 
-    private String individualName;
+//    private String individualName;
 
     private Integer snpPos = 0;
 
@@ -27,9 +27,9 @@ public class DartInfo {
 
     private String[] sampleIDs = new String[]{};
 
-    public DartInfo(String alleleID, String individualName) {
+    public DartInfo(String alleleID/*, String individualName*/) {
         this.alleleID = alleleID;
-        this.individualName = individualName;
+//        this.individualName = individualName;
     }
 
     public DartInfo(String alleleID, String alleleSequence, String trimmedSequence, String chrom, Integer chromPos, String individualName) {
@@ -38,7 +38,7 @@ public class DartInfo {
         this.trimmedSequence = trimmedSequence;
         this.chrom = chrom;
         this.chromPos = chromPos;
-        this.individualName = individualName;
+//        this.individualName = individualName;
     }
 
     public String[] getSampleIDs() {
@@ -80,14 +80,14 @@ public class DartInfo {
     public void setStrand(String strand) {
         this.strand = strand;
     }
-
-    public String getIndividualName() {
-        return individualName;
-    }
-
-    public void setIndividualName(String individualName) {
-        this.individualName = individualName;
-    }
+//
+//    public String getIndividualName() {
+//        return individualName;
+//    }
+//
+//    public void setIndividualName(String individualName) {
+//        this.individualName = individualName;
+//    }
 
     public String getAlleleID() {
         return alleleID;
