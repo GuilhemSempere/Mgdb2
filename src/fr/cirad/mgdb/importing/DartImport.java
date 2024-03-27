@@ -325,13 +325,13 @@ public class DartImport extends AbstractGenotypeImport {
                     int nTestedVariantCount = 0;
 //                    Iterator<DartInfo> it = reader.iterator();
 //                    dartFeatures;
-                    while (nTestedVariantCount < 1000 && dartIterator.hasNext()) {
+                    variantLoop: while (nTestedVariantCount < 1000 && dartIterator.hasNext()) {
                     	List<DartInfo> dartFeatures = dartIterator.next();
                     	for (DartInfo dartFeature : dartFeatures)
 	                        if (dartFeature.getAlleles().length > 1) {
 	                            project.setPloidyLevel(dartFeature.getAlleles().length);
 	                            LOG.info("Guessed ploidy level for dataset to import: " + project.getPloidyLevel());
-	                            break;
+	                            break variantLoop;
 	                        }
                         nTestedVariantCount++;
                     }
