@@ -115,6 +115,9 @@ abstract public class AbstractVariantData
     /** The Constant GT_FIELD_PL. */
     public static final String GT_FIELD_PL = "PL";
     
+    /** The Constant GT_FIELD_FI. (fluorescence intensity) */
+    public static final String GT_FIELD_FI = "FI";
+    
     /** The Constant GT_FIELD_PHASED_GT. */
     public static final String GT_FIELD_PHASED_GT = "phGT";
     
