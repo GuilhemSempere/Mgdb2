@@ -190,7 +190,7 @@ public class ProgressIndicator
 	 */
 	public void setError(String error) {
 		m_error = error;
-		remove();
+		remove(2500);
 	}
 	
 	/**
@@ -242,15 +242,20 @@ public class ProgressIndicator
 		setAborted(true);
 	}
 	
-	private void remove()
+	/**
+	 * Remove ProgressIndicator from static Map
+	 *
+	 * @param delay, time to wait before removing (delay needed because there may be several client pages looking at it (when importing for instance))
+	 */
+	private void remove(int delay)
 	{
-		new Timer().schedule(new TimerTask() {	// delay removal because there may be several client pages looking at it (when importing for instance)
+		new Timer().schedule(new TimerTask() {
 		    @Override
 		    public void run() {
 		    	progressIndicators.remove(m_processId);
 		    	LOG.debug("removed " + (hashCode()  + ": " + getProgressDescription()) + " for process " + m_processId);
 		    }
-		}, 2500);
+		}, delay);
 	}
 	
 	/**
@@ -312,7 +317,7 @@ public class ProgressIndicator
 	{
 		ProgressIndicator progress = progressIndicators.get(sProcessID);
 		if (progress != null && (progress.isComplete() || progress.isAborted() || progress.getError() != null))
-	    	progress.remove();	// we don't want to keep them forever
+	    	progress.remove(progress.isAborted() ? 0 : 2500);	// we don't want to keep them forever
 
 //		LOG.debug("returning " + (progress == null ? progress : (progress.hashCode()  + ": " + progress.getProgressDescription())) + " for process " + sProcessID);
 		return progress;

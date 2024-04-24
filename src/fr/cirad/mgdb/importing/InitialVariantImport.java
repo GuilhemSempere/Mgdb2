@@ -76,6 +76,7 @@ public class InitialVariantImport {
     static public final String VARIANT_LIST_COLNAME_ID = "id";
     static public final String VARIANT_LIST_COLNAME_TYPE = "type";
     static public final String VARIANT_LIST_COLNAME_CHIP = "chip";
+    static public final String VARIANT_LIST_COLNAME_ALLELES = "all";
 
     /** The Constant twoDecimalNF. */
     static private final NumberFormat twoDecimalNF = NumberFormat.getInstance();
@@ -204,7 +205,7 @@ public class InitialVariantImport {
                     assemblies.add(null);   // means default, unnamed assembly
                 }
 
-                int idColIndex = header.indexOf(VARIANT_LIST_COLNAME_ID), typeColIndex = header.indexOf(VARIANT_LIST_COLNAME_TYPE), chipColIndex = header.indexOf(VARIANT_LIST_COLNAME_CHIP);
+                int idColIndex = header.indexOf(VARIANT_LIST_COLNAME_ID), typeColIndex = header.indexOf(VARIANT_LIST_COLNAME_TYPE), chipColIndex = header.indexOf(VARIANT_LIST_COLNAME_CHIP), alleleColIndex = header.indexOf(VARIANT_LIST_COLNAME_ALLELES);
                 AtomicLong count = new AtomicLong();
                 int nCurrentVariant = 0, nNumberOfVariantsToSaveAtOnce = fUpdateExistingList ? 10000 : 50000;
                 AtomicReference<ArrayList<VariantData>> unsavedVariants = new AtomicReference<>(new ArrayList<>(nNumberOfVariantsToSaveAtOnce));
@@ -242,6 +243,14 @@ public class InitialVariantImport {
                         	LOG.warn("Skipping incomplete line: " + sLine);
                         VariantData variant = new VariantData(cells.get(idColIndex));
                         variant.setType(cells.get(typeColIndex));
+                        if (alleleColIndex != -1) {
+	                        String alleles = cells.get(alleleColIndex);
+	                        if (alleles != null) {
+	                        	alleles = alleles.trim();
+	                        	if (!alleles.isEmpty())
+	                        		variant.setKnownAlleles(Helper.split(alleles, ";"));
+	                        }
+                        }
                         for (Assembly assembly : assemblies) {
                         	int cellIndex = header.indexOf(assembly == null ? "pos" : (ASSEMBLY_POSITION_PREFIX + assembly.getName()));
                             String[] seqAndPos = /*cellIndex >= cells.size() ? new String[0] : */cells.get(cellIndex).split(":");

@@ -182,7 +182,7 @@
         <dependency>
             <groupId>org.springframework.data</groupId>
             <artifactId>spring-data-mongodb</artifactId>
-            <version>4.1.7</version>
+            <version>4.1.10</version>
             <exclusions>
                 <exclusion>
                     <groupId>org.mongodb</groupId>
