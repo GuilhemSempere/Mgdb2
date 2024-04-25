@@ -1003,8 +1003,7 @@ abstract public class AbstractVariantData
     	
     	if (!getPositions().isEmpty()) {
 	    	sb.append("pos:");
-	    	for (Entry<Integer, ReferencePosition> positionEntry : getPositions().entrySet())
-	    		sb.append("(").append(positionEntry.getKey()).append(")").append(positionEntry.getValue().getSequence()).append(":").append(positionEntry.getValue().getStartSite());
+	    	sb.append(StringUtils.join(getPositions().entrySet().stream().map(e -> new StringBuffer("(").append(e.getKey()).append(")").append(e.getValue().getSequence()).append(":").append(e.getValue().getStartSite()).toString()).toList(), ","));
 	    	sb.append("; ");
     	}
     	

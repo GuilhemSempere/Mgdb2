@@ -107,8 +107,9 @@ public abstract class RefactoredImport extends AbstractGenotypeImport {
                 if (sPop != null)
                     ind.setPopulation(sPop);
                 else {
-                	int firstDigitPos = sIndividual.indexOf(sIndividual.chars().filter(Character::isDigit).mapToObj(Character::toString).findFirst().orElse(null));
-                	if (sIndividual.length() > firstDigitPos && !sIndividual.substring(0, firstDigitPos).matches(".*\\d+.*") && sIndividual.substring(firstDigitPos).matches("\\d+"))
+                    String firstEncounteredDigit = sIndividual.chars().filter(Character::isDigit).mapToObj(Character::toString).findFirst().orElse(null);
+                    Integer firstDigitPos = firstEncounteredDigit == null ? null : sIndividual.indexOf(firstEncounteredDigit);
+                    if (firstDigitPos != null && sIndividual.length() > firstDigitPos && !sIndividual.substring(0, firstDigitPos).matches(".*\\d+.*") && sIndividual.substring(firstDigitPos).matches("\\d+"))
 	                    ind.setPopulation(sIndividual.substring(0, firstDigitPos));
 	                else {
 	                    individualsWithoutPopulation.add(sIndividual);
