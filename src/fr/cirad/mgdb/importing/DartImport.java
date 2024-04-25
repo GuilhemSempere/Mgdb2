@@ -22,6 +22,10 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
+import fr.cirad.mgdb.model.mongo.maintypes.*;
+import htsjdk.variant.vcf.VCFHeader;
+import htsjdk.variant.vcf.VCFHeaderLineType;
+import htsjdk.variant.vcf.VCFInfoHeaderLine;
 import org.apache.log4j.Logger;
 import org.bson.types.ObjectId;
 import org.springframework.beans.factory.BeanDefinitionStoreException;
@@ -31,12 +35,6 @@ import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
 
 import fr.cirad.mgdb.importing.base.AbstractGenotypeImport;
-import fr.cirad.mgdb.model.mongo.maintypes.Assembly;
-import fr.cirad.mgdb.model.mongo.maintypes.GenotypingProject;
-import fr.cirad.mgdb.model.mongo.maintypes.GenotypingSample;
-import fr.cirad.mgdb.model.mongo.maintypes.Individual;
-import fr.cirad.mgdb.model.mongo.maintypes.VariantData;
-import fr.cirad.mgdb.model.mongo.maintypes.VariantRunData;
 import fr.cirad.mgdb.model.mongo.subtypes.ReferencePosition;
 import fr.cirad.mgdb.model.mongo.subtypes.Run;
 import fr.cirad.mgdb.model.mongo.subtypes.SampleGenotype;
@@ -150,7 +148,7 @@ public class DartImport extends AbstractGenotypeImport {
 	                		}
 	                    fieldPositions.put(columnNames[i], i);
 	                };
-	                for (String mandatoryCol : new String[] {"AlleleID", "AlleleSequence", "TrimmedSequence", "SnpPosition", /*"strand", */"RepAvg", "Chrom_*", "ChromPos_*"})
+	                for (String mandatoryCol : new String[] {"AlleleID", "AlleleSequence", "TrimmedSequence", "SnpPosition", /*"strand", */ "CallRate", "FreqHomRef", "FreqHomSnp", "FreqHets", "RepAvg", "Chrom_*", "ChromPos_*"})
 		                if (fieldPositions.get(mandatoryCol) == null)
 		                	throw new Exception("Unable to find mandatory field '" + mandatoryCol + "' in Dart file header!");
 //	            }
@@ -173,7 +171,7 @@ public class DartImport extends AbstractGenotypeImport {
         
         if (columns.length != columnNames.length)
         	throw new Error("Line has " + columns.length + " fields instead of " + columnNames.length + ": " + line.split(",")[0]);
-        	
+        
         String alleleID = columns[fieldPositions.get("AlleleID")];
         DartInfo dart = new DartInfo(alleleID/*, individualName*/);
         dart.setAlleleSequence(columns[fieldPositions.get("AlleleSequence")]);
@@ -182,6 +180,10 @@ public class DartImport extends AbstractGenotypeImport {
         dart.setChromPos(Integer.parseInt(columns[fieldPositions.get("ChromPos_*")]));
         dart.setSnpPos(Integer.parseInt(columns[fieldPositions.get("SnpPosition")]));
 //        dart.setStrand(columns[columnNames.get("strand")]);
+        dart.setCallRate(Float.parseFloat(columns[fieldPositions.get("CallRate")]));
+        dart.setFreqHomRef(Float.parseFloat(columns[fieldPositions.get("FreqHomRef")]));
+        dart.setFreqHomSnp(Float.parseFloat(columns[fieldPositions.get("FreqHomSnp")]));
+        dart.setFreqHets(Float.parseFloat(columns[fieldPositions.get("FreqHets")]));
         int sampleIndex = fieldPositions.get("RepAvg") + 1;
         String[] samplesName = Arrays.copyOfRange(columnNames, sampleIndex, columnNames.length);
         dart.setSampleIDs(samplesName);
@@ -374,156 +376,174 @@ public class DartImport extends AbstractGenotypeImport {
             final Assembly finalAssembly = assembly;
             m_providedIdToSampleMap = new HashMap<String /*individual*/, GenotypingSample>();
 
+            VCFInfoHeaderLine headerLineGT = new VCFInfoHeaderLine("GT", 1, VCFHeaderLineType.String, "Genotype");
+            VCFInfoHeaderLine headerLineAS = new VCFInfoHeaderLine("AS", 2, VCFHeaderLineType.String, "In 1 row format: the sequence of the Reference allele. In 2 rows format: the sequence of the Reference allele is in the Ref row, the sequence of the SNP allele in the SNP row");
+            VCFInfoHeaderLine headerLineSP = new VCFInfoHeaderLine("SP", 3, VCFHeaderLineType.Integer, "The position (zero indexed) in the sequence tag at which the defined SNP variant base occurs");
+            VCFInfoHeaderLine headerLineCR = new VCFInfoHeaderLine("CR", 4, VCFHeaderLineType.Float, "The proportion of samples for which the genotype call is either '1' or '0', rather than '-'");
+            VCFInfoHeaderLine headerLineFHR = new VCFInfoHeaderLine("FHR", 5, VCFHeaderLineType.Float, "The proportion of samples which score as homozygous for the Reference allele");
+            VCFInfoHeaderLine headerLineFHS = new VCFInfoHeaderLine("FHS", 6, VCFHeaderLineType.Float, "The proportion of samples which score as homozygous for the SNP allele");
+            VCFInfoHeaderLine headerLineFH = new VCFInfoHeaderLine("FH", 7, VCFHeaderLineType.Float, "The proportion of samples which score as heterozygous");
+
+            VCFHeader header = new VCFHeader(new HashSet<>(Arrays.asList(headerLineGT, headerLineAS, headerLineSP, headerLineCR, headerLineFHR, headerLineFHS, headerLineFH)));
+            finalMongoTemplate.save(new DBVCFHeader(new DBVCFHeader.VcfHeaderId(finalProject.getId(), sRun), header));
+
             for (int threadIndex = 0; threadIndex < nImportThreads; threadIndex++) {
                 importThreads[threadIndex] = new Thread() {
                     @Override
                     public void run() {
-                        try {
-                            int numberOfVariantsProcessedInThread = 0, localNumberOfVariantsToSaveAtOnce = -1;  // Minor optimization, copy this locally to avoid having to use the AtomicInteger every time
-                            HashSet<VariantData> unsavedVariants = new HashSet<VariantData>();  // HashSet allows no duplicates
-                            HashSet<VariantRunData> unsavedRuns = new HashSet<VariantRunData>();
-                            while (progress.getError() == null && !progress.isAborted()) {
-                            	List<DartInfo> dartFeatures = null;
-                                synchronized(dataReader) {
-                                    if (dataReader.hasNext())
-                                        dartFeatures= dataReader.next();
-                                }
-                                if (dartFeatures == null)
-                                    break;
+                    try {
+                        int numberOfVariantsProcessedInThread = 0, localNumberOfVariantsToSaveAtOnce = -1;  // Minor optimization, copy this locally to avoid having to use the AtomicInteger every time
+                        HashSet<VariantData> unsavedVariants = new HashSet<VariantData>();  // HashSet allows no duplicates
+                        HashSet<VariantRunData> unsavedRuns = new HashSet<VariantRunData>();
+                        while (progress.getError() == null && !progress.isAborted()) {
+                            List<DartInfo> dartFeatures = null;
+                            synchronized(dataReader) {
+                                if (dataReader.hasNext())
+                                    dartFeatures= dataReader.next();
+                            }
+                            if (dartFeatures == null)
+                                break;
 
-                                // We can only retrieve the sample IDs from a feature but need to set them up synchronously
-                                if (numberOfVariantsProcessedInThread == 0) {
-                                    synchronized (sampleIds) {
-                                        // The first thread to reach this will create the samples, the next ones will skip
-                                        // So this will be executed once before everything else, everything after this block of code can assume the samples have been set up
-                                        if (sampleIds.isEmpty()) {
-                                            sampleIds.addAll(Arrays.asList(dartFeatures.iterator().next().getSampleIDs()));
+                            // We can only retrieve the sample IDs from a feature but need to set them up synchronously
+                            if (numberOfVariantsProcessedInThread == 0) {
+                                synchronized (sampleIds) {
+                                    // The first thread to reach this will create the samples, the next ones will skip
+                                    // So this will be executed once before everything else, everything after this block of code can assume the samples have been set up
+                                    if (sampleIds.isEmpty()) {
+                                        sampleIds.addAll(Arrays.asList(dartFeatures.iterator().next().getSampleIDs()));
 
-                                            HashSet<Individual> indsToAdd = new HashSet<>();
-                                            boolean fDbAlreadyContainedIndividuals = finalMongoTemplate.findOne(new Query(), Individual.class) != null;
-                                            for (String sIndOrSpId : sampleIds) {
-                                                String sIndividual = sampleToIndividualMap == null ? sIndOrSpId : sampleToIndividualMap.get(sIndOrSpId);
-                                                if (sIndividual == null) {
-                                                    progress.setError("Sample / individual mapping contains no individual for sample " + sIndOrSpId);
-                                                    return;
-                                                }
-
-                                                if (!fDbAlreadyContainedIndividuals && finalMongoTemplate.findById(sIndividual, Individual.class) == null)  // we don't have any population data so we don't need to update the Individual if it already exists
-                                                    indsToAdd.add(new Individual(sIndividual));
-
-                                                if (!indsToAdd.isEmpty() && indsToAdd.size() % 1000 == 0) {
-                                                    finalMongoTemplate.insert(indsToAdd, Individual.class);
-                                                    indsToAdd = new HashSet<>();
-                                                }
-
-                                                int sampleId = AutoIncrementCounter.getNextSequence(finalMongoTemplate, MongoTemplateManager.getMongoCollectionName(GenotypingSample.class));
-                                                m_providedIdToSampleMap.put(sIndOrSpId, new GenotypingSample(sampleId, finalProject.getId(), sRun, sIndividual, sampleToIndividualMap == null ? null : sIndOrSpId));   // add a sample for this individual to the project
+                                        HashSet<Individual> indsToAdd = new HashSet<>();
+                                        boolean fDbAlreadyContainedIndividuals = finalMongoTemplate.findOne(new Query(), Individual.class) != null;
+                                        for (String sIndOrSpId : sampleIds) {
+                                            String sIndividual = sampleToIndividualMap == null ? sIndOrSpId : sampleToIndividualMap.get(sIndOrSpId);
+                                            if (sIndividual == null) {
+                                                progress.setError("Sample / individual mapping contains no individual for sample " + sIndOrSpId);
+                                                return;
                                             }
 
-                                            finalMongoTemplate.insert(m_providedIdToSampleMap.values(), GenotypingSample.class);
-                                            if (!indsToAdd.isEmpty()) {
+                                            if (!fDbAlreadyContainedIndividuals && finalMongoTemplate.findById(sIndividual, Individual.class) == null)  // we don't have any population data so we don't need to update the Individual if it already exists
+                                                indsToAdd.add(new Individual(sIndividual));
+
+                                            if (!indsToAdd.isEmpty() && indsToAdd.size() % 1000 == 0) {
                                                 finalMongoTemplate.insert(indsToAdd, Individual.class);
-                                                indsToAdd = null;
+                                                indsToAdd = new HashSet<>();
                                             }
-                                            m_fSamplesPersisted = true;
-                                            nNumberOfVariantsToSaveAtOnce.set(sampleIds.size() == 0 ? nMaxChunkSize : Math.max(1, nMaxChunkSize / sampleIds.size()));
-                                            LOG.info("Importing by chunks of size " + nNumberOfVariantsToSaveAtOnce.get());
+
+                                            int sampleId = AutoIncrementCounter.getNextSequence(finalMongoTemplate, MongoTemplateManager.getMongoCollectionName(GenotypingSample.class));
+                                            m_providedIdToSampleMap.put(sIndOrSpId, new GenotypingSample(sampleId, finalProject.getId(), sRun, sIndividual, sampleToIndividualMap == null ? null : sIndOrSpId));   // add a sample for this individual to the project
+                                        }
+
+                                        finalMongoTemplate.insert(m_providedIdToSampleMap.values(), GenotypingSample.class);
+                                        if (!indsToAdd.isEmpty()) {
+                                            finalMongoTemplate.insert(indsToAdd, Individual.class);
+                                            indsToAdd = null;
+                                        }
+                                        m_fSamplesPersisted = true;
+                                        nNumberOfVariantsToSaveAtOnce.set(sampleIds.size() == 0 ? nMaxChunkSize : Math.max(1, nMaxChunkSize / sampleIds.size()));
+                                        LOG.info("Importing by chunks of size " + nNumberOfVariantsToSaveAtOnce.get());
+                                    }
+                                }
+
+                                localNumberOfVariantsToSaveAtOnce = nNumberOfVariantsToSaveAtOnce.get();
+                            }
+
+                            for (DartInfo dartFeature : dartFeatures)
+                                try {
+                                    Type variantType = determineType(Arrays.stream(dartFeature.getAlleles()).map(allele -> Allele.create(allele)).collect(Collectors.toList()));
+                                    String sFeatureName = dartFeature.getAlleleID().trim(); //getName()
+                                    boolean fFileProvidesValidVariantId = !sFeatureName.isEmpty() && !".".equals(sFeatureName);
+
+                                    String variantId = null;
+                                    for (String variantDescForPos : getIdentificationStrings(variantType.toString(), dartFeature.getChrom(), (long) dartFeature.getStart(), sFeatureName.length() == 0 ? null : Arrays.asList(new String[] {sFeatureName}))) {
+                                        variantId = existingVariantIDs.get(variantDescForPos);
+                                        if (variantId != null)
+                                            break;
+                                    }
+
+                                    if (variantId == null && fSkipMonomorphic) {
+                                        String[] distinctGTs = Arrays.stream(dartFeature.getGenotypes()).filter(gt -> !"NA".equals(gt) && !"NN".equals(gt)).distinct().toArray(String[]::new);
+                                        if (distinctGTs.length == 0 || (distinctGTs.length == 1 && Arrays.stream(distinctGTs[0].split(variantType.equals(Type.SNP) ? "" : "/")).distinct().count() < 2))
+                                            continue; // skip non-variant positions that are not already known
+                                    }
+
+                                    VariantData variant = variantId == null || !fDbAlreadyContainedVariants ? null : finalMongoTemplate.findById(variantId, VariantData.class);
+                                    if (variant == null) {
+                                        if (fFileProvidesValidVariantId) {
+                                            variant = new VariantData((ObjectId.isValid(sFeatureName) ? "_" : "") + sFeatureName);
+                                            totalProcessedVariantCount.getAndIncrement();
+                                        }
+                                        else
+                                            variant = new VariantData(generatedIdBaseString + String.format(String.format("%09x", totalProcessedVariantCount.getAndIncrement())));
+                                    }
+                                    else
+                                        totalProcessedVariantCount.getAndIncrement();
+
+                                    // update variant runs
+                                    variant.getRuns().add(new Run(finalProject.getId(), sRun));
+
+                                    AtomicInteger allIdx = new AtomicInteger(0);
+                                    Map<String, Integer> alleleIndexMap = variant.getKnownAlleles().stream().collect(Collectors.toMap(Function.identity(), t -> allIdx.getAndIncrement()));  // should be more efficient not to call indexOf too often...
+                                    List<Allele> knownAlleles = new ArrayList<>();
+                                    for (String allele : dartFeature.getAlleles()) {
+                                        if (!alleleIndexMap.containsKey(allele)) {  // it's a new allele
+                                            int alleleIndexMapSize = alleleIndexMap.size();
+                                            alleleIndexMap.put(allele, alleleIndexMapSize);
+                                            variant.getKnownAlleles().add(allele);
+                                            knownAlleles.add(Allele.create(allele, alleleIndexMapSize == 0));
                                         }
                                     }
 
-                                    localNumberOfVariantsToSaveAtOnce = nNumberOfVariantsToSaveAtOnce.get();
-                                }
+                                    VariantRunData runToSave = addDartSeqDataToVariant(finalMongoTemplate, variant, finalAssembly == null ? null : finalAssembly.getId(), variantType, alleleIndexMap, dartFeature, finalProject, sRun, sampleIds);
 
-                                for (DartInfo dartFeature : dartFeatures)
-	                                try {
-	                                    Type variantType = determineType(Arrays.stream(dartFeature.getAlleles()).map(allele -> Allele.create(allele)).collect(Collectors.toList()));
-	                                    String sFeatureName = dartFeature.getAlleleID().trim(); //getName()
-	                                    boolean fFileProvidesValidVariantId = !sFeatureName.isEmpty() && !".".equals(sFeatureName);
-	
-	                                    String variantId = null;
-	                                    for (String variantDescForPos : getIdentificationStrings(variantType.toString(), dartFeature.getChrom(), (long) dartFeature.getStart(), sFeatureName.length() == 0 ? null : Arrays.asList(new String[] {sFeatureName}))) {
-	                                        variantId = existingVariantIDs.get(variantDescForPos);
-	                                        if (variantId != null)
-	                                            break;
-	                                    }
-	
-	                                    if (variantId == null && fSkipMonomorphic) {
-	                                        String[] distinctGTs = Arrays.stream(dartFeature.getGenotypes()).filter(gt -> !"NA".equals(gt) && !"NN".equals(gt)).distinct().toArray(String[]::new);
-	                                        if (distinctGTs.length == 0 || (distinctGTs.length == 1 && Arrays.stream(distinctGTs[0].split(variantType.equals(Type.SNP) ? "" : "/")).distinct().count() < 2))
-	                                            continue; // skip non-variant positions that are not already known
-	                                    }
-	
-	                                    VariantData variant = variantId == null || !fDbAlreadyContainedVariants ? null : finalMongoTemplate.findById(variantId, VariantData.class);
-	                                    if (variant == null) {
-	                                        if (fFileProvidesValidVariantId) {
-	                                            variant = new VariantData((ObjectId.isValid(sFeatureName) ? "_" : "") + sFeatureName);
-	                                            totalProcessedVariantCount.getAndIncrement();
-	                                        }
-	                                        else
-	                                            variant = new VariantData(generatedIdBaseString + String.format(String.format("%09x", totalProcessedVariantCount.getAndIncrement())));
-	                                    }
-	                                    else
-	                                        totalProcessedVariantCount.getAndIncrement();
-	
-	                                    //update variant runs
-	                                    variant.getRuns().add(new Run(finalProject.getId(), sRun));
-	
-	                                    AtomicInteger allIdx = new AtomicInteger(0);
-	                                    Map<String, Integer> alleleIndexMap = variant.getKnownAlleles().stream().collect(Collectors.toMap(Function.identity(), t -> allIdx.getAndIncrement()));  // should be more efficient not to call indexOf too often...
-	                                    List<Allele> knownAlleles = new ArrayList<>();
-	                                    for (String allele : dartFeature.getAlleles()) {
-	                                        if (!alleleIndexMap.containsKey(allele)) {  // it's a new allele
-	                                            int alleleIndexMapSize = alleleIndexMap.size();
-	                                            alleleIndexMap.put(allele, alleleIndexMapSize);
-	                                            variant.getKnownAlleles().add(allele);
-	                                            knownAlleles.add(Allele.create(allele, alleleIndexMapSize == 0));
-	                                        }
-	                                    }
-	
-	                                    VariantRunData runToSave = addDartSeqDataToVariant(finalMongoTemplate, variant, finalAssembly == null ? null : finalAssembly.getId(), variantType, alleleIndexMap, dartFeature, finalProject, sRun, sampleIds);
-	
-	                                    for (Integer asmId : assemblyIDs) {
-	                                        ReferencePosition rp = variant.getReferencePosition(asmId);
-	                                        if (rp != null)
-	                                            finalProject.getContigs(asmId).add(rp.getSequence());
-	                                    }
-	
-	                                    finalProject.getAlleleCounts().add(variant.getKnownAlleles().size());	// it's a TreeSet so it will only be added if it's not already present
-	
-	                                    if (variant.getKnownAlleles().size() > 0)
-	                                    {	// we only import data related to a variant if we know its alleles
-	                                        if (!unsavedVariants.contains(variant))
-	                                            unsavedVariants.add(variant);
-	                                        if (!unsavedRuns.contains(runToSave))
-	                                            unsavedRuns.add(runToSave);
-	                                    }
-	
-	                                    numberOfVariantsProcessedInThread++;
-	                                    int currentTotalProcessedVariants = totalProcessedVariantCount.get();
-	                                    if (currentTotalProcessedVariants % localNumberOfVariantsToSaveAtOnce == 0) {
-	                                        saveChunk(unsavedVariants, unsavedRuns, existingVariantIDs, finalMongoTemplate, progress, saveService);
-	                                        unsavedVariants = new HashSet<>();
-	                                        unsavedRuns = new HashSet<>();
-	                                    }
-	
-	                                    progress.setCurrentStepProgress(currentTotalProcessedVariants);
-	                                    if (currentTotalProcessedVariants % (localNumberOfVariantsToSaveAtOnce * 50) == 0)
-	                                        LOG.debug(currentTotalProcessedVariants + " lines processed");
-	                                }
-	                                catch (Exception e) {
-	                                    LOG.error("Error occured importing variant number " + (totalProcessedVariantCount.get() + 1) + " (" + Type.SNP.toString() + ":" + dartFeature.getChrom() + ":" + dartFeature.getStart() + ") ", e);
-	                                    throw new Exception("Error occured importing variant number " + (totalProcessedVariantCount.get() + 1) + " (" + Type.SNP.toString() + ":" + dartFeature.getChrom() + ":" + dartFeature.getStart() + ") " + (e.getMessage().endsWith("\"index\" is null") ? "containing an invalid allele code" : e.getMessage()), e);
-	                                }
-                            }
-                            if (unsavedVariants.size() > 0) {
-                                persistVariantsAndGenotypes(!existingVariantIDs.isEmpty(), finalMongoTemplate, unsavedVariants, unsavedRuns);
-                                progress.setCurrentStepProgress(totalProcessedVariantCount.get());
-                            }
-                        } catch (Throwable t) {
-                            progress.setError("Genotype import failed with error: " + t.getMessage());
-                            LOG.error(progress.getError(), t);
-                            return;
+                                    runToSave.getAdditionalInfo().put("AS", dartFeature.getAlleleSequence());
+                                    runToSave.getAdditionalInfo().put("SP", dartFeature.getSnpPos());
+                                    runToSave.getAdditionalInfo().put("CR", dartFeature.getCallRate());
+                                    runToSave.getAdditionalInfo().put("FHR", dartFeature.getFreqHomRef());
+                                    runToSave.getAdditionalInfo().put("FHS", dartFeature.getFreqHomSnp());
+                                    runToSave.getAdditionalInfo().put("FH", dartFeature.getFreqHets());
+
+                                    for (Integer asmId : assemblyIDs) {
+                                        ReferencePosition rp = variant.getReferencePosition(asmId);
+                                        if (rp != null)
+                                            finalProject.getContigs(asmId).add(rp.getSequence());
+                                    }
+
+                                    finalProject.getAlleleCounts().add(variant.getKnownAlleles().size());	// it's a TreeSet so it will only be added if it's not already present
+
+                                    if (variant.getKnownAlleles().size() > 0)
+                                    {	// we only import data related to a variant if we know its alleles
+                                        if (!unsavedVariants.contains(variant))
+                                            unsavedVariants.add(variant);
+                                        if (!unsavedRuns.contains(runToSave))
+                                            unsavedRuns.add(runToSave);
+                                    }
+
+                                    numberOfVariantsProcessedInThread++;
+                                    int currentTotalProcessedVariants = totalProcessedVariantCount.get();
+                                    if (currentTotalProcessedVariants % localNumberOfVariantsToSaveAtOnce == 0) {
+                                        saveChunk(unsavedVariants, unsavedRuns, existingVariantIDs, finalMongoTemplate, progress, saveService);
+                                        unsavedVariants = new HashSet<>();
+                                        unsavedRuns = new HashSet<>();
+                                    }
+
+                                    progress.setCurrentStepProgress(currentTotalProcessedVariants);
+                                    if (currentTotalProcessedVariants % (localNumberOfVariantsToSaveAtOnce * 50) == 0)
+                                        LOG.debug(currentTotalProcessedVariants + " lines processed");
+                                }
+                                catch (Exception e) {
+                                    LOG.error("Error occured importing variant number " + (totalProcessedVariantCount.get() + 1) + " (" + Type.SNP.toString() + ":" + dartFeature.getChrom() + ":" + dartFeature.getStart() + ") ", e);
+                                    throw new Exception("Error occured importing variant number " + (totalProcessedVariantCount.get() + 1) + " (" + Type.SNP.toString() + ":" + dartFeature.getChrom() + ":" + dartFeature.getStart() + ") " + (e.getMessage().endsWith("\"index\" is null") ? "containing an invalid allele code" : e.getMessage()), e);
+                                }
                         }
+                        if (unsavedVariants.size() > 0) {
+                            persistVariantsAndGenotypes(!existingVariantIDs.isEmpty(), finalMongoTemplate, unsavedVariants, unsavedRuns);
+                            progress.setCurrentStepProgress(totalProcessedVariantCount.get());
+                        }
+                    } catch (Throwable t) {
+                        progress.setError("Genotype import failed with error: " + t.getMessage());
+                        LOG.error(progress.getError(), t);
+                        return;
+                    }
                     }
                 };
 
