@@ -310,7 +310,7 @@ public class IntertekImport extends AbstractGenotypeImport {
                                 		break;
                                 	}
 
-                                    GenotypingSample sample = m_providedIdToSampleMap.get(sIndividual);
+                                    GenotypingSample sample = m_providedIdToSampleMap.get(sIndOrSpId);
                                     if (sample == null) {
                                         Individual ind = mongoTemplate.findById(sIndividual, Individual.class);
                                         if (ind == null)
@@ -319,7 +319,7 @@ public class IntertekImport extends AbstractGenotypeImport {
                                         int sampleId = AutoIncrementCounter.getNextSequence(mongoTemplate, MongoTemplateManager.getMongoCollectionName(GenotypingSample.class));
                                         sample = new GenotypingSample(sampleId, project.getId(), sRun, sIndividual, sampleToIndividualMap == null ? null : sIndOrSpId);
                                         sample.getAdditionalInfo().put("masterPlate", masterPlate);
-                                        m_providedIdToSampleMap.put(sIndividual, sample);
+                                        m_providedIdToSampleMap.put(sIndOrSpId, sample);
                                     }
 
                                     SampleGenotype sampleGt = new SampleGenotype(gtCode);
