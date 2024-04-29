@@ -188,7 +188,7 @@ public class ExportManager
             projectStage = new BasicDBObject("$project", projection);
             if (markerCount != null && markerCount > 5000 && nTotalNumberOfSamplesInDB > 200 && sampleIDsNotToExport != null && !sampleIDsNotToExport.isEmpty()) {   // we may only attempt evaluating if it's worth removing $project when exported markers are numerous enough, overall sample count is large enough and more than a half of them is involved
                 double nTotalChunkCount = Math.ceil(markerCount.intValue() / nQueryChunkSize);
-                if (nTotalChunkCount > 30)   // at least 10 chunks would be used for comparison, we only bother doing it if the optimization can be applied to at more than 20 others
+                if (nTotalChunkCount > 30)   // at least 10 chunks would be used for comparison, we only bother doing it if the optimization can be applied to at least 20 others
                     nNumberOfChunksUsedForSpeedEstimation = markerCount == null ? 5 : Math.max(5, (int) nTotalChunkCount / 100 /*1% of the whole stuff*/);
             }
         }
@@ -225,7 +225,7 @@ public class ExportManager
 
         MongoCursor<Document> markerCursor = varColl.aggregate(pipeline, Document.class).collation(IExportHandler.collationObj).allowDiskUse(true).batchSize(nQueryChunkSize).iterator();   /*FIXME: didn't find a way to set noCursorTimeOut on aggregation cursors*/
 
-        // pipeline object will we re-used to query VariantRunData, we won't need the $project stage for that
+        // pipeline object will be re-used to query VariantRunData, we won't need the $project stage for that
         pipeline = new ArrayList<>();
         pipeline.add(sortStage);
         
@@ -258,7 +258,7 @@ public class ExportManager
 
                 if (nChunkIndex == 1) {
                 	if (nNumberOfChunksUsedForSpeedEstimation == null && projectStage != null)
-                		pipeline.add(projectStage);	// it was decided to use this $project and not to test removing test
+                		pipeline.add(projectStage);	// it was decided to use this $project and not to test removing it
                     LOG.debug("Export pipeline: " + pipeline);
                 }
 
@@ -292,7 +292,7 @@ public class ExportManager
                     }
                     else if (nChunkIndex == 2 * nNumberOfChunksUsedForSpeedEstimation) {
                         long timeSpentReadingWithProjectStage = System.currentTimeMillis() - chunkProcessingStartTime;
-                        if (timeSpentReadingWithoutProjectStage < timeSpentReadingWithProjectStage) {    // removing $project provided more some speed-up : let's do the rest of the export without $project
+                        if ((float) timeSpentReadingWithoutProjectStage / timeSpentReadingWithProjectStage <= .75) {    // removing $project provided more than 25% speed-up : let's do the rest of the export without $project
                             pipeline.remove(projectStage);
                             LOG.debug("Exporting without $project stage");
                         }
@@ -400,13 +400,14 @@ public class ExportManager
                     if (nChunkIndex == nNumberOfChunksUsedForSpeedEstimation) { // we just tested without $project, let's try with it now
                         timeSpentReadingWithoutProjectStage = System.currentTimeMillis() - chunkProcessingStartTime;
                         markerCursor = markerCursors[1];
+                        currentMarkerRuns.clear();	// if we don't do this the same run will be read twice (once by each cursor)
                     }
                     else if (nChunkIndex == 2 * nNumberOfChunksUsedForSpeedEstimation) {
                         long timeSpentReadingWithProjectStage = System.currentTimeMillis() - chunkProcessingStartTime;
                         if ((float) timeSpentReadingWithoutProjectStage / timeSpentReadingWithProjectStage <= .75) {    // removing $project provided more than 25% speed-up : let's do the rest of the export without $project
                             markerCursor.close();
                             markerCursor = markerCursors[0];
-                            for (int i=0; i<=nQueryChunkSize * nNumberOfChunksUsedForSpeedEstimation; i++)
+                            for (int i=0; i<nQueryChunkSize * nNumberOfChunksUsedForSpeedEstimation; i++)
                                 markerCursor.tryNext();
                             LOG.debug("Exporting without $project stage");
                         }
@@ -430,7 +431,7 @@ public class ExportManager
                 tempMarkerRunsToWrite = new ArrayDeque<>(nQueryChunkSize);
                 orderedVariantIds = new ArrayList<>();
             }
-            previousVarId = varId;
+           	previousVarId = currentMarkerRuns.isEmpty() ? null : varId;	// if we emptied currentMarkerRuns it's because we switched to markerCursors[1] so the last VRD we encountered is going to be read again using $project 
         }
 
         if (future != null && !future.isDone())
