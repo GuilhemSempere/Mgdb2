@@ -394,16 +394,16 @@ public class IndividualMetadataImport {
         BulkOperations bulkOperations = mongoTemplate.bulkOps(BulkOperations.BulkMode.ORDERED, username == null ? Individual.class : CustomIndividualMetadata.class);
         int i = 0;
         for (String germplasmId : germplasmMap.keySet()) {
+            Map<String, Object> aiMap = germplasmMap.get(germplasmId);
+            aiMap.remove(BrapiService.BRAPI_FIELD_germplasmDbId); //remove brapi germplasmDbId to avoid confusion between external and internal germplasmDbId
             for (String indName : germplasmDbIdToIndividualMap.get(germplasmId)) {
-                Map<String, Object> aiMap = germplasmMap.get(germplasmId);
-
                 progress.setCurrentStepProgress((long) (++i * 100f / germplasmMap.keySet().size()));
 
                 if (aiMap.isEmpty()) {
                     LOG.warn("Found no metadata to import for germplasm " + germplasmId);
                     continue;
                 }
-                aiMap.put(BrapiService.BRAPI_FIELD_extGermplasmDbId, aiMap.remove(BrapiService.BRAPI_FIELD_germplasmDbId));		// use a dedicated field name to avoid confusion
+                aiMap.put(BrapiService.BRAPI_FIELD_extGermplasmDbId, germplasmId);	// use a dedicated field to keep external germplasmDbId
 
                 Update update = new Update();
                 if (username == null) { // global metadata
@@ -483,16 +483,16 @@ public class IndividualMetadataImport {
         BulkOperations bulkOperations = mongoTemplate.bulkOps(BulkOperations.BulkMode.ORDERED, username == null ? Individual.class : CustomIndividualMetadata.class);
         int i = 0;
         for (String germplasmId : germplasmMap.keySet()) {
+            Map<String, Object> aiMap = germplasmMap.get(germplasmId);
+            aiMap.remove(BrapiService.BRAPI_FIELD_germplasmDbId); //remove brapi germplasmDbId to avoid confusion between external and internal germplasmDbId
             for (String indName : germplasmDbIdToIndividualMap.get(germplasmId)) {
-                Map<String, Object> aiMap = germplasmMap.get(germplasmId);
-
                 progress.setCurrentStepProgress((long) (++i * 100f / germplasmMap.keySet().size()));
 
                 if (aiMap.isEmpty()) {
                     LOG.warn("Found no metadata to import for germplasm " + germplasmId);
                     continue;
-                }
-                aiMap.put(BrapiService.BRAPI_FIELD_extGermplasmDbId, aiMap.remove(BrapiService.BRAPI_FIELD_germplasmDbId));		// use a dedicated field name to avoid confusion
+                }                
+                aiMap.put(BrapiService.BRAPI_FIELD_extGermplasmDbId, germplasmId);	// use a dedicated field to keep external germplasmDbId
 
                 Update update = new Update();
                 if (username == null) { // global metadata
@@ -612,15 +612,16 @@ public class IndividualMetadataImport {
         BulkOperations bulkOperations = mongoTemplate.bulkOps(BulkOperations.BulkMode.ORDERED, username == null ? GenotypingSample.class : CustomSampleMetadata.class);
         for (int i = 0; i < sampleList.size(); i++) {            
             BrapiSample sample = sampleList.get(i);
-            for (String internalId : externalToInternalIdMap.get(sample.getSampleDbId())) {
-                Map<String, Object> aiMap = mapper.convertValue(sample, Map.class);
+            Map<String, Object> aiMap = mapper.convertValue(sample, Map.class);
+            aiMap.remove(BrapiService.BRAPI_FIELD_sampleDbId); // we don't want to persist this field as it's internal to the remote source but not to the present system
+            for (String internalId : externalToInternalIdMap.get(sample.getSampleDbId())) {                
                 progress.setCurrentStepProgress((long) (i * 100f / sampleList.size()));
 
                 if (aiMap.isEmpty()) {
                     LOG.warn("Found no metadata to import for sample " + sample.getSampleDbId());
                     continue;
-                }
-                aiMap.remove(BrapiService.BRAPI_FIELD_sampleDbId); // we don't want to persist this field as it's internal to the remote source but not to the present system
+                }       
+                aiMap.put(BrapiService.BRAPI_FIELD_extSampleDbId, sample.getSampleDbId());	// use a dedicated field to keep external sampleDbId
 
                 Integer spId = null;
         	try {
@@ -767,8 +768,9 @@ public class IndividualMetadataImport {
         BulkOperations bulkOperations = mongoTemplate.bulkOps(BulkOperations.BulkMode.ORDERED, username == null ? GenotypingSample.class : CustomSampleMetadata.class);
         for (int i = 0; i < sampleList.size(); i++) {
             Sample sample = sampleList.get(i);
+            Map<String, Object> aiMap = mapper.convertValue(sample, Map.class);
+            aiMap.remove(BrapiService.BRAPI_FIELD_sampleDbId); // we don't want to persist this field as it's internal to the remote source but not to the present system
             for (String internalId : externalToInternalIdMap.get(sample.getSampleDbId())) {
-                Map<String, Object> aiMap = mapper.convertValue(sample, Map.class);
                 //Map<String, Object> gMap = germplasmMap.get(sample.getGermplasmDbId());
                 //merging 2 maps
                 //aiMap.putAll(gMap);
@@ -779,7 +781,7 @@ public class IndividualMetadataImport {
                     LOG.warn("Found no metadata to import for sample " + sample.getSampleDbId());
                     continue;
                 }
-                aiMap.remove(BrapiService.BRAPI_FIELD_sampleDbId); // we don't want to persist this field as it's internal to the remote source but not to the present system
+                aiMap.put(BrapiService.BRAPI_FIELD_extSampleDbId, sample.getSampleDbId());	// use a dedicated field to keep external sampleDbId
                 //aiMap.put(BrapiService.BRAPI_FIELD_extGermplasmDbId, aiMap.remove(BrapiService.BRAPI_FIELD_germplasmDbId));
 
                 Integer spId = null;
