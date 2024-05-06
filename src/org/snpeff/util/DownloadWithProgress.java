@@ -13,12 +13,14 @@ import java.util.Date;
 public class DownloadWithProgress extends Download {
 	private static final int BUFFER_SIZE = 102400;
 
+	protected ProgressIndicator progress;
+	
+	public DownloadWithProgress(ProgressIndicator progress) {
+		this.progress = progress;
+	}
+
 	@Override
 	public boolean download(URL url, String localFile) {
-
-		ProgressIndicator progressIndicator = new ProgressIndicator("progress_download_genome", new String[] {"Downloading genome..."});
-		ProgressIndicator.registerProgressIndicator(progressIndicator);
-
 	    boolean res = false;
 	    try {
 	        sslSetup(); // Set up SSL for websites having issues with certificates (e.g. Sourceforge)
@@ -81,8 +83,7 @@ public class DownloadWithProgress extends Download {
 	            int newProgressPercentage = (int) (total * 100d / connection.getContentLengthLong());
 	            if (newProgressPercentage != progressPercentage) {
 	            	progressPercentage = newProgressPercentage;
-					progressIndicator.setCurrentStepProgress(progressPercentage);
-	            	System.out.println("Download progress: " + progressPercentage + "%");
+	            	progress.setCurrentStepProgress(progressPercentage);
 	            }
 	
 	            // Show every MB
@@ -97,7 +98,7 @@ public class DownloadWithProgress extends Download {
 	        is.close();
 	        os.close();
 	        if (verbose) Log.info("Download finished. Total " + total + " bytes.");
-			progressIndicator.markAsComplete();
+	        progress.markAsComplete();
 	
 	        res = true;
 	    } catch (Exception e) {

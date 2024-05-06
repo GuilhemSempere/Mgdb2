@@ -205,7 +205,7 @@
 		<dependency>
 			<groupId>org.snpeff</groupId>
 			<artifactId>SnpEff</artifactId>
-			<version>5.2</version>
+			<version>5.2c</version>
 		</dependency>
     </dependencies>
 

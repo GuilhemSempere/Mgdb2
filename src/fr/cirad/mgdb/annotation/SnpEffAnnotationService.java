@@ -3,6 +3,7 @@ package fr.cirad.mgdb.annotation;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileDescriptor;
+import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.FileWriter;
 import java.io.IOException;
@@ -14,8 +15,10 @@ import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.TreeSet;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -72,6 +75,7 @@ public class SnpEffAnnotationService {
 
 	public static String annotateRun(String configFile, String dataPath, String module, int projectId, String run, String snpEffDatabase, ProgressIndicator progress) {
 		MongoTemplate template = MongoTemplateManager.get(module);
+		int nAssembly = Assembly.getThreadBoundAssembly();
 
 		progress.addStep("Loading config");
 		progress.moveToNextStep();
@@ -92,9 +96,27 @@ public class SnpEffAnnotationService {
 		progress.addStep("Processing variants");
 		progress.moveToNextStep();
 		int processedVariants = 0;
+		
+		HashMap<String, String> unplacedVariants = new HashMap<>();
+		Pattern digitPattern = Pattern.compile("[0-9]+"); 
+
 		for (Document doc : variantRunData) {
 			VariantRunData vrd = template.getConverter().read(VariantRunData.class, doc);
-			Chromosome chromosome = getParentChromosome(vrd, genome);
+			
+			String sequence = vrd.getReferencePosition(nAssembly).getSequence();
+			Chromosome chromosome = genome.getChromosome(sequence);
+			if (chromosome == null && digitPattern.matcher(sequence).matches()) {
+				Pattern singleNumericPattern = Pattern.compile("\\D*(\\d+)\\D*");	// Isolate the numeric part
+				Matcher matcher = singleNumericPattern.matcher(sequence);
+				matcher.find();
+				if (matcher.matches())
+					chromosome = genome.getChromosome(matcher.group(1));
+			}
+			if (chromosome == null) {
+				unplacedVariants.put(vrd.getVariantId(), snpEffDatabase);
+				continue;
+			}
+				
 			SnpEffEntryWrapper entry = new SnpEffEntryWrapper(chromosome, vrd);
 
 			VariantRunData result = annotateVariant(entry, predictor, projectEffects);
@@ -106,6 +128,8 @@ public class SnpEffAnnotationService {
 				LOG.warn("Failed to annotate variant " + vrd.getId());
 			}
 		}
+		
+		LOG.warn("During functional annotation on " + module + ", " + new HashSet<>(unplacedVariants.values()).size() + " contig(s) were not found in the reference genome, and thus " + unplacedVariants.size() + " variants could not be annotated");
 
 		progress.addStep("Updating project metadata");
 		progress.moveToNextStep();
@@ -150,36 +174,19 @@ public class SnpEffAnnotationService {
 		return entry.buildANN();
 	}
 
-	private static Chromosome getParentChromosome(VariantRunData vrd, Genome genome) {
-		int nAssembly = Assembly.getThreadBoundAssembly();
-		String sequence = vrd.getReferencePosition(nAssembly).getSequence();
-		Chromosome chromosome = genome.getChromosome(sequence);
-		if (chromosome != null) return chromosome;
-
-		// Isolate the numeric part
-		Pattern singleNumericPattern = Pattern.compile("\\D*(\\d+)\\D*");
-		Matcher matcher = singleNumericPattern.matcher(sequence);
-		matcher.find();
-		if (matcher.matches()) {
-			chromosome = genome.getChromosome(matcher.group(1));
-			if (chromosome != null) return chromosome;
-		}
-
-		throw new RuntimeException("Chromosome name " + sequence + " is not compatible with the SnpEff database");
-	}
-
-	public static List<String> getAvailableGenomes(String configFile, String dataPath) {
+	public static List<String> getAvailableGenomes(String dataPath) {
     	File repository = new File(dataPath);
     	File[] databases = repository.listFiles(File::isDirectory);
     	List<String> availableGenomes = Arrays.stream(databases).map(file -> file.getName()).filter(fileName -> !fileName.equals("genomes")).collect(Collectors.toList());
     	return availableGenomes;
 	}
 
-	public static List<String> getDownloadableGenomes(String configFile, String dataPath) {
+	public static TreeMap<String, String> getDownloadableGenomes(String configFile, String dataPath) {
 		Config config = new Config("", configFile, dataPath, null);
-		List<String> downloadableGenomes = new ArrayList<>();
+
+		TreeMap<String, String> downloadableGenomes = new TreeMap<>();
 		for (String genome : config)
-			downloadableGenomes.add(genome);
+			downloadableGenomes.put(genome, config.getName(genome));
 		return downloadableGenomes;
 	}
 
@@ -200,7 +207,7 @@ public class SnpEffAnnotationService {
 
         boolean maskExceptions = (urls.size() > 1);
         for (URL url : urls) {
-        	if (downloadGenome(config, url, maskExceptions))
+        	if (downloadGenome(config, url, maskExceptions, progress))
         		return;
         }
 
@@ -213,19 +220,19 @@ public class SnpEffAnnotationService {
 
 		Config config = new Config("", configFile, dataPath, null);
 
-        if (!downloadGenome(config, genomeURL, false))
+        if (!downloadGenome(config, genomeURL, false, progress))
         	progress.setError("Genome download failed");
 	}
 
-	private static boolean downloadGenome(Config config, URL url, boolean maskExceptions) {
+	private static boolean downloadGenome(Config config, URL url, boolean maskExceptions, ProgressIndicator progress) {
 		String localFile = System.getProperty("java.io.tmpdir") + "/" + Download.urlBaseName(url.toString());
 
-		DownloadWithProgress download = new DownloadWithProgress();
+		DownloadWithProgress download = new DownloadWithProgress(progress);
         download.setVerbose(false);
         download.setDebug(false);
         download.setUpdate(false);
         download.setMaskDownloadException(maskExceptions);
-        LOG.info("Try to download genome from " + url.toString());
+        LOG.info("Trying to download genome from " + url.toString());
         if (download.download(url, localFile)) {
         	LOG.debug("Unzipping " + localFile);
             if (download.unzip(localFile, config.getDirMain(), config.getDirData())) {
