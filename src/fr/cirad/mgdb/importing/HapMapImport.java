@@ -319,7 +319,7 @@ public class HapMapImport extends AbstractGenotypeImport {
 	                                        HashSet<Individual> indsToAdd = new HashSet<>();
 	                                        boolean fDbAlreadyContainedIndividuals = finalMongoTemplate.findOne(new Query(), Individual.class) != null;
 	                                        for (String sIndOrSpId : sampleIds) {
-	                                        	String sIndividual = sampleToIndividualMap == null ? sIndOrSpId : sampleToIndividualMap.get(sIndOrSpId);
+	                                        	String sIndividual = sampleToIndividualMap == null || sampleToIndividualMap.isEmpty() /*empty means no mapping file but sample names provided: individuals will be named same as samples*/ ? sIndOrSpId : sampleToIndividualMap.get(sIndOrSpId);
 	                                        	if (sIndividual == null) {
 	                                        		progress.setError("Sample / individual mapping contains no individual for sample " + sIndOrSpId);
 	                                        		return;
@@ -336,6 +336,12 @@ public class HapMapImport extends AbstractGenotypeImport {
 	                                            int sampleId = AutoIncrementCounter.getNextSequence(finalMongoTemplate, MongoTemplateManager.getMongoCollectionName(GenotypingSample.class));
 	                                            m_providedIdToSampleMap.put(sIndOrSpId, new GenotypingSample(sampleId, finalProject.getId(), sRun, sIndividual, sampleToIndividualMap == null ? null : sIndOrSpId));   // add a sample for this individual to the project
 	                                        }
+	                                        
+	                                        // make sure provided sample names do not conflict with existing ones
+	                                        if (finalMongoTemplate.findOne(new Query(Criteria.where(GenotypingSample.FIELDNAME_NAME).in(m_providedIdToSampleMap.values().stream().map(sp -> sp.getSampleName()).toList())), GenotypingSample.class) != null) {
+	                                	        progress.setError("Some of the sample IDs provided in the mapping file already exist in this database!");
+	                                	        return;
+	                                		}
 	                                        
 	                                        finalMongoTemplate.insert(m_providedIdToSampleMap.values(), GenotypingSample.class);
 	                                        if (!indsToAdd.isEmpty()) {

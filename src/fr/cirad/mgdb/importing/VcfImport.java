@@ -318,7 +318,7 @@ public class VcfImport extends AbstractGenotypeImport {
             HashSet<Individual> indsToAdd = new HashSet<>();
             boolean fDbAlreadyContainedIndividuals = mongoTemplate.findOne(new Query(), Individual.class) != null, fDbAlreadyContainedVariants = mongoTemplate.findOne(new Query() {{ fields().include("_id"); }}, VariantData.class) != null;
             for (String sIndOrSpId : header.getSampleNamesInOrder()) {
-            	String sIndividual = sampleToIndividualMap == null ? sIndOrSpId : sampleToIndividualMap.get(sIndOrSpId);
+            	String sIndividual = sampleToIndividualMap == null || sampleToIndividualMap.isEmpty() /*empty means no mapping file but sample names provided: individuals will be named same as samples*/ ? sIndOrSpId : sampleToIndividualMap.get(sIndOrSpId);
             	if (sIndividual == null) {
             		progress.setError("Sample / individual mapping contains no individual for sample " + sIndOrSpId);
             		return createdProject;
@@ -335,6 +335,12 @@ public class VcfImport extends AbstractGenotypeImport {
                 int sampleId = AutoIncrementCounter.getNextSequence(mongoTemplate, MongoTemplateManager.getMongoCollectionName(GenotypingSample.class));
                 m_providedIdToSampleMap.put(sIndOrSpId, new GenotypingSample(sampleId, project.getId(), sRun, sIndividual, sampleToIndividualMap == null ? null : sIndOrSpId));   // add a sample for this individual to the project
             }
+            
+            // make sure provided sample names do not conflict with existing ones
+            if (finalMongoTemplate.findOne(new Query(Criteria.where(GenotypingSample.FIELDNAME_NAME).in(m_providedIdToSampleMap.values().stream().map(sp -> sp.getSampleName()).toList())), GenotypingSample.class) != null) {
+    	        progress.setError("Some of the sample IDs provided in the mapping file already exist in this database!");
+    	        return null;
+    		}
 
             mongoTemplate.insert(m_providedIdToSampleMap.values(), GenotypingSample.class);
             if (!indsToAdd.isEmpty()) {

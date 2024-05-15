@@ -305,7 +305,7 @@ public class IntertekImport extends AbstractGenotypeImport {
                                         }
                                     }
                                     
-                                    String sIndividual = sampleToIndividualMap == null ? sIndOrSpId : sampleToIndividualMap.get(sIndOrSpId);
+                                    String sIndividual = sampleToIndividualMap == null || sampleToIndividualMap.isEmpty() /*empty means no mapping file but sample names provided: individuals will be named same as samples*/ ? sIndOrSpId : sampleToIndividualMap.get(sIndOrSpId);
                                 	if (sIndividual == null) {
                                 		progress.setError("Sample / individual mapping contains no individual for sample " + sIndOrSpId);
                                 		break;
@@ -343,6 +343,12 @@ public class IntertekImport extends AbstractGenotypeImport {
                 }
             }
             
+            // make sure provided sample names do not conflict with existing ones
+            if (mongoTemplate.findOne(new Query(Criteria.where(GenotypingSample.FIELDNAME_NAME).in(m_providedIdToSampleMap.values().stream().map(sp -> sp.getSampleName()).toList())), GenotypingSample.class) != null) {
+    	        progress.setError("Some of the sample IDs provided in the mapping file already exist in this database!");
+    	        return null;
+    		}
+
             mongoTemplate.insert(m_providedIdToSampleMap.values(), GenotypingSample.class);
             m_fSamplesPersisted = true;
                         
