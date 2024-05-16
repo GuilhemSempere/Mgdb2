@@ -319,9 +319,9 @@ public class HapMapImport extends AbstractGenotypeImport {
 	                                        HashSet<Individual> indsToAdd = new HashSet<>();
 	                                        boolean fDbAlreadyContainedIndividuals = finalMongoTemplate.findOne(new Query(), Individual.class) != null;
 	                                        for (String sIndOrSpId : sampleIds) {
-	                                        	String sIndividual = sampleToIndividualMap == null || sampleToIndividualMap.isEmpty() /*empty means no mapping file but sample names provided: individuals will be named same as samples*/ ? sIndOrSpId : sampleToIndividualMap.get(sIndOrSpId);
+	                                        	String sIndividual = determineIndividualName(sampleToIndividualMap, sIndOrSpId, progress);
 	                                        	if (sIndividual == null) {
-	                                        		progress.setError("Sample / individual mapping contains no individual for sample " + sIndOrSpId);
+	                                        		progress.setError("Unable to determine individual for sample " + sIndOrSpId);
 	                                        		return;
 	                                        	}
 	                                        	
@@ -557,10 +557,11 @@ public class HapMapImport extends AbstractGenotypeImport {
 
             try {
 	            SampleGenotype aGT = new SampleGenotype(alleles.stream().map(allele -> alleleIndexMap.get(allele)).sorted().map(index -> index.toString()).collect(Collectors.joining("/")));
-				GenotypingSample sample = m_providedIdToSampleMap.get(sIndOrSpId);
-	        	if (sample == null)
-	        		throw new Exception("Sample / individual mapping contains no individual for sample " + sIndOrSpId);
-				vrd.getSampleGenotypes().put(sample.getId(), aGT);
+//				GenotypingSample sample = m_providedIdToSampleMap.get(sIndOrSpId);
+//	        	if (sample == null)
+//	        		throw new Exception("Sample / individual mapping contains no individual for sample " + sIndOrSpId);
+//				vrd.getSampleGenotypes().put(sample.getId(), aGT);
+				vrd.getSampleGenotypes().put(m_providedIdToSampleMap.get(sIndOrSpId).getId(), aGT);
             }
             catch (NullPointerException npe) {
             	throw new Exception("Some genotypes for variant " + hmFeature.getContig() + ":" + hmFeature.getStart() + " refer to alleles not declared at the beginning of the line!");

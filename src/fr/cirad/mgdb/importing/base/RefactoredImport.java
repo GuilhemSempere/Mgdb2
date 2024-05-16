@@ -485,14 +485,14 @@ public abstract class RefactoredImport extends AbstractGenotypeImport {
         return result;
     }
     
-    protected void createSamples(MongoTemplate mongoTemplate, int projId, String sRun, HashMap<String, String> sampleToIndividualMap, LinkedHashMap<String, String> orderedIndividualToPopulationMap, ProgressIndicator progress) {
+    protected void createSamples(MongoTemplate mongoTemplate, int projId, String sRun, HashMap<String, String> sampleToIndividualMap, LinkedHashMap<String, String> orderedIndividualToPopulationMap, ProgressIndicator progress) throws Exception {
         m_providedIdToSampleMap = new HashMap<String /*individual*/, GenotypingSample>();
         HashSet<Individual> indsToAdd = new HashSet<>();
         boolean fDbAlreadyContainedIndividuals = mongoTemplate.findOne(new Query(), Individual.class) != null;
         for (String sIndOrSpId : orderedIndividualToPopulationMap.keySet()) {
-        	String sIndividual = sampleToIndividualMap == null || sampleToIndividualMap.isEmpty() /*empty means no mapping file but sample names provided: individuals will be named same as samples*/ ? sIndOrSpId : sampleToIndividualMap.get(sIndOrSpId);
+        	String sIndividual = determineIndividualName(sampleToIndividualMap, sIndOrSpId, progress);
         	if (sIndividual == null) {
-        		progress.setError("Sample / individual mapping contains no individual for sample " + sIndOrSpId);
+        		progress.setError("Unable to determine individual for sample " + sIndOrSpId);
         		return;
         	}
         	

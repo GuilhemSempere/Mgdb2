@@ -41,6 +41,7 @@ import org.springframework.data.mongodb.core.query.Query;
 
 import com.mongodb.client.MongoCursor;
 
+import fr.cirad.mgdb.importing.IndividualMetadataImport;
 import fr.cirad.mgdb.model.mongo.maintypes.Assembly;
 import fr.cirad.mgdb.model.mongo.maintypes.GenotypingProject;
 import fr.cirad.mgdb.model.mongo.maintypes.GenotypingSample;
@@ -52,8 +53,12 @@ import fr.cirad.tools.Helper;
 import fr.cirad.tools.ProgressIndicator;
 import fr.cirad.tools.mongo.AutoIncrementCounter;
 import fr.cirad.tools.mongo.MongoTemplateManager;
+
+import org.brapi.v2.model.Sample;
+
 import htsjdk.variant.variantcontext.Allele;
 import htsjdk.variant.variantcontext.VariantContext.Type;
+import jhi.brapi.api.samples.BrapiSample;
 
 public class AbstractGenotypeImport {
 
@@ -68,6 +73,41 @@ public class AbstractGenotypeImport {
 
 	protected boolean m_fSamplesPersisted = false;
 	protected Map<String /* individual or sample name */, GenotypingSample> m_providedIdToSampleMap = null;
+	
+	protected String brapiEndPointUriForNamingIndividuals;
+	protected String brapiEndPointTokenForNamingIndividuals;
+	
+	public void setBrapiEndPointForNamingIndividuals(String brapiEndPointUri, String brapiEndPointToken) {
+		brapiEndPointUriForNamingIndividuals = !brapiEndPointUri.endsWith("/") ? brapiEndPointUri + "/" : brapiEndPointUri;
+		brapiEndPointTokenForNamingIndividuals = "".equals(brapiEndPointToken) ? null : brapiEndPointToken;
+	}
+	
+	protected String determineIndividualName(Map<String, String> sampleToIndividualMap, String sIndOrSpId, ProgressIndicator progress) throws Exception {
+		String indName = null;
+		if (brapiEndPointUriForNamingIndividuals != null) {
+			if (progress != null)
+				progress.setProgressDescription("Getting germplasmDbId for sample " + sIndOrSpId + " from " + brapiEndPointUriForNamingIndividuals);
+			if (brapiEndPointUriForNamingIndividuals.endsWith("/v1/")) {
+				List<BrapiSample> samples = IndividualMetadataImport.readBrapiV1Samples(brapiEndPointUriForNamingIndividuals, brapiEndPointTokenForNamingIndividuals, Arrays.asList(sIndOrSpId), null);
+				if (samples.size() != 1)
+					LOG.error("Unable to find individual name from BrAPI endpoint " + brapiEndPointUriForNamingIndividuals + " for sample " + sIndOrSpId);
+				else
+					indName = samples.get(0).getGermplasmDbId();
+			}
+			else {
+				List<Sample> samples = IndividualMetadataImport.readBrapiV2Samples(brapiEndPointUriForNamingIndividuals, brapiEndPointTokenForNamingIndividuals, Arrays.asList(sIndOrSpId), null);
+				if (samples.size() != 1)
+					LOG.error("Unable to find individual name from BrAPI endpoint " + brapiEndPointUriForNamingIndividuals + " for sample " + sIndOrSpId);
+				else
+					indName = samples.get(0).getGermplasmDbId();
+				}
+			if (progress != null)
+				progress.setProgressDescription(null);
+		}
+		if (indName == null)	// may happen if we're not using BrAPI here or if we tried to use it but failed to find a matching entity
+			indName = sampleToIndividualMap == null || sampleToIndividualMap.isEmpty() /*empty means no mapping file but sample names provided: individuals will be named same as samples*/ ? sIndOrSpId : sampleToIndividualMap.get(sIndOrSpId);
+		return indName;
+	}
 
 	public static ArrayList<String> getIdentificationStrings(String sType, String sSeq, Long nStartPos, Collection<String> idAndSynonyms) throws Exception
 	{
