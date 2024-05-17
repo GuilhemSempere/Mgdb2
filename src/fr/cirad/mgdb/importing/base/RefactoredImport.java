@@ -489,6 +489,7 @@ public abstract class RefactoredImport extends AbstractGenotypeImport {
         m_providedIdToSampleMap = new HashMap<String /*individual*/, GenotypingSample>();
         HashSet<Individual> indsToAdd = new HashSet<>();
         boolean fDbAlreadyContainedIndividuals = mongoTemplate.findOne(new Query(), Individual.class) != null;
+        attemptPreloadingIndividuals(orderedIndividualToPopulationMap.keySet(), progress);
         for (String sIndOrSpId : orderedIndividualToPopulationMap.keySet()) {
         	String sIndividual = determineIndividualName(sampleToIndividualMap, sIndOrSpId, progress);
         	if (sIndividual == null) {
@@ -519,6 +520,6 @@ public abstract class RefactoredImport extends AbstractGenotypeImport {
         	mongoTemplate.insert(indsToAdd, Individual.class);
             indsToAdd = null;
         }	                    					
-        m_fSamplesPersisted = true;
+        setSamplesPersisted(true);
     }
 }

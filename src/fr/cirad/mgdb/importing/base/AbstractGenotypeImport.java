@@ -71,41 +71,74 @@ public class AbstractGenotypeImport {
     public boolean m_fCloseContextAfterImport = false;
     public boolean m_fAllowNewAssembly = true;
 
-	protected boolean m_fSamplesPersisted = false;
+	private boolean m_fSamplesPersisted = false;
+
 	protected Map<String /* individual or sample name */, GenotypingSample> m_providedIdToSampleMap = null;
 	
 	protected String brapiEndPointUriForNamingIndividuals;
 	protected String brapiEndPointTokenForNamingIndividuals;
 	
+	private HashMap<String, String> preloadedSampleToIndividualMap = null;
+	
 	public void setBrapiEndPointForNamingIndividuals(String brapiEndPointUri, String brapiEndPointToken) {
 		brapiEndPointUriForNamingIndividuals = !brapiEndPointUri.endsWith("/") ? brapiEndPointUri + "/" : brapiEndPointUri;
 		brapiEndPointTokenForNamingIndividuals = "".equals(brapiEndPointToken) ? null : brapiEndPointToken;
 	}
-	
-	protected String determineIndividualName(Map<String, String> sampleToIndividualMap, String sIndOrSpId, ProgressIndicator progress) throws Exception {
-		String indName = null;
-		if (brapiEndPointUriForNamingIndividuals != null) {
+
+	protected void setSamplesPersisted(boolean m_fSamplesPersisted) {
+		this.m_fSamplesPersisted = m_fSamplesPersisted;
+	}
+
+	protected void attemptPreloadingIndividuals(Collection<String> sampleDbIds, ProgressIndicator progress) throws Exception {
+		if (brapiEndPointUriForNamingIndividuals == null || preloadedSampleToIndividualMap != null)
+			return;
+		
+		try {
 			if (progress != null)
-				progress.setProgressDescription("Getting germplasmDbId for sample " + sIndOrSpId + " from " + brapiEndPointUriForNamingIndividuals);
-			if (brapiEndPointUriForNamingIndividuals.endsWith("/v1/")) {
-				List<BrapiSample> samples = IndividualMetadataImport.readBrapiV1Samples(brapiEndPointUriForNamingIndividuals, brapiEndPointTokenForNamingIndividuals, Arrays.asList(sIndOrSpId), null);
-				if (samples.size() != 1)
-					LOG.error("Unable to find individual name from BrAPI endpoint " + brapiEndPointUriForNamingIndividuals + " for sample " + sIndOrSpId);
-				else
-					indName = samples.get(0).getGermplasmDbId();
-			}
-			else {
-				List<Sample> samples = IndividualMetadataImport.readBrapiV2Samples(brapiEndPointUriForNamingIndividuals, brapiEndPointTokenForNamingIndividuals, Arrays.asList(sIndOrSpId), null);
-				if (samples.size() != 1)
-					LOG.error("Unable to find individual name from BrAPI endpoint " + brapiEndPointUriForNamingIndividuals + " for sample " + sIndOrSpId);
-				else
-					indName = samples.get(0).getGermplasmDbId();
-				}
+				progress.setProgressDescription("Getting germplasmDbId for " + sampleDbIds.size() + " samples from " + brapiEndPointUriForNamingIndividuals);
+			
+			preloadedSampleToIndividualMap = new HashMap<>();
+			if (brapiEndPointUriForNamingIndividuals.endsWith("/v1/"))
+				for (BrapiSample sp : IndividualMetadataImport.readBrapiV1Samples(brapiEndPointUriForNamingIndividuals, brapiEndPointTokenForNamingIndividuals, sampleDbIds, null))
+					preloadedSampleToIndividualMap.put(sp.getSampleDbId(), sp.getGermplasmDbId());
+			else
+				for (Sample sp : IndividualMetadataImport.readBrapiV2Samples(brapiEndPointUriForNamingIndividuals, brapiEndPointTokenForNamingIndividuals, sampleDbIds, null))
+					preloadedSampleToIndividualMap.put(sp.getSampleDbId(), sp.getGermplasmDbId());
+		}
+		finally {
 			if (progress != null)
 				progress.setProgressDescription(null);
 		}
+	}
+
+	protected String determineIndividualName(Map<String, String> sampleToIndividualMap, String sampleDbId, ProgressIndicator progress) throws Exception {
+		String indName = preloadedSampleToIndividualMap == null ? null : preloadedSampleToIndividualMap.get(sampleDbId);
+		if (indName == null && brapiEndPointUriForNamingIndividuals != null) {
+			if (progress != null)
+				progress.setProgressDescription("Getting germplasmDbId for sample " + sampleDbId + " from " + brapiEndPointUriForNamingIndividuals);
+			try {
+				if (brapiEndPointUriForNamingIndividuals.endsWith("/v1/")) {
+					List<BrapiSample> samples = IndividualMetadataImport.readBrapiV1Samples(brapiEndPointUriForNamingIndividuals, brapiEndPointTokenForNamingIndividuals, Arrays.asList(sampleDbId), null);
+					if (samples.size() != 1)
+						LOG.error("Unable to find individual name from BrAPI endpoint " + brapiEndPointUriForNamingIndividuals + " for sample " + sampleDbId);
+					else
+						indName = samples.get(0).getGermplasmDbId();
+				}
+				else {
+					List<Sample> samples = IndividualMetadataImport.readBrapiV2Samples(brapiEndPointUriForNamingIndividuals, brapiEndPointTokenForNamingIndividuals, Arrays.asList(sampleDbId), null);
+					if (samples.size() != 1)
+						LOG.error("Unable to find individual name from BrAPI endpoint " + brapiEndPointUriForNamingIndividuals + " for sample " + sampleDbId);
+					else
+						indName = samples.get(0).getGermplasmDbId();
+					}
+			}
+			finally {
+				if (progress != null)
+					progress.setProgressDescription(null);
+			}
+		}
 		if (indName == null)	// may happen if we're not using BrAPI here or if we tried to use it but failed to find a matching entity
-			indName = sampleToIndividualMap == null || sampleToIndividualMap.isEmpty() /*empty means no mapping file but sample names provided: individuals will be named same as samples*/ ? sIndOrSpId : sampleToIndividualMap.get(sIndOrSpId);
+			indName = sampleToIndividualMap == null || sampleToIndividualMap.isEmpty() /*empty means no mapping file but sample names provided: individuals will be named same as samples*/ ? sampleDbId : sampleToIndividualMap.get(sampleDbId);
 		return indName;
 	}
 

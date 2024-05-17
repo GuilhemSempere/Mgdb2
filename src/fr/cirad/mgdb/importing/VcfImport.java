@@ -317,6 +317,7 @@ public class VcfImport extends AbstractGenotypeImport {
             m_providedIdToSampleMap = new HashMap<String /*individual*/, GenotypingSample>();
             HashSet<Individual> indsToAdd = new HashSet<>();
             boolean fDbAlreadyContainedIndividuals = mongoTemplate.findOne(new Query(), Individual.class) != null, fDbAlreadyContainedVariants = mongoTemplate.findOne(new Query() {{ fields().include("_id"); }}, VariantData.class) != null;
+            attemptPreloadingIndividuals(header.getSampleNamesInOrder(), progress);
             for (String sIndOrSpId : header.getSampleNamesInOrder()) {
             	String sIndividual = determineIndividualName(sampleToIndividualMap, sIndOrSpId, progress);
             	if (sIndividual == null) {
@@ -347,7 +348,7 @@ public class VcfImport extends AbstractGenotypeImport {
                 mongoTemplate.insert(indsToAdd, Individual.class);
                 indsToAdd = null;
             }
-            m_fSamplesPersisted = true;
+            setSamplesPersisted(true);
 
             // loop over each variation
             final Integer nAssemblyId = assembly == null ? null : assembly.getId();

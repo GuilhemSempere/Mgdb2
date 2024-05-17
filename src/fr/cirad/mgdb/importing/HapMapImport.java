@@ -318,6 +318,7 @@ public class HapMapImport extends AbstractGenotypeImport {
 
 	                                        HashSet<Individual> indsToAdd = new HashSet<>();
 	                                        boolean fDbAlreadyContainedIndividuals = finalMongoTemplate.findOne(new Query(), Individual.class) != null;
+	                                        attemptPreloadingIndividuals(sampleIds, progress);
 	                                        for (String sIndOrSpId : sampleIds) {
 	                                        	String sIndividual = determineIndividualName(sampleToIndividualMap, sIndOrSpId, progress);
 	                                        	if (sIndividual == null) {
@@ -348,7 +349,7 @@ public class HapMapImport extends AbstractGenotypeImport {
 	                                        	finalMongoTemplate.insert(indsToAdd, Individual.class);
 	                                            indsToAdd = null;
 	                                        }	                    					
-	                                        m_fSamplesPersisted = true;
+	                                        setSamplesPersisted(true);
 	                                		nNumberOfVariantsToSaveAtOnce.set(sampleIds.size() == 0 ? nMaxChunkSize : Math.max(1, nMaxChunkSize / sampleIds.size()));
 	                    					LOG.info("Importing by chunks of size " + nNumberOfVariantsToSaveAtOnce.get());
                                 		}	
