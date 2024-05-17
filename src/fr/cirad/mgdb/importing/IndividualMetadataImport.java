@@ -72,6 +72,7 @@ import fr.cirad.mgdb.model.mongo.maintypes.GenotypingSample;
 import fr.cirad.mgdb.model.mongo.maintypes.Individual;
 import fr.cirad.tools.Helper;
 import fr.cirad.tools.ProgressIndicator;
+import fr.cirad.tools.SessionAttributeAwareThread;
 import fr.cirad.tools.mongo.MongoTemplateManager;
 import jhi.brapi.api.BrapiBaseResource;
 import jhi.brapi.api.BrapiListResource;
@@ -115,7 +116,7 @@ public class IndividualMetadataImport {
         if (args.length < 3)
             throw new Exception("You must pass 3 or 4 parameters as arguments: DATASOURCE name, metadata file path (TSV format with header on first line), label of column containing individual names (matching those in the DB), and optionally a CSV list of column labels for fields to import (all will be imported if no such parameter is supplied).");
 
-        importIndividualOrSampleMetadata(args[0], null, new File(args[1]).toURI().toURL(), args[2], args.length > 3 ? args[3] : null, null);
+        importIndividualOrSampleMetadataByFile(args[0], null, new File(args[1]).toURI().toURL(), args[2], args.length > 3 ? args[3] : null, null);
     }
     
     public static HashMap<Integer, String> readMetadataFileHeader(String headerLine, Collection<String> fieldsToImport) {
@@ -133,7 +134,7 @@ public class IndividualMetadataImport {
     	return columnLabels;
     }
 
-    public static int importIndividualOrSampleMetadata(String sModule, HttpSession session, URL metadataFileURL, String targetTypeColName, String csvFieldListToImport, String username) throws Exception {
+    public static int importIndividualOrSampleMetadataByFile(String sModule, HttpSession session, URL metadataFileURL, String targetTypeColName, String csvFieldListToImport, String username) throws Exception {
         GenericXmlApplicationContext ctx = null;
         MongoTemplate mongoTemplate = MongoTemplateManager.get(sModule);
         if (mongoTemplate == null) { // we are probably being invoked offline
@@ -147,7 +148,8 @@ public class IndividualMetadataImport {
         }
 
         boolean fIsAnonymous = "anonymousUser".equals(username);
-        LinkedHashMap<Comparable /*sample*/, LinkedHashMap<String, Object>> sessionObject = (LinkedHashMap<Comparable, LinkedHashMap<String, Object>>) session.getAttribute(targetTypeColName + "s_metadata_" + sModule);
+        boolean fGrabSessionAttributesFromThread = SessionAttributeAwareThread.class.isAssignableFrom(Thread.currentThread().getClass());
+        LinkedHashMap<Comparable /*sample*/, LinkedHashMap<String, Object>> sessionObject = (LinkedHashMap<Comparable, LinkedHashMap<String, Object>>) (fGrabSessionAttributesFromThread ? ((SessionAttributeAwareThread) Thread.currentThread()).getSessionAttributes().get(targetTypeColName + "s_metadata_" + sModule) : session.getAttribute(targetTypeColName + "s_metadata_" + sModule));
         if (fIsAnonymous && sessionObject == null) {
             sessionObject = new LinkedHashMap<>();
             session.setAttribute(targetTypeColName + "s_metadata_" + sModule, sessionObject);
@@ -167,6 +169,7 @@ public class IndividualMetadataImport {
             HashMap<Integer, String> columnLabels = null;
             Integer idColumn = null;
             List<String> targetEntityList = new ArrayList<>();
+            int nProcessedEntityCount = 0;
             while (scanner.hasNextLine()) {
                 sLine = scanner.nextLine();
                 if (sLine.isEmpty() || sLine.replaceAll("\\s+", "").equals("#fjFile=PHENOTYPE")) {
@@ -225,6 +228,7 @@ public class IndividualMetadataImport {
                 	}
                 	existingEntityMetadata.putAll(additionalInfo);
                 }
+                nProcessedEntityCount++;
             }
 
             if (targetEntityList.size() == 0) { // a blank metadata file was submitted: let's delete any existing metadata
@@ -269,7 +273,7 @@ public class IndividualMetadataImport {
             		LOG.info("Database " + sModule + ": " + targetTypeColName + " metadata was deleted from session " + session.getId() + " for anonymous user");
             	else
             		LOG.info("Database " + sModule + ": " + targetTypeColName + " metadata was persisted into session " + session.getId() + " for anonymous user");
-                return 1;
+                return nProcessedEntityCount;
             }
         } finally {
             scanner.close();
@@ -278,7 +282,7 @@ public class IndividualMetadataImport {
         }
     }
 
-    public static int importBrapiMetadata(String sModule, HttpSession session, String endpointUrl, HashMap<String, String> externalToInternalIdMap, String username, String authToken, ProgressIndicator progress, String metadataType)  {
+    public static int importBrapiMetadata(String sModule, HttpSession session, String brapiEndpointUrl, String brapiToken, HashMap<String, String> externalToInternalIdMap, String username, ProgressIndicator progress, String metadataType)  {
         int modifiedCount = 0;
         try {
 	        if (externalToInternalIdMap != null && externalToInternalIdMap.isEmpty())
@@ -296,26 +300,26 @@ public class IndividualMetadataImport {
 	            }
 	        }
 
-	        String fixedEndpointUrl = !endpointUrl.endsWith("/") ? endpointUrl + "/" : endpointUrl;
+	        String fixedEndpointUrl = !brapiEndpointUrl.endsWith("/") ? brapiEndpointUrl + "/" : brapiEndpointUrl;
 	        if (fixedEndpointUrl.endsWith("/brapi/v1/")) {
 	            if (metadataType.equals("individual")) {
 	                modifiedCount += importBrapiV1Germplasm(
 	                        sModule,
 	                        session,
-	                        endpointUrl,
+	                        brapiEndpointUrl,
+	                        brapiToken,
 	                        externalToInternalIdMap,
 	                        username,
-	                        authToken,
 	                        progress
 	                );
 	            } else if (metadataType.equals("sample")) {
 	                modifiedCount += importBrapiV1Samples(
 	                        sModule,
 	                        session,
-	                        endpointUrl,
+	                        brapiEndpointUrl,
+	                        brapiToken,
 	                        externalToInternalIdMap,
 	                        username,
-	                        authToken,
 	                        progress
 	                );
 	            }
@@ -325,20 +329,20 @@ public class IndividualMetadataImport {
 	                modifiedCount += importBrapiV2Germplasm(
 	                        sModule,
 	                        session,
-	                        endpointUrl,
+	                        brapiEndpointUrl,
+	                        brapiToken,
 	                        externalToInternalIdMap,
 	                        username,
-	                        authToken,
 	                        progress
 	                );
 	             } else if (metadataType.equals("sample")) {
 	                modifiedCount += importBrapiV2Samples(
 	                        sModule,
 	                        session,
-	                        endpointUrl,
+	                        brapiEndpointUrl,
+	                        brapiToken,
 	                        externalToInternalIdMap,
 	                        username,
-	                        authToken,
 	                        progress
 	                );
 	            }
@@ -346,8 +350,9 @@ public class IndividualMetadataImport {
     	}
     	catch (Exception e) {
     		progress.setError(e.getMessage());
-    		LOG.error("Error importing metadata from BrAPI endpoint " + endpointUrl, e);
+    		LOG.error("Error importing metadata from BrAPI endpoint " + brapiEndpointUrl, e);
     	}
+        LOG.info("Database " + sModule + ": " + modifiedCount + " " + metadataType + "s updated with metadata using BrAPI endpoint " + brapiEndpointUrl);
         return modifiedCount;
     }
 
@@ -355,9 +360,9 @@ public class IndividualMetadataImport {
             String sModule,
             HttpSession session,
             String endpointUrl,
+            String authToken,
             HashMap<String, String> germplasmDbIdToIndividualMap,
             String username,
-            String authToken,
             ProgressIndicator progress) throws Exception {
 
     	MongoTemplate mongoTemplate = MongoTemplateManager.get(sModule);
@@ -393,7 +398,7 @@ public class IndividualMetadataImport {
 
         // Inserting germplasm and attributes information in DB as additional info
         BulkOperations bulkOperations = mongoTemplate.bulkOps(BulkOperations.BulkMode.ORDERED, username == null ? Individual.class : CustomIndividualMetadata.class);
-        int i = 0;
+        int i = 0, nProcessedEntityCount = 0;;
         for (String germplasmId : germplasmMap.keySet()) {
             Map<String, Object> aiMap = germplasmMap.get(germplasmId);
 
@@ -428,6 +433,7 @@ public class IndividualMetadataImport {
             	existingEntityMetadata.remove(BrapiService.BRAPI_FIELD_externalReferenceId);
             	existingEntityMetadata.remove(BrapiService.BRAPI_FIELD_externalReferenceSource);
             }
+            nProcessedEntityCount++;
         }
 
         progress.addStep("Persisting metadata found at " + endpointUrl);
@@ -438,7 +444,7 @@ public class IndividualMetadataImport {
             return wr.getModifiedCount() + wr.getUpserts().size();
         } else {
             LOG.info("Database " + sModule + ": individual metadata was persisted into session for anonymous user");
-            return 1;
+            return nProcessedEntityCount;
         }
     }
 
@@ -446,9 +452,9 @@ public class IndividualMetadataImport {
             String sModule,
             HttpSession session,
             String endpointUrl,
+            String authToken,
             HashMap<String, String> germplasmDbIdToIndividualMap,
             String username,
-            String authToken,
             ProgressIndicator progress) throws Exception {
 
     	MongoTemplate mongoTemplate = MongoTemplateManager.get(sModule);
@@ -483,7 +489,7 @@ public class IndividualMetadataImport {
 
         // Inserting germplasm and attributes information in DB as additional info
         BulkOperations bulkOperations = mongoTemplate.bulkOps(BulkOperations.BulkMode.ORDERED, username == null ? Individual.class : CustomIndividualMetadata.class);
-        int i = 0;
+        int i = 0, nProcessedEntityCount = 0;
         for (String germplasmId : germplasmMap.keySet()) {
             Map<String, Object> aiMap = germplasmMap.get(germplasmId);
 
@@ -518,6 +524,7 @@ public class IndividualMetadataImport {
             	existingEntityMetadata.remove(BrapiService.BRAPI_FIELD_externalReferenceId);
             	existingEntityMetadata.remove(BrapiService.BRAPI_FIELD_externalReferenceSource);
             }
+            nProcessedEntityCount++;
         }
 
         progress.addStep("Persisting metadata found at " + endpointUrl);
@@ -528,7 +535,7 @@ public class IndividualMetadataImport {
             return wr.getModifiedCount() + wr.getUpserts().size();
         } else {
             LOG.info("Database " + sModule + ": individual metadata was persisted into session for anonymous user");
-            return 1;
+            return nProcessedEntityCount;
         }
     }
     
@@ -593,19 +600,17 @@ public class IndividualMetadataImport {
             String sModule,
             HttpSession session,
             String endpointUrl,
+            String authToken,
             HashMap<String, String> sampleDbIdToIndividualMap,
             String username,
-            String authToken,
             ProgressIndicator progress) throws Exception {
 
     	MongoTemplate mongoTemplate = MongoTemplateManager.get(sModule);
     	Collection<String> idList = sampleDbIdToIndividualMap == null ? mongoTemplate.findDistinct(new Query(), GenotypingSample.FIELDNAME_NAME, GenotypingSample.class, String.class) : sampleDbIdToIndividualMap.keySet();
     	List<BrapiSample> sampleList = readBrapiV1Samples(endpointUrl, authToken, idList, progress);
     	
-        if (sampleList.isEmpty()) {
-        	progress.setError("None of the followinng sampleDbIds were found on " + endpointUrl + ": " + idList);
-            return 0;
-        }
+        if (sampleList.isEmpty())
+        	return setErrorIfNoneExists(progress, endpointUrl, "sample", idList);
 
         progress.addStep("Importing sample information from " + endpointUrl);
         progress.moveToNextStep();
@@ -625,9 +630,6 @@ public class IndividualMetadataImport {
         for (int i = 0; i < sampleList.size(); i++) {
             BrapiSample sample = sampleList.get(i);
             Map<String, Object> aiMap = mapper.convertValue(sample, Map.class);
-            //Map<String, Object> gMap = germplasmMap.get(sample.getGermplasmDbId());
-            //merging 2 maps
-            //aiMap.putAll(gMap);
 
             progress.setCurrentStepProgress((long) (i * 100f / sampleList.size()));
 
@@ -677,11 +679,17 @@ public class IndividualMetadataImport {
             return wr.getModifiedCount() + wr.getUpserts().size();
         } else {
             LOG.info("Database " + sModule + ": sample metadata was persisted into session for anonymous user");
-            return 1;
+            return sampleList.size();
         }
     }
     
-    public static List<Sample> readBrapiV2Samples(String endpointUrl, String authToken, Collection<String> sampleDbList, ProgressIndicator progress) throws Exception {
+    private static int setErrorIfNoneExists(ProgressIndicator progress, String endpointUrl, String mdType, Collection<String> idList) {
+    	if (progress.getError() == null)
+    		progress.setError("None of the following " + mdType + "DbIds were found on " + endpointUrl + ": " + idList);
+        return 0;
+    }
+
+	public static List<Sample> readBrapiV2Samples(String endpointUrl, String authToken, Collection<String> sampleDbList, ProgressIndicator progress) throws Exception {
         List<Sample> sampleList = new ArrayList<>();
 
         HashMap<String, Object> reqBody = new HashMap<>();
@@ -741,42 +749,17 @@ public class IndividualMetadataImport {
             String sModule,
             HttpSession session,
             String endpointUrl,
+            String authToken,
             HashMap<String, String> sampleDbIdToIndividualMap,
             String username,
-            String authToken,
             ProgressIndicator progress) throws Exception {
     	
     	MongoTemplate mongoTemplate = MongoTemplateManager.get(sModule);
     	Collection<String> idList = sampleDbIdToIndividualMap == null ? mongoTemplate.findDistinct(new Query(), GenotypingSample.FIELDNAME_NAME, GenotypingSample.class, String.class) : sampleDbIdToIndividualMap.keySet();
     	List<Sample> sampleList = readBrapiV2Samples(endpointUrl, authToken, idList, progress);
     	
-        if (sampleList.isEmpty()) {
-        	progress.setError("None of the followinng sampleDbIds were found on " + endpointUrl + ": " + idList);
-            return 0;
-        }
-    	
-        progress.addStep("Getting sample information from " + endpointUrl);
-        progress.moveToNextStep();
-
-        //fill map with germplasmDbIds to get linked information
-//        for (Sample sample : sampleList) {
-//            String sampleDbId = sample.getSampleDbId();
-//            String germplasmDbId = sample.getGermplasmDbId();
-//            String individual = externalToInternalIdMap.get(REF_TYPE_SAMPLE).get(sampleDbId);
-//            if (externalToInternalIdMap.get(REF_TYPE_GERMPLASM) == null) {
-//                externalToInternalIdMap.put(REF_TYPE_GERMPLASM, new HashMap<>());
-//            }
-//            externalToInternalIdMap.get(REF_TYPE_GERMPLASM).put(germplasmDbId, individual);
-//        }
-
-        //Getting information from germplasm and attributes linked to the samples
-//        boolean fCanQueryAttributes = client.hasCallSearchAttributes();
-//        Map<String, Map<String, Object>> germplasmMap = getBrapiV2GermplasmWithAttributes(service, endpointUrl, externalToInternalIdMap.get(REF_TYPE_GERMPLASM).keySet(), fCanQueryAttributes, progress);
-
-        if (sampleList.isEmpty()) {
-        	progress.setError("None of the followinng sampleDbIds were found on " + endpointUrl + ": " + idList);
-            return 0;
-        }
+        if (sampleList.isEmpty())
+        	return setErrorIfNoneExists(progress, endpointUrl, "sample", idList);
 
         progress.addStep("Importing sample information from " + endpointUrl);
         progress.moveToNextStep();
@@ -796,9 +779,6 @@ public class IndividualMetadataImport {
         for (int i = 0; i < sampleList.size(); i++) {
             Sample sample = sampleList.get(i);
             Map<String, Object> aiMap = mapper.convertValue(sample, Map.class);
-            //Map<String, Object> gMap = germplasmMap.get(sample.getGermplasmDbId());
-            //merging 2 maps
-            //aiMap.putAll(gMap);
 
             progress.setCurrentStepProgress((long) (i * 100f / sampleList.size()));
 
@@ -850,7 +830,7 @@ public class IndividualMetadataImport {
         }
         else {
             LOG.info("Database " + sModule + ": sample metadata was persisted into session for anonymous user");
-            return 1;
+            return sampleList.size();
         }
     }
 
@@ -963,8 +943,11 @@ public class IndividualMetadataImport {
 
         Map<String, Map<String, Object>> germplasmMap = new HashMap<>();
         if (germplasmList.isEmpty())
-        	progress.setError("None of the followinng germplasmDbIds were found on " + endPointUrl + ": " + germplasmDbIds);
+        	setErrorIfNoneExists(progress, endPointUrl, "germplasm", germplasmDbIds);
         else {
+            progress.addStep("Importing germplasm information from " + endPointUrl);
+            progress.moveToNextStep();
+
             Map<String, List<GermplasmAttributeValue>> attributesMap = new HashMap<>();
             if (fCanQueryAttributes) {
                 attributesMap = getBrapiV2GermplasmAttributes(service, endPointUrl, germplasmDbIds, progress);
@@ -1020,9 +1003,12 @@ public class IndividualMetadataImport {
 
         HashMap<String, Map<String, Object>> germplasmMap = new HashMap<>();
         if (germplasmList.isEmpty())
-        	progress.setError("None of the followinng germplasmDbIds were found on " + endPointUrl + ": " + germplasmDbIds);
-        else
-	        for (BrapiGermplasm germplasm : germplasmList) {
+        	setErrorIfNoneExists(progress, endPointUrl, "germplasm", germplasmDbIds);
+        else {
+            progress.addStep("Importing germplasm information from " + endPointUrl);
+            progress.moveToNextStep();
+
+            for (BrapiGermplasm germplasm : germplasmList) {
 	            Map<String, Object> aiMap = mapper.convertValue(germplasm, Map.class);
 	
 	            if (fCanQueryAttributes) {
@@ -1035,7 +1021,7 @@ public class IndividualMetadataImport {
 	            }
 	            germplasmMap.put(germplasm.getGermplasmDbId(), aiMap);
 	        }
+        }
         return germplasmMap;
     }
-
 }
