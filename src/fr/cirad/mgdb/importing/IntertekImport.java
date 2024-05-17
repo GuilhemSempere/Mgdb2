@@ -350,7 +350,7 @@ public class IntertekImport extends AbstractGenotypeImport {
     		}
 
             mongoTemplate.insert(m_providedIdToSampleMap.values(), GenotypingSample.class);
-            m_fSamplesPersisted = true;
+            setSamplesPersisted(true);
                         
             VCFFormatHeaderLine headerLineGT = new VCFFormatHeaderLine("GT", 1, VCFHeaderLineType.String, "Genotype");
             VCFFormatHeaderLine headerLineFI = new VCFFormatHeaderLine(AbstractVariantData.GT_FIELD_FI, 2, VCFHeaderLineType.Float, "Fluorescence intensity");
