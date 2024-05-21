@@ -438,7 +438,7 @@ public class DartImport extends AbstractGenotypeImport {
                                             finalMongoTemplate.insert(indsToAdd, Individual.class);
                                             indsToAdd = null;
                                         }
-                                        m_fSamplesPersisted = true;
+                                        setSamplesPersisted(true);
                                         nNumberOfVariantsToSaveAtOnce.set(sampleIds.size() == 0 ? nMaxChunkSize : Math.max(1, nMaxChunkSize / sampleIds.size()));
                                         LOG.info("Importing by chunks of size " + nNumberOfVariantsToSaveAtOnce.get());
                                     }

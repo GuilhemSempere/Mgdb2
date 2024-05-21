@@ -305,9 +305,9 @@ public class IntertekImport extends AbstractGenotypeImport {
                                         }
                                     }
                                     
-                                    String sIndividual = sampleToIndividualMap == null ? sIndOrSpId : sampleToIndividualMap.get(sIndOrSpId);
+                                	String sIndividual = determineIndividualName(sampleToIndividualMap, sIndOrSpId, progress);
                                 	if (sIndividual == null) {
-                                		progress.setError("Sample / individual mapping contains no individual for sample " + sIndOrSpId);
+                                		progress.setError("Unable to determine individual for sample " + sIndOrSpId);
                                 		break;
                                 	}
 
@@ -343,8 +343,14 @@ public class IntertekImport extends AbstractGenotypeImport {
                 }
             }
             
+            // make sure provided sample names do not conflict with existing ones
+            if (mongoTemplate.findOne(new Query(Criteria.where(GenotypingSample.FIELDNAME_NAME).in(m_providedIdToSampleMap.values().stream().map(sp -> sp.getSampleName()).toList())), GenotypingSample.class) != null) {
+    	        progress.setError("Some of the sample IDs provided in the mapping file already exist in this database!");
+    	        return null;
+    		}
+
             mongoTemplate.insert(m_providedIdToSampleMap.values(), GenotypingSample.class);
-            m_fSamplesPersisted = true;
+            setSamplesPersisted(true);
                         
             VCFFormatHeaderLine headerLineGT = new VCFFormatHeaderLine("GT", 1, VCFHeaderLineType.String, "Genotype");
             VCFFormatHeaderLine headerLineFI = new VCFFormatHeaderLine(AbstractVariantData.GT_FIELD_FI, 2, VCFHeaderLineType.Float, "Fluorescence intensity");

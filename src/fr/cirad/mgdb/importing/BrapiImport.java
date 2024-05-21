@@ -403,7 +403,7 @@ public class BrapiImport extends STDVariantImport {
 		            }
 				}
 				mongoTemplate.insert(m_providedIdToSampleMap.values(), GenotypingSample.class);
-				m_fSamplesPersisted = true;
+				setSamplesPersisted(true);
 				
 				// Initiate data export on server-side
 				Pager genotypePager = new Pager();
