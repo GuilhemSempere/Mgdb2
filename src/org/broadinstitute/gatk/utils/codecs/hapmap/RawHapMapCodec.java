@@ -31,6 +31,7 @@ import htsjdk.tribble.annotation.Strand;
 import htsjdk.tribble.readers.LineIterator;
 
 import java.io.IOException;
+import java.text.Normalizer;
 import java.util.Arrays;
 
 /**
@@ -123,7 +124,7 @@ public class RawHapMapCodec extends AsciiFeatureCodec<RawHapMapFeature> {
     @Override
     public Object readActualHeader(final LineIterator lineIterator) {
         this.headerLine = lineIterator.next();
-        return headerLine;
+        return Normalizer.normalize(headerLine, Normalizer.Form.NFD);	// try and account for special characters
     }
 
     @Override
