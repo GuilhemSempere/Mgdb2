@@ -715,8 +715,10 @@ public class IndividualMetadataImport {
 
         // Getting sample information by calling Brapi services
         if (client.hasCallSearchSample()) {
-            progress.addStep("Getting information list from " + endpointUrl);
-            progress.moveToNextStep();
+        	if (progress != null) {
+	            progress.addStep("Getting information list from " + endpointUrl);
+	            progress.moveToNextStep();
+        	}
 
             try {
                 Response<SuccessfulSearchResponse> response = service.searchSamples(reqBody).execute();
@@ -741,13 +743,17 @@ public class IndividualMetadataImport {
                         samplePager.paginate(br.getMetadata());
                     }
                 } catch (Exception f) {
-                    progress.setError("Error invoking BrAPI " + endpointUrl + "/search/samples call (" + (f instanceof AuthenticationException ? "authentication failed" : "no searchResultDbId returned and yet unable to directly obtain results") + ")");
+                	String sError = "Error invoking BrAPI " + endpointUrl + "/search/samples call (" + (f instanceof AuthenticationException ? "authentication failed" : "no searchResultDbId returned and yet unable to directly obtain results") + ")";
                     LOG.error(e);
-                    LOG.error(progress.getError(), f);
+                	if (progress != null) {
+                        progress.setError(sError);
+                		LOG.error(progress.getError(), f);
+                	}
                 }
             }
             catch (Throwable t) {
-            	progress.setError(endpointUrl + " - " + t.getMessage());
+            	if (progress != null)
+            		progress.setError(endpointUrl + " - " + t.getMessage());
             }
         }
         return sampleList;
