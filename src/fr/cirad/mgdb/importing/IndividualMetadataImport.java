@@ -80,6 +80,7 @@ import jhi.brapi.api.germplasm.BrapiGermplasm;
 import jhi.brapi.api.germplasm.BrapiGermplasmAttributes;
 import jhi.brapi.api.samples.BrapiSample;
 import jhi.brapi.api.search.BrapiSearchResult;
+import org.brapi.v2.model.ExternalReferences;
 import org.brapi.v2.model.ExternalReferencesInner;
 import retrofit2.Response;
 
@@ -421,13 +422,13 @@ public class IndividualMetadataImport {
 	            Update update = new Update();
 	            if (username == null) { // global metadata
 	                aiMap.forEach((k, v) -> update.set(Individual.SECTION_ADDITIONAL_INFO + "." + k, v));
-                        update.push(Individual.SECTION_ADDITIONAL_INFO + "." + BrapiService.BRAPI_FIELD_externalReferences, extRef);
+                        update.addToSet(Individual.SECTION_ADDITIONAL_INFO + "." + BrapiService.BRAPI_FIELD_externalReferences, extRef);
 	                update.unset(Individual.SECTION_ADDITIONAL_INFO + "." + BrapiService.BRAPI_FIELD_externalReferenceId);
 	                update.unset(Individual.SECTION_ADDITIONAL_INFO + "." + BrapiService.BRAPI_FIELD_externalReferenceSource);
 	                bulkOperations.updateMulti(new Query(Criteria.where("_id").is(internalId)), update);
 	            } else if (!fIsAnonymous) { // persistent user-level metadata
 	                aiMap.forEach((k, v) -> update.set(CustomIndividualMetadata.SECTION_ADDITIONAL_INFO + "." + k, v));
-                        update.push(CustomIndividualMetadata.SECTION_ADDITIONAL_INFO + "." + BrapiService.BRAPI_FIELD_externalReferences, extRef);
+                        update.addToSet(CustomIndividualMetadata.SECTION_ADDITIONAL_INFO + "." + BrapiService.BRAPI_FIELD_externalReferences, extRef);
 	                update.unset(CustomIndividualMetadata.SECTION_ADDITIONAL_INFO + "." + BrapiService.BRAPI_FIELD_externalReferenceId);
 	                update.unset(CustomIndividualMetadata.SECTION_ADDITIONAL_INFO + "." + BrapiService.BRAPI_FIELD_externalReferenceSource);
 	                bulkOperations.upsert(new Query(Criteria.where("_id").is(new CustomIndividualMetadata.CustomIndividualMetadataId(internalId, username))), update);
@@ -437,6 +438,14 @@ public class IndividualMetadataImport {
 	            		existingEntityMetadata = new LinkedHashMap<>();
 	            		sessionObject.put(internalId, existingEntityMetadata);
 	            	}
+                        
+                        if (aiMap.get(BrapiService.BRAPI_FIELD_externalReferences) != null) {
+                            ExternalReferences refs = mapper.convertValue(aiMap.get(BrapiService.BRAPI_FIELD_externalReferences), ExternalReferences.class);
+                            refs.add(extRef);                            
+                        } else {
+                            aiMap.put(BrapiService.BRAPI_FIELD_externalReferences, new ExternalReferences().add(extRef));
+                        }
+                        
 	            	existingEntityMetadata.putAll(aiMap);
 	            	existingEntityMetadata.remove(BrapiService.BRAPI_FIELD_externalReferenceId);
 	            	existingEntityMetadata.remove(BrapiService.BRAPI_FIELD_externalReferenceSource);
@@ -517,16 +526,16 @@ public class IndividualMetadataImport {
                     extRef.setReferenceId(germplasmId);
                     extRef.setReferenceSource(endpointUrl);
                     
-	            Update update = new Update();
+	            Update update = new Update();                    
 	            if (username == null) { // global metadata
 	                aiMap.forEach((k, v) -> update.set(Individual.SECTION_ADDITIONAL_INFO + "." + k, v));
-                        update.push(Individual.SECTION_ADDITIONAL_INFO + "." + BrapiService.BRAPI_FIELD_externalReferences, extRef);
+                        update.addToSet(Individual.SECTION_ADDITIONAL_INFO + "." + BrapiService.BRAPI_FIELD_externalReferences, extRef);
 	                update.unset(Individual.SECTION_ADDITIONAL_INFO + "." + BrapiService.BRAPI_FIELD_externalReferenceId);
 	                update.unset(Individual.SECTION_ADDITIONAL_INFO + "." + BrapiService.BRAPI_FIELD_externalReferenceSource);
 	                bulkOperations.updateMulti(new Query(Criteria.where("_id").is(internalId)), update);
 	            } else if (!fIsAnonymous) { // persistent user-level metadata
 	                aiMap.forEach((k, v) -> update.set(CustomIndividualMetadata.SECTION_ADDITIONAL_INFO + "." + k, v));
-                        update.push(CustomIndividualMetadata.SECTION_ADDITIONAL_INFO + "." + BrapiService.BRAPI_FIELD_externalReferences, extRef);
+                        update.addToSet(CustomIndividualMetadata.SECTION_ADDITIONAL_INFO + "." + BrapiService.BRAPI_FIELD_externalReferences, extRef);
 	                update.unset(CustomIndividualMetadata.SECTION_ADDITIONAL_INFO + "." + BrapiService.BRAPI_FIELD_externalReferenceId);
 	                update.unset(CustomIndividualMetadata.SECTION_ADDITIONAL_INFO + "." + BrapiService.BRAPI_FIELD_externalReferenceSource);
 	                bulkOperations.upsert(new Query(Criteria.where("_id").is(new CustomIndividualMetadata.CustomIndividualMetadataId(internalId, username))), update);
@@ -536,7 +545,14 @@ public class IndividualMetadataImport {
 	            		existingEntityMetadata = new LinkedHashMap<>();
 	            		sessionObject.put(internalId, existingEntityMetadata);
 	            	}
-                        aiMap.put(BrapiService.BRAPI_FIELD_externalReferences, extRef);
+                        if (aiMap.get(BrapiService.BRAPI_FIELD_externalReferences) != null) {
+                            ExternalReferences refs = mapper.convertValue(aiMap.get(BrapiService.BRAPI_FIELD_externalReferences), ExternalReferences.class);
+                            if (refs.contains(extRef)) {
+                                refs.add(extRef);
+                            }                            
+                        } else {
+                            aiMap.put(BrapiService.BRAPI_FIELD_externalReferences, new ExternalReferences().add(extRef));
+                        }
 	            	existingEntityMetadata.putAll(aiMap);
 	            	existingEntityMetadata.remove(BrapiService.BRAPI_FIELD_externalReferenceId);
 	            	existingEntityMetadata.remove(BrapiService.BRAPI_FIELD_externalReferenceSource);
@@ -676,13 +692,13 @@ public class IndividualMetadataImport {
 	       		Update update = new Update();
 	            if (username == null) { // global metadata
 	                aiMap.forEach((k, v) -> update.set(GenotypingSample.SECTION_ADDITIONAL_INFO + "." + k, v));
-                        update.push(GenotypingSample.SECTION_ADDITIONAL_INFO + "." + BrapiService.BRAPI_FIELD_externalReferences, extRef);
+                        update.addToSet(GenotypingSample.SECTION_ADDITIONAL_INFO + "." + BrapiService.BRAPI_FIELD_externalReferences, extRef);
 	                bulkOperations.updateMulti(new Query(Criteria.where(GenotypingSample.FIELDNAME_NAME).is(internalId)), update);
 	                update.unset(GenotypingSample.SECTION_ADDITIONAL_INFO + "." + BrapiService.BRAPI_FIELD_externalReferenceId);
 	                update.unset(GenotypingSample.SECTION_ADDITIONAL_INFO + "." + BrapiService.BRAPI_FIELD_externalReferenceSource);
 	            } else if (!fIsAnonymous) { // persistent user-level metadata
 	                aiMap.forEach((k, v) -> update.set(CustomSampleMetadata.SECTION_ADDITIONAL_INFO + "." + k, v));
-                        update.push(CustomSampleMetadata.SECTION_ADDITIONAL_INFO + "." + BrapiService.BRAPI_FIELD_externalReferences, extRef);
+                        update.addToSet(CustomSampleMetadata.SECTION_ADDITIONAL_INFO + "." + BrapiService.BRAPI_FIELD_externalReferences, extRef);
 	                update.unset(CustomSampleMetadata.SECTION_ADDITIONAL_INFO + "." + BrapiService.BRAPI_FIELD_externalReferenceId);
 	                update.unset(CustomSampleMetadata.SECTION_ADDITIONAL_INFO + "." + BrapiService.BRAPI_FIELD_externalReferenceSource);
 	           		bulkOperations.upsert(new Query(new Criteria().andOperator(Criteria.where("_id." + CustomSampleMetadataId.FIELDNAME_USER).is(username), new Criteria().andOperator(Criteria.where("_id." + CustomSampleMetadataId.FIELDNAME_SAMPLE_ID).is(spId)))), update);
@@ -692,7 +708,14 @@ public class IndividualMetadataImport {
 	            		existingEntityMetadata = new LinkedHashMap<>();
 	            		sessionObject.put(spId, existingEntityMetadata);
 	            	}
-                        aiMap.put(BrapiService.BRAPI_FIELD_externalReferences, extRef);
+                        if (aiMap.get(BrapiService.BRAPI_FIELD_externalReferences) != null) {
+                            ExternalReferences refs = mapper.convertValue(aiMap.get(BrapiService.BRAPI_FIELD_externalReferences), ExternalReferences.class);
+                            if (refs.contains(extRef)) {
+                                refs.add(extRef);
+                            }                            
+                        } else {
+                            aiMap.put(BrapiService.BRAPI_FIELD_externalReferences, new ExternalReferences().add(extRef));
+                        }
 	            	existingEntityMetadata.putAll(aiMap);
 	            	existingEntityMetadata.remove(BrapiService.BRAPI_FIELD_externalReferenceId);
 	            	existingEntityMetadata.remove(BrapiService.BRAPI_FIELD_externalReferenceSource);
@@ -842,13 +865,13 @@ public class IndividualMetadataImport {
 	            Update update = new Update();
 	            if (username == null) { // global metadata
 	                aiMap.forEach((k, v) -> update.set(GenotypingSample.SECTION_ADDITIONAL_INFO + "." + k, v));
-                        update.push(Individual.SECTION_ADDITIONAL_INFO + "." + BrapiService.BRAPI_FIELD_externalReferences, extRef);
+                        update.addToSet(Individual.SECTION_ADDITIONAL_INFO + "." + BrapiService.BRAPI_FIELD_externalReferences, extRef);
 	                update.unset(GenotypingSample.SECTION_ADDITIONAL_INFO + "." + BrapiService.BRAPI_FIELD_externalReferenceId);
 	                update.unset(GenotypingSample.SECTION_ADDITIONAL_INFO + "." + BrapiService.BRAPI_FIELD_externalReferenceSource);
 	                bulkOperations.updateMulti(new Query(Criteria.where(GenotypingSample.FIELDNAME_NAME).is(internalId)), update);
 	            } else if (!fIsAnonymous) { // persistent user-level metadata
 	                aiMap.forEach((k, v) -> update.set(CustomSampleMetadata.SECTION_ADDITIONAL_INFO + "." + k, v));
-                        update.push(CustomSampleMetadata.SECTION_ADDITIONAL_INFO + "." + BrapiService.BRAPI_FIELD_externalReferences, extRef);
+                        update.addToSet(CustomSampleMetadata.SECTION_ADDITIONAL_INFO + "." + BrapiService.BRAPI_FIELD_externalReferences, extRef);
 	                update.unset(CustomSampleMetadata.SECTION_ADDITIONAL_INFO + "." + BrapiService.BRAPI_FIELD_externalReferenceId);
 	                update.unset(CustomSampleMetadata.SECTION_ADDITIONAL_INFO + "." + BrapiService.BRAPI_FIELD_externalReferenceSource);
 	           		bulkOperations.upsert(new Query(new Criteria().andOperator(Criteria.where("_id." + CustomSampleMetadataId.FIELDNAME_USER).is(username), new Criteria().andOperator(Criteria.where("_id." + CustomSampleMetadataId.FIELDNAME_SAMPLE_ID).is(spId)))), update);
@@ -858,7 +881,14 @@ public class IndividualMetadataImport {
 	            		existingEntityMetadata = new LinkedHashMap<>();
 	            		sessionObject.put(spId, existingEntityMetadata);
 	            	}
-                        aiMap.put(BrapiService.BRAPI_FIELD_externalReferences, extRef);
+                        if (aiMap.get(BrapiService.BRAPI_FIELD_externalReferences) != null) {
+                            ExternalReferences refs = mapper.convertValue(aiMap.get(BrapiService.BRAPI_FIELD_externalReferences), ExternalReferences.class);
+                            if (refs.contains(extRef)) {
+                                refs.add(extRef);
+                            }                            
+                        } else {
+                            aiMap.put(BrapiService.BRAPI_FIELD_externalReferences, new ExternalReferences().add(extRef));
+                        }
 	            	existingEntityMetadata.putAll(aiMap);
 	            	existingEntityMetadata.remove(BrapiService.BRAPI_FIELD_externalReferenceId);
 	            	existingEntityMetadata.remove(BrapiService.BRAPI_FIELD_externalReferenceSource);
