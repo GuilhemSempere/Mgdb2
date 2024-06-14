@@ -458,10 +458,8 @@ public class IntertekImport extends AbstractGenotypeImport {
 			List<String> values = Helper.split(sLine, ",");
 			if (values.containsAll(dataHeaderList))
 				fInDataSection = true;
-			else if (fInDataSection) {
-				if (!sampleIDs.add(values.get(subjectColIndex)))
-					break;	// looks like we've got them all
-			}
+			else if (fInDataSection)
+				sampleIDs.add(values.get(subjectColIndex));
 		}
 		scanner.close();
 		attemptPreloadingIndividuals(sampleIDs, progress);
