@@ -20,6 +20,7 @@ import java.text.NumberFormat;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Timer;
@@ -72,6 +73,8 @@ public class ProgressIndicator
 
 	/** The us number format. */
 	static private NumberFormat usNumberFormat = NumberFormat.getNumberInstance(Locale.US);
+
+	static private HashSet<String> cancelledRemovals = new HashSet<>();
 
 	/**
 	 * Instantiates a new progress indicator.
@@ -190,7 +193,7 @@ public class ProgressIndicator
 	 */
 	public void setError(String error) {
 		m_error = error;
-		remove(2500);
+//		remove(2500);
 	}
 	
 	/**
@@ -252,8 +255,14 @@ public class ProgressIndicator
 		new Timer().schedule(new TimerTask() {
 		    @Override
 		    public void run() {
-		    	progressIndicators.remove(m_processId);
-		    	LOG.debug("removed " + (hashCode()  + ": " + getProgressDescription()) + " for process " + m_processId);
+		    	if (cancelledRemovals.contains(m_processId)) {
+		    		LOG.debug("cancelled removal " + (hashCode()  + ": " + getProgressDescription()) + " for process " + m_processId);
+		    		cancelledRemovals.remove(m_processId);
+		    	}
+		    	else {
+			    	progressIndicators.remove(m_processId);
+			    	LOG.debug("removed " + (hashCode()  + ": " + getProgressDescription()) + " for process " + m_processId);
+		    	}
 		    }
 		}, delay);
 	}
@@ -317,12 +326,12 @@ public class ProgressIndicator
 	{
 		ProgressIndicator progress = progressIndicators.get(sProcessID);
 		if (progress != null && (progress.isComplete() || progress.isAborted() || progress.getError() != null))
-	    	progress.remove(progress.isAborted() ? 0 : 2500);	// we don't want to keep them forever
+	    	progress.remove(2500);	// we don't want to keep them forever
 
-//		LOG.debug("returning " + (progress == null ? progress : (progress.hashCode()  + ": " + progress.getProgressDescription())) + " for process " + sProcessID);
+//		LOG.info("returning " + (progress == null ? progress : (progress.hashCode()  + ": " + progress.getProgressDescription())) + " for process " + sProcessID);
 		return progress;
 	}
-	
+
 	/**
 	 * Register progress indicator.
 	 *
@@ -331,6 +340,8 @@ public class ProgressIndicator
 	public static void registerProgressIndicator(ProgressIndicator progress)
 	{
 //		LOG.debug("adding " + (progress.hashCode()  + ": " + progress.getProgressDescription()) + " for process " + progress.getProcessId());
+		if (progressIndicators.containsKey(progress.getProcessId()))
+			cancelledRemovals.add(progress.getProcessId());		// client is re-querying before we had the time to remove this process from our list: cancel its removal otherwise it won't be able to track it
 		progressIndicators.put(progress.getProcessId(), progress);
 	}
 }

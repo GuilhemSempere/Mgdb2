@@ -35,12 +35,21 @@ public class SessionAttributeAwareThread extends Thread {
 		storeSessionAttributes(session);
 		sc = session.getServletContext();
 	}
+
+	public SessionAttributeAwareThread(SessionAttributeAwareThread saat) {
+		storeSessionAttributes(saat);
+		sc = saat.getServletContext();
+	}
 	
+	protected void storeSessionAttributes(SessionAttributeAwareThread saat) {
+		sessionAttributes = saat.getSessionAttributes();
+	}
+
 	public Map<String, Object> getSessionAttributes() {
 		return sessionAttributes;
 	}
 	
-	public void storeSessionAttributes(HttpSession session) {
+	protected void storeSessionAttributes(HttpSession session) {
        Enumeration<String> attrNames = session.getAttributeNames();
        while (attrNames.hasMoreElements() ) {
             String name = attrNames.nextElement();
