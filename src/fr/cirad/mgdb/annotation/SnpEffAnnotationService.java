@@ -3,7 +3,6 @@ package fr.cirad.mgdb.annotation;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileDescriptor;
-import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.FileWriter;
 import java.io.IOException;
@@ -24,7 +23,6 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
-import fr.cirad.mgdb.model.mongo.maintypes.Assembly;
 import org.apache.log4j.Logger;
 import org.bson.Document;
 import org.snpeff.SnpEff;
@@ -45,11 +43,13 @@ import com.mongodb.BasicDBObject;
 import com.mongodb.client.FindIterable;
 
 import fr.cirad.mgdb.importing.VcfImport;
+import fr.cirad.mgdb.model.mongo.maintypes.Assembly;
 import fr.cirad.mgdb.model.mongo.maintypes.DBVCFHeader;
 import fr.cirad.mgdb.model.mongo.maintypes.DBVCFHeader.VcfHeaderId;
 import fr.cirad.mgdb.model.mongo.maintypes.GenotypingProject;
 import fr.cirad.mgdb.model.mongo.maintypes.VariantRunData;
 import fr.cirad.mgdb.model.mongo.subtypes.Run;
+import fr.cirad.tools.Helper;
 import fr.cirad.tools.ProgressIndicator;
 import fr.cirad.tools.mongo.MongoTemplateManager;
 import htsjdk.variant.vcf.VCFHeaderLineCount;
@@ -75,7 +75,7 @@ public class SnpEffAnnotationService {
 
 	public static String annotateRun(String configFile, String dataPath, String module, int projectId, String run, String snpEffDatabase, ProgressIndicator progress) {
 		MongoTemplate template = MongoTemplateManager.get(module);
-		int nAssembly = Assembly.getThreadBoundAssembly();
+		Integer nAssembly = Assembly.getThreadBoundAssembly();
 
 		progress.addStep("Loading config");
 		progress.moveToNextStep();
@@ -91,11 +91,13 @@ public class SnpEffAnnotationService {
 		BasicDBObject vrdQuery = new BasicDBObject();
 		vrdQuery.put("_id." + Run.FIELDNAME_PROJECT_ID, projectId);
 		vrdQuery.put("_id." + Run.FIELDNAME_RUNNAME, run);
+		
+		long nTotalNumberOfVRDInDB = Helper.estimDocCount(template, VariantRunData.class);
 		FindIterable<Document> variantRunData = template.getCollection(MongoTemplateManager.getMongoCollectionName(VariantRunData.class)).find(vrdQuery).batchSize(100);
 
 		progress.addStep("Processing variants");
 		progress.moveToNextStep();
-		int processedVariants = 0;
+		int processedVrdCount = 0;
 		
 		HashMap<String, String> unplacedVariants = new HashMap<>();
 		Pattern digitPattern = Pattern.compile("[0-9]+"); 
@@ -122,8 +124,8 @@ public class SnpEffAnnotationService {
 			VariantRunData result = annotateVariant(entry, predictor, projectEffects);
 			if (result != null) {
 				template.save(result);
-				processedVariants += 1;
-				progress.setCurrentStepProgress(processedVariants);
+				processedVrdCount += 1;
+				progress.setCurrentStepProgress(processedVrdCount * 100 / nTotalNumberOfVRDInDB);
 			} else {
 				LOG.warn("Failed to annotate variant " + vrd.getId());
 			}
