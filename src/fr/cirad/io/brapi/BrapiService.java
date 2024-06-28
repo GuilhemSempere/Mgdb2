@@ -39,8 +39,10 @@ public interface BrapiService {
     public static final String BRAPI_FIELD_germplasmDbId = "germplasmDbId";
     public static final String BRAPI_FIELD_sampleDbId = "sampleDbId";
     public static final String BRAPI_FIELD_extGermplasmDbId = "extGermplasmDbId";
+    public static final String BRAPI_FIELD_extSampleDbId = "extSampleDbId";
     public static final String BRAPI_FIELD_externalReferenceId = "extRefId";
     public static final String BRAPI_FIELD_externalReferenceSource = "extRefSrc";
+    public static final String BRAPI_FIELD_externalReferences = "externalReferences";
 
     @GET(value = "calls")
     public Call<BrapiListResource<BrapiCall>> getCalls(@Query(value = "pageSize") String var1, @Query(value = "page") String var2);

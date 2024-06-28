@@ -28,6 +28,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Scanner;
 import java.util.Set;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ExecutorService;
@@ -58,6 +59,7 @@ import fr.cirad.mgdb.model.mongo.subtypes.Run;
 import fr.cirad.mgdb.model.mongo.subtypes.SampleGenotype;
 import fr.cirad.mgdb.model.mongo.subtypes.VariantRunDataId;
 import fr.cirad.mgdb.model.mongodao.MgdbDao;
+import fr.cirad.tools.Helper;
 import fr.cirad.tools.ProgressIndicator;
 import fr.cirad.tools.mongo.AutoIncrementCounter;
 import fr.cirad.tools.mongo.MongoTemplateManager;
@@ -81,7 +83,7 @@ public class IntertekImport extends AbstractGenotypeImport {
      */
     private String m_processID;
 
-    private boolean fImportUnknownVariants = false;
+//    private boolean fImportUnknownVariants = false;
 
     public boolean m_fCloseContextOpenAfterImport = false;
 
@@ -191,13 +193,16 @@ public class IntertekImport extends AbstractGenotypeImport {
             int xColIndex = Arrays.asList(snpHeader).indexOf("AlleleX");
             String[] limit = {"Scaling"};
 
-            final String[] dataHeader = {"DaughterPlate","MasterPlate","MasterWell","Call","X","Y","SNPID","SubjectID","Norm","Carrier","DaughterWell","LongID"};
-            int variantColIndex = Arrays.asList(dataHeader).indexOf("SNPID");
-            int indColIndex = Arrays.asList(dataHeader).indexOf("SubjectID");
-            int callColIndex = Arrays.asList(dataHeader).indexOf("Call");
-            int xFIColIndex = Arrays.asList(dataHeader).indexOf("X");
-            int yFIColIndex = Arrays.asList(dataHeader).indexOf("Y");
-            int masterPlateColIndex = Arrays.asList(dataHeader).indexOf("MasterPlate");
+    		List<String> dataHeaderList = Arrays.asList(new String[]{"DaughterPlate","MasterPlate","MasterWell","Call","X","Y","SNPID","SubjectID","Norm","Carrier","DaughterWell","LongID"});
+
+            int variantColIndex = dataHeaderList.indexOf("SNPID");
+            int indColIndex = dataHeaderList.indexOf("SubjectID");
+            int callColIndex = dataHeaderList.indexOf("Call");
+            int xFIColIndex = dataHeaderList.indexOf("X");
+            int yFIColIndex = dataHeaderList.indexOf("Y");
+            int masterPlateColIndex = dataHeaderList.indexOf("MasterPlate");
+            
+            readAllSampleIDsToPreloadIndividuals(fileURL, dataHeaderList, indColIndex, progress);
 
             Set<VariantData> variantsToSave = new HashSet<>();
             HashMap<String /*variant ID*/, List<String> /*allelesList*/> variantAllelesMap = new HashMap<>();
@@ -263,7 +268,7 @@ public class IntertekImport extends AbstractGenotypeImport {
                             project.getAlleleCounts().add(variant.getKnownAlleles().size());
                         }
 
-                        if (Arrays.asList(values).containsAll(Arrays.asList(dataHeader))) {
+                        if (Arrays.asList(values).containsAll(dataHeaderList)) {
                             dataPart = true;
                         } else {
                             if (dataPart) {
@@ -305,13 +310,13 @@ public class IntertekImport extends AbstractGenotypeImport {
                                         }
                                     }
                                     
-                                    String sIndividual = sampleToIndividualMap == null ? sIndOrSpId : sampleToIndividualMap.get(sIndOrSpId);
+                                	String sIndividual = determineIndividualName(sampleToIndividualMap, sIndOrSpId, progress);
                                 	if (sIndividual == null) {
-                                		progress.setError("Sample / individual mapping contains no individual for sample " + sIndOrSpId);
+                                		progress.setError("Unable to determine individual for sample " + sIndOrSpId);
                                 		break;
                                 	}
 
-                                    GenotypingSample sample = m_providedIdToSampleMap.get(sIndividual);
+                                    GenotypingSample sample = m_providedIdToSampleMap.get(sIndOrSpId);
                                     if (sample == null) {
                                         Individual ind = mongoTemplate.findById(sIndividual, Individual.class);
                                         if (ind == null)
@@ -320,7 +325,7 @@ public class IntertekImport extends AbstractGenotypeImport {
                                         int sampleId = AutoIncrementCounter.getNextSequence(mongoTemplate, MongoTemplateManager.getMongoCollectionName(GenotypingSample.class));
                                         sample = new GenotypingSample(sampleId, project.getId(), sRun, sIndividual, sampleToIndividualMap == null ? null : sIndOrSpId);
                                         sample.getAdditionalInfo().put("masterPlate", masterPlate);
-                                        m_providedIdToSampleMap.put(sIndividual, sample);
+                                        m_providedIdToSampleMap.put(sIndOrSpId, sample);
                                     }
 
                                     SampleGenotype sampleGt = new SampleGenotype(gtCode);
@@ -343,8 +348,14 @@ public class IntertekImport extends AbstractGenotypeImport {
                 }
             }
             
+            // make sure provided sample names do not conflict with existing ones
+            if (mongoTemplate.findOne(new Query(Criteria.where(GenotypingSample.FIELDNAME_NAME).in(m_providedIdToSampleMap.values().stream().map(sp -> sp.getSampleName()).toList())), GenotypingSample.class) != null) {
+    	        progress.setError("Some of the sample IDs provided in the mapping file already exist in this database!");
+    	        return null;
+    		}
+
             mongoTemplate.insert(m_providedIdToSampleMap.values(), GenotypingSample.class);
-            m_fSamplesPersisted = true;
+            setSamplesPersisted(true);
                         
             VCFFormatHeaderLine headerLineGT = new VCFFormatHeaderLine("GT", 1, VCFHeaderLineType.String, "Genotype");
             VCFFormatHeaderLine headerLineFI = new VCFFormatHeaderLine(AbstractVariantData.GT_FIELD_FI, 2, VCFHeaderLineType.Float, "Fluorescence intensity");
@@ -437,4 +448,20 @@ public class IntertekImport extends AbstractGenotypeImport {
             }
         }
     }
+
+	private void readAllSampleIDsToPreloadIndividuals(URL fileURL, List<String> dataHeaderList, int subjectColIndex, ProgressIndicator progress) throws Exception {
+		Scanner scanner = new Scanner(new File(fileURL.getFile()));
+		boolean fInDataSection = false;
+		HashSet<String> sampleIDs = new HashSet<>();
+		while (scanner.hasNextLine()) {
+			String sLine = scanner.nextLine();
+			List<String> values = Helper.split(sLine, ",");
+			if (values.containsAll(dataHeaderList))
+				fInDataSection = true;
+			else if (fInDataSection)
+				sampleIDs.add(values.get(subjectColIndex));
+		}
+		scanner.close();
+		attemptPreloadingIndividuals(sampleIDs, progress);
+	}
 }

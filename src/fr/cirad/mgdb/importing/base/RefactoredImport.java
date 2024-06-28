@@ -32,6 +32,7 @@ import org.apache.commons.lang3.StringUtils;
 import org.apache.log4j.Logger;
 import org.bson.types.ObjectId;
 import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
 
 import fr.cirad.mgdb.model.mongo.maintypes.Assembly;
@@ -484,14 +485,15 @@ public abstract class RefactoredImport extends AbstractGenotypeImport {
         return result;
     }
     
-    protected void createSamples(MongoTemplate mongoTemplate, int projId, String sRun, HashMap<String, String> sampleToIndividualMap, LinkedHashMap<String, String> orderedIndividualToPopulationMap, ProgressIndicator progress) {
+    protected void createSamples(MongoTemplate mongoTemplate, int projId, String sRun, HashMap<String, String> sampleToIndividualMap, LinkedHashMap<String, String> orderedIndividualToPopulationMap, ProgressIndicator progress) throws Exception {
         m_providedIdToSampleMap = new HashMap<String /*individual*/, GenotypingSample>();
         HashSet<Individual> indsToAdd = new HashSet<>();
         boolean fDbAlreadyContainedIndividuals = mongoTemplate.findOne(new Query(), Individual.class) != null;
+        attemptPreloadingIndividuals(orderedIndividualToPopulationMap.keySet(), progress);
         for (String sIndOrSpId : orderedIndividualToPopulationMap.keySet()) {
-        	String sIndividual = sampleToIndividualMap == null ? sIndOrSpId : sampleToIndividualMap.get(sIndOrSpId);
+        	String sIndividual = determineIndividualName(sampleToIndividualMap, sIndOrSpId, progress);
         	if (sIndividual == null) {
-        		progress.setError("Sample / individual mapping contains no individual for sample " + sIndOrSpId);
+        		progress.setError("Unable to determine individual for sample " + sIndOrSpId);
         		return;
         	}
         	
@@ -507,11 +509,17 @@ public abstract class RefactoredImport extends AbstractGenotypeImport {
             m_providedIdToSampleMap.put(sIndOrSpId, new GenotypingSample(sampleId, projId, sRun, sIndividual, sampleToIndividualMap == null ? null : sIndOrSpId));   // add a sample for this individual to the project
         }
         
+        // make sure provided sample names do not conflict with existing ones
+        if (mongoTemplate.findOne(new Query(Criteria.where(GenotypingSample.FIELDNAME_NAME).in(m_providedIdToSampleMap.values().stream().map(sp -> sp.getSampleName()).toList())), GenotypingSample.class) != null) {
+	        progress.setError("Some of the sample IDs provided in the mapping file already exist in this database!");
+	        return;
+		}
+
         mongoTemplate.insert(m_providedIdToSampleMap.values(), GenotypingSample.class);
         if (!indsToAdd.isEmpty()) {
         	mongoTemplate.insert(indsToAdd, Individual.class);
             indsToAdd = null;
         }	                    					
-        m_fSamplesPersisted = true;
+        setSamplesPersisted(true);
     }
 }
