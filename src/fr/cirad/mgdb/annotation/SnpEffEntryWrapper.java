@@ -40,7 +40,7 @@ public class SnpEffEntryWrapper {
 				String.join(",", entry.getKnownAlleles().subList(1, entry.getKnownAlleles().size())), entry.getVariantId(), true);
 	}
 
-	public VariantRunData buildANN() {
+	public HashMap<String, Object> buildANN() {
 		StringBuilder annotation = new StringBuilder();
 		ArrayList<String> effectNames = new ArrayList<>();
 		ArrayList<String> effectGenes = new ArrayList<>();
@@ -53,11 +53,11 @@ public class SnpEffEntryWrapper {
 		}
 		annotation.setLength(annotation.length() - 1);  // Trim the last comma
 
-		HashMap<String, Object> info = entry.getAdditionalInfo();
+		HashMap<String, Object> info = new HashMap<>();
 		info.put(VcfImport.ANNOTATION_FIELDNAME_ANN, annotation.toString());
 		info.put(VariantRunData.FIELDNAME_ADDITIONAL_INFO_EFFECT_NAME, effectNames);
 		info.put(VariantRunData.FIELDNAME_ADDITIONAL_INFO_EFFECT_GENE, effectGenes);
 
-		return entry;
+		return info;
 	}
 }

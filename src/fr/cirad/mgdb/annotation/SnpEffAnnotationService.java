@@ -19,9 +19,13 @@ import java.util.List;
 import java.util.Set;
 import java.util.TreeMap;
 import java.util.TreeSet;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import org.apache.log4j.Logger;
 import org.bson.Document;
@@ -37,10 +41,16 @@ import org.snpeff.util.Download;
 import org.snpeff.util.DownloadWithProgress;
 import org.snpeff.util.Log;
 import org.snpeff.vcf.EffFormatVersion;
+import org.springframework.data.mongodb.core.BulkOperations;
 import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.data.mongodb.core.query.Criteria;
+import org.springframework.data.mongodb.core.query.Query;
+import org.springframework.data.mongodb.core.query.Update;
 
 import com.mongodb.BasicDBObject;
-import com.mongodb.client.FindIterable;
+import com.mongodb.bulk.BulkWriteResult;
+import com.mongodb.client.MongoCursor;
+import com.mongodb.client.model.Projections;
 
 import fr.cirad.mgdb.importing.VcfImport;
 import fr.cirad.mgdb.model.mongo.maintypes.Assembly;
@@ -49,6 +59,7 @@ import fr.cirad.mgdb.model.mongo.maintypes.DBVCFHeader.VcfHeaderId;
 import fr.cirad.mgdb.model.mongo.maintypes.GenotypingProject;
 import fr.cirad.mgdb.model.mongo.maintypes.VariantRunData;
 import fr.cirad.mgdb.model.mongo.subtypes.Run;
+import fr.cirad.mgdb.model.mongo.subtypes.VariantRunDataId;
 import fr.cirad.tools.Helper;
 import fr.cirad.tools.ProgressIndicator;
 import fr.cirad.tools.mongo.MongoTemplateManager;
@@ -73,7 +84,7 @@ public class SnpEffAnnotationService {
     	Log.setFatalErrorBehabiour(Log.FatalErrorBehabiour.EXCEPTION);
     }
 
-	public static String annotateRun(String configFile, String dataPath, String module, int projectId, String run, String snpEffDatabase, ProgressIndicator progress) {
+	public static String annotateRun(String configFile, String dataPath, String module, int projectId, String run, String snpEffDatabase, ProgressIndicator progress) throws InterruptedException {
 		MongoTemplate template = MongoTemplateManager.get(module);
 		Integer nAssembly = Assembly.getThreadBoundAssembly();
 
@@ -92,44 +103,73 @@ public class SnpEffAnnotationService {
 		vrdQuery.put("_id." + Run.FIELDNAME_PROJECT_ID, projectId);
 		vrdQuery.put("_id." + Run.FIELDNAME_RUNNAME, run);
 		
+		int nBatchSize = 200;
 		long nTotalNumberOfVRDInDB = Helper.estimDocCount(template, VariantRunData.class);
-		FindIterable<Document> variantRunData = template.getCollection(MongoTemplateManager.getMongoCollectionName(VariantRunData.class)).find(vrdQuery).batchSize(100);
+		MongoCursor<Document> vrdCursor = template.getCollection(MongoTemplateManager.getMongoCollectionName(VariantRunData.class)).find(vrdQuery).projection(Projections.fields(Projections.include(VariantRunData.FIELDNAME_KNOWN_ALLELES, VariantRunData.FIELDNAME_REFERENCE_POSITION))).batchSize(nBatchSize).cursor();
 
 		progress.addStep("Processing variants");
 		progress.moveToNextStep();
-		int processedVrdCount = 0;
+		AtomicInteger processedVrdCount = new AtomicInteger();
 		
 		HashMap<String, String> unplacedVariants = new HashMap<>();
 		Pattern digitPattern = Pattern.compile("[0-9]+"); 
 
-		for (Document doc : variantRunData) {
-			VariantRunData vrd = template.getConverter().read(VariantRunData.class, doc);
-			
-			String sequence = vrd.getReferencePosition(nAssembly).getSequence();
-			Chromosome chromosome = genome.getChromosome(sequence);
-			if (chromosome == null && digitPattern.matcher(sequence).matches()) {
-				Pattern singleNumericPattern = Pattern.compile("\\D*(\\d+)\\D*");	// Isolate the numeric part
-				Matcher matcher = singleNumericPattern.matcher(sequence);
-				matcher.find();
-				if (matcher.matches())
-					chromosome = genome.getChromosome(matcher.group(1));
-			}
-			if (chromosome == null) {
-				unplacedVariants.put(vrd.getVariantId(), snpEffDatabase);
-				continue;
-			}
-				
-			SnpEffEntryWrapper entry = new SnpEffEntryWrapper(chromosome, vrd);
+        ExecutorService executorService = Executors.newFixedThreadPool(Math.max(1, Runtime.getRuntime().availableProcessors() / 3));
+        List<Document> vrdChunk = new ArrayList<>();
+		while (vrdCursor.hasNext()) {
+			vrdChunk.add(vrdCursor.next());
+			if (vrdChunk.size() == nBatchSize || !vrdCursor.hasNext()) {
+				List<Document> vrdChunkToProcess = vrdChunk;
+				vrdChunk = new ArrayList<>();
+				executorService.execute(new Thread() {
+					public void run() {
+						Assembly.setThreadAssembly(nAssembly);
+						BulkOperations bulkOperations = template.bulkOps(BulkOperations.BulkMode.UNORDERED, VariantRunData.class);
+						for (Document doc : vrdChunkToProcess) {
+							VariantRunData vrd = template.getConverter().read(VariantRunData.class, doc);
+							
+							String sequence = vrd.getReferencePosition(nAssembly).getSequence();
+							Chromosome chromosome = genome.getChromosome(sequence);
+							if (chromosome == null && digitPattern.matcher(sequence).matches()) {
+								Pattern singleNumericPattern = Pattern.compile("\\D*(\\d+)\\D*");	// Isolate the numeric part
+								Matcher matcher = singleNumericPattern.matcher(sequence);
+								matcher.find();
+								if (matcher.matches())
+									chromosome = genome.getChromosome(matcher.group(1));
+							}
+							if (chromosome == null) {
+								unplacedVariants.put(vrd.getVariantId(), snpEffDatabase);
+								processedVrdCount.incrementAndGet();
+								continue;
+							}
 
-			VariantRunData result = annotateVariant(entry, predictor, projectEffects);
-			if (result != null) {
-				template.save(result);
-				processedVrdCount += 1;
-				progress.setCurrentStepProgress(processedVrdCount * 100 / nTotalNumberOfVRDInDB);
-			} else {
-				LOG.warn("Failed to annotate variant " + vrd.getId());
+							HashMap<String, Object> variantAnnotations = annotateVariant(new SnpEffEntryWrapper(chromosome, vrd), predictor, projectEffects);
+							if (variantAnnotations != null) {
+			                    Query q = new Query(new Criteria().andOperator(
+		                            Criteria.where("_id." + VariantRunDataId.FIELDNAME_VARIANT_ID).is(vrd.getVariantId()),
+		                            Criteria.where("_id." + VariantRunDataId.FIELDNAME_PROJECT_ID).is(projectId),
+		                            Criteria.where("_id." + VariantRunDataId.FIELDNAME_RUNNAME).is(run)
+			                    ));
+			                    Update update = new Update();
+			                    for (String key : variantAnnotations.keySet())
+			                    	update.set(VariantRunData.SECTION_ADDITIONAL_INFO + "." + key, variantAnnotations.get(key));
+			                    bulkOperations.updateOne(q, update);
+							}
+							else
+								LOG.warn("Failed to annotate variant " + vrd.getId());
+							processedVrdCount.incrementAndGet();
+						}
+			            BulkWriteResult wr = bulkOperations.execute();
+//			            if (wr.getModifiedCount() > 0)
+//			            	LOG.debug("Database " + module + ": " + wr.getModifiedCount() + " VRD records annotated");
+						progress.setCurrentStepProgress(processedVrdCount.get() * 100 / nTotalNumberOfVRDInDB);
+					}
+				});
 			}
 		}
+
+		executorService.shutdown();
+		executorService.awaitTermination(Integer.MAX_VALUE, TimeUnit.DAYS);
 		
 		LOG.warn("During functional annotation on " + module + ", " + new HashSet<>(unplacedVariants.values()).size() + " contig(s) were not found in the reference genome, and thus " + unplacedVariants.size() + " variants could not be annotated");
 
@@ -142,11 +182,10 @@ public class SnpEffAnnotationService {
 
         DBVCFHeader header = null;
         Document headerDoc = template.getCollection(MongoTemplateManager.getMongoCollectionName(DBVCFHeader.class)).find(queryVarAnn).first();
-        if (headerDoc == null) {
+        if (headerDoc == null)
         	header = new DBVCFHeader(new VcfHeaderId(projectId, run), false, false, new HashMap<>(), new HashMap<>(), new HashMap<>(), new HashMap<>(), new HashMap<>());
-        } else {
+        else
         	header = DBVCFHeader.fromDocument(headerDoc);
-        }
 
         // FIXME : Retrieve this from EffFormatVersion.FORMAT_ANN_1.vcfHeader()
         String description = "Functional annotations: 'Allele | Annotation | Annotation_Impact | Gene_Name | Gene_ID | Feature_Type | Feature_ID | Transcript_BioType | Rank | HGVS.c | HGVS.p | cDNA.pos / cDNA.length | CDS.pos / CDS.length | AA.pos / AA.length | Distance | ERRORS / WARNINGS / INFO'";
@@ -158,8 +197,8 @@ public class SnpEffAnnotationService {
 
 		return null;
 	}
-
-	private static VariantRunData annotateVariant(SnpEffEntryWrapper entry, SnpEffectPredictor predictor, Set<String> effectAnnotations) {
+	
+	private static HashMap<String, Object> annotateVariant(SnpEffEntryWrapper entry, SnpEffectPredictor predictor, Set<String> effectAnnotations) {
 		for (Variant variant : entry.variants()) {
 			// Calculate effects: By default do not annotate non-variant sites
 			if (!variant.isVariant()) return null;
