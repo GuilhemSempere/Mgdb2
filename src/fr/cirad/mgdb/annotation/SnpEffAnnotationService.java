@@ -84,7 +84,7 @@ public class SnpEffAnnotationService {
     	Log.setFatalErrorBehabiour(Log.FatalErrorBehabiour.EXCEPTION);
     }
 
-	public static String annotateRun(String configFile, String dataPath, String module, int projectId, String run, String snpEffDatabase, ProgressIndicator progress) throws InterruptedException {
+	public static void annotateRun(String configFile, String dataPath, String module, int projectId, String run, String snpEffDatabase, ProgressIndicator progress) throws InterruptedException {
 		MongoTemplate template = MongoTemplateManager.get(module);
 		Integer nAssembly = Assembly.getThreadBoundAssembly();
 
@@ -194,8 +194,7 @@ public class SnpEffAnnotationService {
         template.save(header);
 
         template.save(project);
-
-		return null;
+        MongoTemplateManager.updateDatabaseLastModification(module);
 	}
 	
 	private static HashMap<String, Object> annotateVariant(SnpEffEntryWrapper entry, SnpEffectPredictor predictor, Set<String> effectAnnotations) {
