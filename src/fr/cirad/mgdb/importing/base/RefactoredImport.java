@@ -62,7 +62,7 @@ public abstract class RefactoredImport extends AbstractGenotypeImport {
     protected boolean m_fImportUnknownVariants = false;
     protected int m_ploidy = 2;
     protected Integer m_maxExpectedAlleleCount = null;	// if set, will issue warnings when exceeded
-    final static protected String validAlleleRegex = "[\\*AaTtGgCc]+".intern();
+    final static protected String validAlleleRegex = "[\\*AaTtGgCcNn]+".intern();
     
 	public void setMaxExpectedAlleleCount(Integer maxExpectedAlleleCount) {
 		m_maxExpectedAlleleCount = maxExpectedAlleleCount;
@@ -328,7 +328,7 @@ public abstract class RefactoredImport extends AbstractGenotypeImport {
                 if (alleleIndex != null)
                 	continue;	// we already have this one
 
-				if (allele.matches(validAlleleRegex )) {
+				if (allele.matches(validAlleleRegex)) {
                     alleleIndex = variantToFeed.getKnownAlleles().size();
                     variantToFeed.getKnownAlleles().add(allele);
                     alleleIndexMap.put(allele, alleleIndex);

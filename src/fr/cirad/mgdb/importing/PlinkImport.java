@@ -477,9 +477,10 @@ public class PlinkImport extends RefactoredImport {
                                             builder.append("\t");
                                             char firstAllele = lineBuffer.charAt(nCurrentPos);
                                             if (firstAllele != '0') {
-	                                            builder.append(firstAllele);
+	                                            builder.append(firstAllele == 'I' ? "NN" : (firstAllele == 'D' ? "N" : String.valueOf(firstAllele)));
 	                                            builder.append("/");
-	                                            builder.append(lineBuffer.charAt(nCurrentPos + 2));
+	                                            char secondAllele = lineBuffer.charAt(nCurrentPos + 2);
+	                                            builder.append(secondAllele == 'I' ? "NN" : (secondAllele == 'D' ? "N" : String.valueOf(secondAllele)));
                                             }
                                         }
                                     // Non-trivial case : INDELs and/or multi-characters separators
@@ -512,9 +513,10 @@ public class PlinkImport extends RefactoredImport {
                                             String sFirstAllele = matcher.group();
                                             matcher.find();
                                             if (!"0".equals(sFirstAllele)) {
-                                            	builder.append(sFirstAllele);
+                                            	builder.append(sFirstAllele.equals("I") ? "NN" : (sFirstAllele.equals("D") ? "N" : sFirstAllele));
 	                                            builder.append("/");
-	                                            builder.append(matcher.group());
+	                                            String sSecondAllele = matcher.group();
+	                                            builder.append(sSecondAllele.equals("I") ? "NN" : (sSecondAllele.equals("D") ? "N" : sSecondAllele));
                                             }
                                             matcher.find();
                                         }
