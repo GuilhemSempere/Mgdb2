@@ -35,7 +35,6 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
-import org.apache.commons.lang3.StringUtils;
 import org.apache.log4j.Logger;
 import org.springframework.beans.factory.BeanDefinitionStoreException;
 import org.springframework.context.support.GenericXmlApplicationContext;
@@ -477,10 +476,9 @@ public class PlinkImport extends RefactoredImport {
                                             builder.append("\t");
                                             char firstAllele = lineBuffer.charAt(nCurrentPos);
                                             if (firstAllele != '0') {
-	                                            builder.append(firstAllele == 'I' ? "NN" : (firstAllele == 'D' ? "N" : String.valueOf(firstAllele)));
+	                                            builder.append(firstAllele);
 	                                            builder.append("/");
-	                                            char secondAllele = lineBuffer.charAt(nCurrentPos + 2);
-	                                            builder.append(secondAllele == 'I' ? "NN" : (secondAllele == 'D' ? "N" : String.valueOf(secondAllele)));
+	                                            builder.append(lineBuffer.charAt(nCurrentPos + 2));
                                             }
                                         }
                                     // Non-trivial case : INDELs and/or multi-characters separators
@@ -513,10 +511,9 @@ public class PlinkImport extends RefactoredImport {
                                             String sFirstAllele = matcher.group();
                                             matcher.find();
                                             if (!"0".equals(sFirstAllele)) {
-                                            	builder.append(sFirstAllele.equals("I") ? "NN" : (sFirstAllele.equals("D") ? "N" : sFirstAllele));
+                                            	builder.append(sFirstAllele);
 	                                            builder.append("/");
-	                                            String sSecondAllele = matcher.group();
-	                                            builder.append(sSecondAllele.equals("I") ? "NN" : (sSecondAllele.equals("D") ? "N" : sSecondAllele));
+	                                            builder.append(matcher.group());
                                             }
                                             matcher.find();
                                         }
@@ -539,7 +536,7 @@ public class PlinkImport extends RefactoredImport {
 				                                                .distinct()
 				                                                .map(allele -> {
 				                                                					try {
-				                                                						return Allele.create(allele);
+				                                                						return Allele.create(allele.equals("I") ? "NN" : (allele.equals("D") ? "N" : allele));
 										                                            } catch (IllegalArgumentException e) {
 										                                            	throw new IllegalArgumentException("Variant " + variantName + " - " + e.getClass().getName() + ": " + e.getMessage());
 										                                            }
