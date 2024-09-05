@@ -161,7 +161,7 @@ public abstract class AbstractIndividualOrientedExportHandler implements IExport
 
 				                    String exportedGT = genotypeStringCache.get(sampleGenotype.getCode());
 				                    if (exportedGT == null) {
-				                    	exportedGT = StringUtils.join(run.safelyGetAllelesFromGenotypeCode(sampleGenotype.getCode(), mongoTemplate), ' ');
+				                    	exportedGT = StringUtils.join(run.safelyGetAllelesFromGenotypeCode(sampleGenotype.getCode(), mongoTemplate).stream().map(all -> "N".equals(all) ? "D" : ("NN".equals(all) ? "I" : all)).toList(), ' ');
 				                    	genotypeStringCache.put(sampleGenotype.getCode(), exportedGT);
 				                    }
 									
