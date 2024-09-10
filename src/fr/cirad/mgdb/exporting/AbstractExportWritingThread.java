@@ -16,6 +16,7 @@
  *******************************************************************************/
 package fr.cirad.mgdb.exporting;
 
+import java.io.OutputStream;
 import java.util.Collection;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
@@ -34,12 +35,24 @@ public abstract class AbstractExportWritingThread extends Thread
 	
 	protected Collection<Collection<VariantRunData>> markerRunsToWrite;
 	protected List<String> orderedMarkerIDs;
+	protected OutputStream mainOS;
+	protected OutputStream warningOS;
 	
-	public CompletableFuture<Void> writeChunkRuns(Collection<Collection<VariantRunData>> markerRunsToWrite, List<String> orderedMarkerIDs) {
+	public CompletableFuture<Void> writeChunkRuns(Collection<Collection<VariantRunData>> markerRunsToWrite, List<String> orderedMarkerIDs, OutputStream mainOS, OutputStream warningOS) {
 		this.markerRunsToWrite = markerRunsToWrite;
 		this.orderedMarkerIDs = orderedMarkerIDs;
+		this.mainOS = mainOS;
+		this.warningOS = warningOS;
 		return CompletableFuture.runAsync(this);
 	}
 	
-	public abstract void run();
+	abstract public void writeChunkRunsSynchronously(Collection<Collection<VariantRunData>> markerRunsToWrite, List<String> orderedMarkerIDs, OutputStream mainOS, OutputStream warningkOS);
+//	{
+//		this.markerRunsToWrite = markerRunsToWrite;
+//		this.orderedMarkerIDs = orderedMarkerIDs;
+//		this.os = os;
+//		run(markerRunsToWrite, orderedMarkerIDs, os);
+//	}
+	
+//	public abstract void run();
 }

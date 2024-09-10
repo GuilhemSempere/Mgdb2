@@ -16,8 +16,12 @@
  *******************************************************************************/
 package fr.cirad.mgdb.exporting.tools;
 
+import java.io.BufferedOutputStream;
+import java.io.File;
+import java.io.FileOutputStream;
 import java.io.FileWriter;
 import java.io.IOException;
+import java.io.OutputStream;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -27,10 +31,16 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Future;
 import java.util.stream.Collectors;
+import java.util.zip.ZipOutputStream;
 
+import org.apache.commons.io.FileUtils;
 import org.apache.log4j.Logger;
 import org.bson.Document;
 import org.bson.codecs.configuration.CodecRegistries;
@@ -52,14 +62,18 @@ import fr.cirad.mgdb.exporting.IExportHandler;
 import fr.cirad.mgdb.model.mongo.maintypes.Assembly;
 import fr.cirad.mgdb.model.mongo.maintypes.GenotypingProject;
 import fr.cirad.mgdb.model.mongo.maintypes.GenotypingSample;
+import fr.cirad.mgdb.model.mongo.maintypes.VariantData;
 import fr.cirad.mgdb.model.mongo.maintypes.VariantRunData;
 import fr.cirad.mgdb.model.mongo.subtypes.AbstractVariantData;
 import fr.cirad.mgdb.model.mongo.subtypes.ReferencePosition;
 import fr.cirad.mgdb.model.mongo.subtypes.VariantRunDataId;
+import fr.cirad.mgdb.model.mongodao.MgdbDao;
 import fr.cirad.tools.AlphaNumericComparator;
 import fr.cirad.tools.Helper;
 import fr.cirad.tools.ProgressIndicator;
 import fr.cirad.tools.mongo.MongoTemplateManager;
+import fr.cirad.tools.query.GroupedExecutor;
+import fr.cirad.tools.query.GroupedExecutor.TaskWrapper;
 
 /**
  * The class ExportManager.
@@ -101,9 +115,7 @@ public class ExportManager
     
     private boolean fWorkingOnTempColl;
     
-    private FileWriter warningFileWriter;
-    
-    private MongoTemplate mongoTemplate;
+    private String module;
     
     private AbstractExportWritingThread writingThread;
     
@@ -129,11 +141,10 @@ public class ExportManager
 
     public static final CodecRegistry pojoCodecRegistry = CodecRegistries.fromRegistries(MongoClientSettings.getDefaultCodecRegistry(), CodecRegistries.fromProviders(PojoCodecProvider.builder().register(new IntKeyMapPropertyCodecProvider()).automatic(true).build()));
     
-    public ExportManager(MongoTemplate mongoTemplate, Integer nAssemblyId, MongoCollection<Document> varColl, Class resultType, BasicDBList vrdQuery, Collection<GenotypingSample> samplesToExport, boolean fIncludeMetadata, int nQueryChunkSize, AbstractExportWritingThread writingThread, Long markerCount, FileWriter warningFileWriter, ProgressIndicator progress) {
+    public ExportManager(String sModule, Integer nAssemblyId, MongoCollection<Document> varColl, Class resultType, BasicDBList vrdQuery, Collection<GenotypingSample> samplesToExport, boolean fIncludeMetadata, int nQueryChunkSize, AbstractExportWritingThread writingThread, Long markerCount, ProgressIndicator progress) {
         this.progress = progress;
         this.nQueryChunkSize = nQueryChunkSize;
-        this.warningFileWriter = warningFileWriter;
-        this.mongoTemplate = mongoTemplate;
+        this.module = sModule;
         this.nAssemblyId = nAssemblyId;
         this.writingThread = writingThread;
         this.markerCount = markerCount;
@@ -149,6 +160,8 @@ public class ExportManager
         // optimization 1: filling in involvedProjectRuns will provide means to apply filtering on project and/or run fields when exporting from temporary collection
         HashMap<Integer, List<String>> involvedProjectRuns = Helper.getRunsByProjectInSampleCollection(samplesToExport);
         involvedRunCount = involvedProjectRuns.values().stream().mapToInt(b -> b.size()).sum();
+
+        MongoTemplate mongoTemplate = MongoTemplateManager.get(module);
 
         for (int projId : involvedProjectRuns.keySet()) {
             List<String> projectInvolvedRuns = involvedProjectRuns.get(projId);
@@ -194,27 +207,25 @@ public class ExportManager
         }
     }
 
-	public void readAndWrite() throws IOException, InterruptedException, ExecutionException {        
+	public File[] readAndWrite(ZipOutputStream zos) throws IOException, InterruptedException, ExecutionException {        
         if (fWorkingOnTempColl)
-            exportFromTempColl();
+            return exportFromTempColl(zos);
         else
-            exportDirectlyFromRuns();
+        	return exportDirectlyFromRuns(zos);
     }
     
     /**
      * Exports by $match-ing successive chunks of variant IDs in VariantRunData. Would have thought using $lookup with a single cursor would be faster, but it's much slower
+     * @param os 
      * 
      * @throws IOException
      * @throws InterruptedException
      * @throws ExecutionException
+     * @return warning file array
      */
-    private void exportFromTempColl() throws IOException, InterruptedException, ExecutionException {
-        CompletableFuture<Void> future = null;        
-        List<VariantRunData> currentMarkerRuns = new ArrayList<>(involvedRunCount);
+    private File[] exportFromTempColl(OutputStream os) throws IOException, InterruptedException, ExecutionException {
         List<String> currentMarkerIDs = new ArrayList<>(nQueryChunkSize);
-        String varId = null, previousVarId = null;
-        int nWrittenmarkerCount = 0;
-        
+
         VariantRunDataComparator vrdComparator = new VariantRunDataComparator(nAssemblyId);
         
         List<BasicDBObject> pipeline = new ArrayList<>();
@@ -223,111 +234,193 @@ public class ExportManager
         pipeline.add(sortStage);
         pipeline.add(new BasicDBObject("$project", new BasicDBObject("_id", 1)));
 
+        MongoTemplate mongoTemplate = MongoTemplateManager.get(module);
+        
+        Future<Void>[] chunkExportTasks = new Future[(int) Math.ceil((float) varColl.countDocuments() / nQueryChunkSize)];
+        File[] chunkTempFiles = new File[chunkExportTasks.length];
+        File[] chunkWarningFiles = new File[chunkExportTasks.length];
+
         MongoCursor<Document> markerCursor = varColl.aggregate(pipeline, Document.class).collation(IExportHandler.collationObj).allowDiskUse(true).batchSize(nQueryChunkSize).iterator();   /*FIXME: didn't find a way to set noCursorTimeOut on aggregation cursors*/
 
         // pipeline object will be re-used to query VariantRunData, we won't need the $project stage for that
         pipeline = new ArrayList<>();
         pipeline.add(sortStage);
         
-        int nChunkIndex = 0;
-        long chunkProcessingStartTime = System.currentTimeMillis(), timeSpentReadingWithoutProjectStage = -1;
+        AtomicInteger nChunkIndex = new AtomicInteger(0), nWrittenmarkerCount = new AtomicInteger(0), nSpeedEstimationCompletedQueryCount = new AtomicInteger(0);
+        AtomicLong timeSpentReadingWithoutProjectStage = new AtomicLong(0), timeSpentReadingWithProjectStage = new AtomicLong(0);
+        
+        ExecutorService executor = MongoTemplateManager.getExecutor(module);
+        String taskGroup = "export_" + System.currentTimeMillis() + "_" + progress.getProcessId();
         
         MongoCollection<VariantRunData> runColl = mongoTemplate.getDb().withCodecRegistry(ExportManager.pojoCodecRegistry).getCollection(mongoTemplate.getCollectionName(VariantRunData.class), VariantRunData.class);
         while (markerCursor.hasNext()) {
-            if (progress.isAborted() || progress.getError() != null ) {
-                if (warningFileWriter != null)
-                    warningFileWriter.close();
-                return;
+            if (progress.isAborted() || progress.getError() != null) {
+        		for (Future<Void> t : chunkExportTasks)
+        			if (t != null)
+        				t.cancel(true);
+                for (File f : chunkTempFiles)
+                	if (f != null)
+                		f.delete();
+                for (File f : chunkWarningFiles)
+                	if (f != null)
+                		f.delete();
+                return null;
             }
             
             currentMarkerIDs.add(markerCursor.next().getString("_id"));
                         
             if (currentMarkerIDs.size() >= nQueryChunkSize || !markerCursor.hasNext()) {	// current variant ID list is large enough to start exporting chunk
-                nChunkIndex++;
+            	List<String> chunkMarkerIDs = currentMarkerIDs;
+            	List<BasicDBObject> chunkPipeline = new ArrayList<>(pipeline);
+            	int nFinalChunkIndex = nChunkIndex.incrementAndGet();
+            	Thread chunkExportThread = new Thread() {
+            		public void run() {
+            			if (progress.isAborted() || progress.getError() != null)
+            				return;
 
-                BasicDBList matchAndList = new BasicDBList();
-                if (!projectFilterList.isEmpty())
-                    matchAndList.add(projectFilterList.size() == 1 ? projectFilterList.get(0) : new BasicDBObject("$or", projectFilterList));
-                matchAndList.add(new BasicDBObject("_id." + VariantRunDataId.FIELDNAME_VARIANT_ID, new BasicDBObject("$in", currentMarkerIDs)));
+            			OutputStream mainChunkOS = null, warningChunkOS = null;
+            			try {
 
-                BasicDBObject initialMatchStage = new BasicDBObject("$match", new BasicDBObject("$and", matchAndList));
-                if (varId == null)
-                    pipeline.add(0, initialMatchStage);    // first time we set this stage, it's an insertion
-                else
-                    pipeline.set(0, initialMatchStage);    // replace existing $match
+	            			File mainChunkFile = File.createTempFile(nFinalChunkIndex + "__", "__" + taskGroup), warningChunkFile = File.createTempFile(nFinalChunkIndex + "__warnings__", "__" + taskGroup);
+	            			chunkTempFiles[nFinalChunkIndex - 1] = mainChunkFile;
+	            			mainChunkOS = new BufferedOutputStream(new FileOutputStream(mainChunkFile));
+	            			chunkWarningFiles[nFinalChunkIndex - 1] = warningChunkFile;
+	            			warningChunkOS = new BufferedOutputStream(new FileOutputStream(warningChunkFile));
 
-                if (nChunkIndex == 1) {
-                	if (nNumberOfChunksUsedForSpeedEstimation == null && projectStage != null)
-                		pipeline.add(projectStage);	// it was decided to use this $project and not to test removing it
-                    LOG.debug("Export pipeline: " + pipeline);
-                }
+	                        BasicDBList matchAndList = new BasicDBList();
+	                        if (!projectFilterList.isEmpty())
+	                            matchAndList.add(projectFilterList.size() == 1 ? projectFilterList.get(0) : new BasicDBObject("$or", projectFilterList));
+	                        matchAndList.add(new BasicDBObject("_id." + VariantRunDataId.FIELDNAME_VARIANT_ID, new BasicDBObject("$in", chunkMarkerIDs)));
+	
+	                        chunkPipeline.add(0, new BasicDBObject("$match", new BasicDBObject("$and", matchAndList)));
 
-                ArrayList<VariantRunData> runs = runColl.aggregate(pipeline, VariantRunData.class).allowDiskUse(true).into(new ArrayList<>(currentMarkerIDs.size())); // we don't use collation here because it leads to unexpected behaviour (sometimes fetches some additional variants to those in currentMarkerIDs) => we'll have to sort each chunk by hand
-                Collections.sort(runs, vrdComparator);    // make sure variants within this chunk are correctly sorted
-                
-                LinkedHashMap<String /*variant ID*/, Collection<VariantRunData>> chunkMarkerRunsToWrite = new LinkedHashMap<>(currentMarkerIDs.size());
-                for (String variantId : currentMarkerIDs)
-                	chunkMarkerRunsToWrite.put(variantId, null);	// there must be an entry for each exported variant
-                
-                for (VariantRunData vrd : runs) {
-                    varId = vrd.getId().getVariantId();
-                    
-                    if (previousVarId != null && !varId.equals(previousVarId)) {
-                        chunkMarkerRunsToWrite.put(previousVarId, currentMarkerRuns);
-                        currentMarkerRuns = new ArrayList<>(involvedRunCount);
-                    }
-                    currentMarkerRuns.add(vrd);
-                    previousVarId = varId;
-                }
-                
-                if (!currentMarkerRuns.isEmpty()) {	// add runs for this chunk's last variant (among those we have data for)
-	                chunkMarkerRunsToWrite.put(previousVarId, currentMarkerRuns);
-	                currentMarkerRuns = new ArrayList<>(involvedRunCount);
-                }
+                        	if (projectStage != null && (nNumberOfChunksUsedForSpeedEstimation == null || nFinalChunkIndex <= nNumberOfChunksUsedForSpeedEstimation))
+                                chunkPipeline.add(projectStage);
 
-                if (nNumberOfChunksUsedForSpeedEstimation != null) {  // pipeline contains a $project stage that we need to assess: let's compare execution speed with and without it (best option depends on so many things that we can't find it out otherwise)
-                    if (nChunkIndex == nNumberOfChunksUsedForSpeedEstimation) { // we just tested without $project, let's try with it now
-                        timeSpentReadingWithoutProjectStage = System.currentTimeMillis() - chunkProcessingStartTime;
-                        pipeline.add(projectStage);
-                    }
-                    else if (nChunkIndex == 2 * nNumberOfChunksUsedForSpeedEstimation) {
-                        long timeSpentReadingWithProjectStage = System.currentTimeMillis() - chunkProcessingStartTime;
-                        if ((float) timeSpentReadingWithoutProjectStage / timeSpentReadingWithProjectStage <= .75) {    // removing $project provided more than 25% speed-up : let's do the rest of the export without $project
-                            pipeline.remove(projectStage);
-                            LOG.debug("Exporting without $project stage");
-                        }
-                    }
-                    chunkProcessingStartTime = System.currentTimeMillis();
-                }
+//                        	LOG.debug("Export pipeline #" + nFinalChunkIndex + ": " + chunkPipeline.contains(projectStage));
+	
+                			if (progress.isAborted() || progress.getError() != null)
+                				return;
 
-                if (future != null && !future.isDone()) {
-//                    long b4 = System.currentTimeMillis();
-                    future.get();
-//                    long delay = System.currentTimeMillis() - b4;
-//                    if (delay > 100)
-//                        LOG.debug(progress.getProcessId() + " waited " + delay + "ms before writing variant " + nWrittenmarkerCount/* + ", increasing nQueryChunkSize from " + nQueryChunkSize + " to " + nQueryChunkSize*2*/);
-                }
-                
-                nWrittenmarkerCount += currentMarkerIDs.size();
-                previousVarId = null;
+	            			long chunkProcessingStartTime = System.currentTimeMillis();
+	                        ArrayList<VariantRunData> runs = runColl.aggregate(chunkPipeline, VariantRunData.class).allowDiskUse(true).into(new ArrayList<>(chunkMarkerIDs.size())); // we don't use collation here because it leads to unexpected behaviour (sometimes fetches some additional variants to those in chunkMarkerIDs) => we'll have to sort each chunk by hand
 
-                if (markerCount != null)
-                    progress.setCurrentStepProgress(nWrittenmarkerCount * 100l / markerCount);
-                future = writingThread.writeChunkRuns(chunkMarkerRunsToWrite.values(), currentMarkerIDs);
-                chunkMarkerRunsToWrite = new LinkedHashMap<>(nQueryChunkSize);
-                
+	                        if (nNumberOfChunksUsedForSpeedEstimation != null) {  // chunkPipeline contains a $project stage that we need to assess: let's compare execution speed with and without it (best option depends on so many things that we can't find it out otherwise)
+		                        long chunkProcessingDuration = System.currentTimeMillis() - chunkProcessingStartTime;
+
+		                        if (nFinalChunkIndex <= nNumberOfChunksUsedForSpeedEstimation) { // we just tested with $project, let's try without it now
+	                                timeSpentReadingWithProjectStage.addAndGet(chunkProcessingDuration);
+	                                nSpeedEstimationCompletedQueryCount.incrementAndGet();
+	                            }
+	                            else if (nFinalChunkIndex <= 2 * nNumberOfChunksUsedForSpeedEstimation) {
+	                            	timeSpentReadingWithoutProjectStage.addAndGet(chunkProcessingDuration);
+	                                nSpeedEstimationCompletedQueryCount.incrementAndGet();
+	                            }
+		                        
+                                if (nSpeedEstimationCompletedQueryCount.get() == 2 * nNumberOfChunksUsedForSpeedEstimation) {
+                            		System.err.println(nFinalChunkIndex + ": timeSpentReadingWithProjectStage: " + timeSpentReadingWithProjectStage.get());
+	                                System.err.println(nFinalChunkIndex + ": timeSpentReadingWithoutProjectStage: " + timeSpentReadingWithoutProjectStage);
+	                            	System.err.println(nSpeedEstimationCompletedQueryCount.get() + " / " + nFinalChunkIndex + " -> " + (float) timeSpentReadingWithoutProjectStage.get() / timeSpentReadingWithProjectStage.get());
+	                                if ((float) timeSpentReadingWithoutProjectStage.get() / timeSpentReadingWithProjectStage.get() <= .75) {    // removing $project provided more than 25% speed-up : let's do the rest of the export without $project
+	                                	projectStage = null;
+	                                    LOG.debug("Exporting without $project stage");
+	                                }
+	                                nNumberOfChunksUsedForSpeedEstimation = null;	// we want to do this only once
+                                }
+	                        }
+	                        
+	                        
+	                        Collections.sort(runs, vrdComparator);    // make sure variants within this chunk are correctly sorted
+	                        
+	                        LinkedHashMap<String /*variant ID*/, Collection<VariantRunData>> chunkMarkerRunsToWrite = new LinkedHashMap<>(chunkMarkerIDs.size());
+	                        for (String variantId : chunkMarkerIDs)
+	                        	chunkMarkerRunsToWrite.put(variantId, null);	// there must be an entry for each exported variant
+	                        
+	                        String varId = null, previousVarId = null;
+	                        List<VariantRunData> currentMarkerRuns = new ArrayList<>(involvedRunCount);
+	                        for (VariantRunData vrd : runs) {
+	                			if (progress.isAborted() || progress.getError() != null)
+	                				return;
+
+	                            varId = vrd.getId().getVariantId();
+	                            
+	                            if (previousVarId != null && !varId.equals(previousVarId)) {
+	                                chunkMarkerRunsToWrite.put(previousVarId, currentMarkerRuns);
+	                                currentMarkerRuns = new ArrayList<>(involvedRunCount);
+	                            }
+	                            currentMarkerRuns.add(vrd);
+	                            previousVarId = varId;
+	                        }
+	                        
+	                        if (!currentMarkerRuns.isEmpty()) {	// add runs for this chunk's last variant (among those we have data for)
+	        	                chunkMarkerRunsToWrite.put(previousVarId, currentMarkerRuns);
+	        	                currentMarkerRuns = new ArrayList<>(involvedRunCount);
+	                        }
+
+	                        nWrittenmarkerCount.addAndGet(chunkMarkerIDs.size());
+	                        previousVarId = null;
+	
+	                        if (markerCount != null)
+	                            progress.setCurrentStepProgress(nWrittenmarkerCount.get() * 100l / markerCount);
+	                        writingThread.writeChunkRunsSynchronously(chunkMarkerRunsToWrite.values(), chunkMarkerIDs, mainChunkOS, warningChunkOS);
+
+	                        chunkMarkerRunsToWrite = new LinkedHashMap<>(nQueryChunkSize);
+                		}
+                		catch (Exception e) {
+                			progress.setError(e.getMessage());
+                			LOG.error(e);
+                			return;
+                		}
+            			finally {
+							try {
+								if (mainChunkOS != null)
+									mainChunkOS.close();
+	            				if (warningChunkOS != null)
+									warningChunkOS.close();
+							} catch (IOException ignored) {}
+            			}
+	            	}
+            	};
+            	
+            	Future<Void> queryRunnable = (Future<Void>) executor.submit(new TaskWrapper(taskGroup, chunkExportThread));
+                chunkExportTasks[nFinalChunkIndex - 1] = queryRunnable;
                 currentMarkerIDs = new ArrayList<>(nQueryChunkSize);
             }
         }
+        
+        if (executor instanceof GroupedExecutor)
+        	((GroupedExecutor) executor).shutdown(taskGroup);
+        else
+        	executor.shutdown();
+        
+        for (Future<Void> t : chunkExportTasks) // wait for all threads before moving to next phase
+        	t.get();
 
-        if (future != null && !future.isDone())
-            future.get();
         markerCursor.close();
         if (markerCount != null)
-            progress.setCurrentStepProgress(nWrittenmarkerCount * 100l / markerCount);
+            progress.setCurrentStepProgress(nWrittenmarkerCount.get() * 100l / markerCount);
+        
+        progress.addStep("Merging results");
+        progress.moveToNextStep();
+        for (int i=0; i<chunkTempFiles.length; i++) {
+        	os.write(FileUtils.readFileToByteArray(chunkTempFiles[i]));
+        	progress.setCurrentStepProgress(i * 100l / chunkTempFiles.length);
+        	chunkTempFiles[i].delete();
+        }
+        
+        return chunkWarningFiles;
     }
 
-    private void exportDirectlyFromRuns() throws IOException, InterruptedException, ExecutionException {
+    /**
+     * Exports directly from VariantRunData records (no temporary collection, i.e., only variant-level filters applied, if any)
+     * @param os 
+     * 
+     * @throws IOException
+     * @throws InterruptedException
+     * @throws ExecutionException
+     * @return warning file array
+     */
+    private File[] exportDirectlyFromRuns(OutputStream os) throws IOException, InterruptedException, ExecutionException {
         CompletableFuture<Void> future = null;
         Collection<Collection<VariantRunData>> tempMarkerRunsToWrite = new ArrayDeque<>(nQueryChunkSize);
         List<VariantRunData> currentMarkerRuns = new ArrayList<>();
@@ -344,6 +437,22 @@ public class ExportManager
         if (projectStage != null)
             pipeline.add(projectStage);
         LOG.debug("Export pipeline: " + pipeline);
+        
+        MongoTemplate mongoTemplate = MongoTemplateManager.get(module);
+        
+        
+        
+        
+        ArrayList<Document> taggedVariants = matchStage == null ? mongoTemplate.getCollection(MgdbDao.COLLECTION_NAME_TAGGED_VARIANT_IDS).find().into(new ArrayList<>()) : MgdbDao.tagVariants(mongoTemplate, mongoTemplate.getCollectionName(VariantData.class), varColl.countDocuments((BasicDBObject) matchStage.get("$match")), 10L, null);
+        System.err.println(taggedVariants);
+        for (Document taggedVar : taggedVariants) {
+        	
+        }
+        Future<Void>[] chunkExportTasks = new Future[(int) Math.ceil((float) varColl.countDocuments() / nQueryChunkSize)];
+        File[] chunkTempFiles = new File[chunkExportTasks.length];
+        File[] chunkWarningFiles = new File[chunkExportTasks.length];
+        
+        
         
         final MongoCursor[] markerCursors = new MongoCursor[2]; // First item always exists. Second only exists if we need to compare speed with and without $project stage
         Thread threadCreatingComparisonCursor = null;
@@ -369,11 +478,8 @@ public class ExportManager
         int nChunkIndex = 0;
         long chunkProcessingStartTime = System.currentTimeMillis(), timeSpentReadingWithoutProjectStage = -1;
         while (markerCursor.hasNext()) {
-            if (progress.isAborted() || progress.getError() != null ) {
-                if (warningFileWriter != null)
-                    warningFileWriter.close();
-                return;
-            }
+            if (progress.isAborted() || progress.getError() != null )
+                return null;
 
             VariantRunData vrd = (VariantRunData) markerCursor.next();
             varId = vrd.getVariantId();
@@ -427,7 +533,7 @@ public class ExportManager
 
                 if (markerCount != null && markerCount > 0)
                     progress.setCurrentStepProgress(nTotalWrittenMarkerCount * 100l / markerCount);
-                future = writingThread.writeChunkRuns(tempMarkerRunsToWrite, orderedVariantIds);
+                future = writingThread.writeChunkRuns(tempMarkerRunsToWrite, orderedVariantIds, null, null /*FIXME*/);
                 tempMarkerRunsToWrite = new ArrayDeque<>(nQueryChunkSize);
                 orderedVariantIds = new ArrayList<>();
             }
@@ -439,5 +545,7 @@ public class ExportManager
         markerCursor.close();
         if (markerCount != null && markerCount > 0)
             progress.setCurrentStepProgress(nTotalWrittenMarkerCount * 100l / markerCount);
+        
+        return chunkWarningFiles;
     }
 }
