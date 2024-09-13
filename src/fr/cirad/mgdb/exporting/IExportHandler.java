@@ -16,7 +16,10 @@
  *******************************************************************************/
 package fr.cirad.mgdb.exporting;
 
+import java.io.BufferedReader;
 import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.io.FileReader;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -196,4 +199,32 @@ public interface IExportHandler
     		}
         return result;
     }
+    
+    public static void writeWarnings(ZipOutputStream zos, File[] warningFiles, String exportName) throws IOException {
+    	try {
+	        int nWarningCount = 0;
+	        for (File f : warningFiles) {
+		    	if (f.length() > 0) {
+		            BufferedReader in = new BufferedReader(new FileReader(f));
+		            String sLine;
+		            while ((sLine = in.readLine()) != null) {
+		            	if (nWarningCount == 0)
+		                    zos.putNextEntry(new ZipEntry(exportName + "-REMARKS.txt"));
+		                zos.write((sLine + "\n").getBytes());
+		                nWarningCount++;
+		            }
+		            in.close();
+		    	}
+		    	f.delete();
+	        }
+	        if (nWarningCount > 0) {
+		        LOG.info("Number of warnings for export (" + exportName + "): " + nWarningCount);
+		        zos.closeEntry();
+	        }
+    	}
+    	finally {
+    		for (File f : warningFiles)
+    			f.delete();
+    	}
+	}
 }

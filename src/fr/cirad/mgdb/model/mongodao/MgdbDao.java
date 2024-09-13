@@ -89,6 +89,7 @@ import fr.cirad.mgdb.model.mongo.maintypes.GenotypingSample;
 import fr.cirad.mgdb.model.mongo.maintypes.Individual;
 import fr.cirad.mgdb.model.mongo.maintypes.VariantData;
 import fr.cirad.mgdb.model.mongo.maintypes.VariantRunData;
+import fr.cirad.mgdb.model.mongo.subtypes.AbstractVariantData;
 import fr.cirad.mgdb.model.mongo.subtypes.ReferencePosition;
 import fr.cirad.mgdb.model.mongo.subtypes.Run;
 import fr.cirad.mgdb.model.mongo.subtypes.VariantRunDataId;
@@ -144,14 +145,14 @@ public class MgdbDao {
         httpSessionFactory = hsf;
     }
     
-    public static ArrayList<Document> tagVariants(MongoTemplate mongoTemplate, String sVariantCollName, long totalIndividualCount, Criteria crit) {
+    public static ArrayList<AbstractVariantData> tagVariants(MongoTemplate mongoTemplate, String sVariantCollName, long totalIndividualCount) {
         long totalVariantCount = mongoTemplate.count(new Query(), sVariantCollName);
         long maxGenotypeCount = totalVariantCount * totalIndividualCount;
         long numberOfTaggedVariants = Math.min(totalVariantCount / 2, maxGenotypeCount > 200000000 ? 500 : (maxGenotypeCount > 100000000 ? 300 : (maxGenotypeCount > 50000000 ? 100 : (maxGenotypeCount > 20000000 ? 50 : (maxGenotypeCount > 5000000 ? 40 : 25)))));
-        return tagVariants(mongoTemplate, sVariantCollName, totalVariantCount, numberOfTaggedVariants, crit);
+        return tagVariants(mongoTemplate, sVariantCollName, totalVariantCount, numberOfTaggedVariants, null, null, null);
     }
 
-    public static ArrayList<Document> tagVariants(MongoTemplate mongoTemplate, String sVariantCollName, long totalVariantCount, long numberOfTaggedVariants, Criteria crit) {
+    public static ArrayList<AbstractVariantData> tagVariants(MongoTemplate mongoTemplate, String sVariantCollName, long totalVariantCount, long numberOfTaggedVariants, Criteria crit, Sort sort, Collection<String> projectedFields) {
         /*  This is how it is internally handled when sharding the data:
         var splitKeys = db.runCommand({splitVector: "mgdb_Musa_acuminata_v2_private.variantRunData", keyPattern: {"_id":1}, maxChunkSizeBytes: 40250000}).splitKeys;
         for (var key in splitKeys)
@@ -161,25 +162,27 @@ public class MgdbDao {
         int nChunkSize = (int) Math.max(1, (int) totalVariantCount / Math.max(1, numberOfTaggedVariants - 1));
         LOG.debug("Number of variants between 2 tagged ones: " + nChunkSize);
 
-        String cursor = null;
-        ArrayList<Document> taggedVariants = new ArrayList<>();
+        AbstractVariantData currentTag = null;
+        ArrayList<AbstractVariantData> taggedVariants = new ArrayList<>();
         for (int nChunkNumber = 0; nChunkNumber < (float) totalVariantCount / nChunkSize; nChunkNumber++) {
-            long before = System.currentTimeMillis();
+//            long before = System.currentTimeMillis();
             Query query = crit == null ? new Query() : new Query(crit);
             query.fields().include("_id");
+            if (projectedFields != null)
+            	for (String field : projectedFields)
+            		query.fields().include(field);
             query.limit(nChunkSize);
-            query.with(Sort.by(Arrays.asList(new Sort.Order(Sort.Direction.ASC, "_id"))));
-            if (cursor != null) {
-                query.addCriteria(Criteria.where("_id").gt(cursor));
-            }
+            query.with(sort != null ? sort : Sort.by(Arrays.asList(new Sort.Order(Sort.Direction.ASC, "_id"))));
+            if (currentTag != null)
+                query.addCriteria(Criteria.where("_id").gt(currentTag.getVariantId()));
             List<VariantData> chunk = mongoTemplate.find(query, VariantData.class);
             try {
-                cursor = chunk.get(chunk.size() - 1).getId();
+                currentTag = chunk.get(chunk.size() - 1);
             } catch (ArrayIndexOutOfBoundsException aioobe) {
                 if (aioobe.getMessage().equals("-1"))
                     LOG.error("Database is mixing String and ObjectID types!");
             }
-            taggedVariants.add(new Document("_id", cursor));
+            taggedVariants.add(currentTag);
 //            LOG.debug("Variant " + cursor + " tagged as position " + nChunkNumber + " (" + (System.currentTimeMillis() - before) + "ms)");
         }
         return taggedVariants;
@@ -220,9 +223,12 @@ public class MgdbDao {
 
                 // tag variant IDs across database
                 taggedVarColl.drop();
-            	ArrayList<Document> taggedVariants = tagVariants(mongoTemplate, variantColl.getNamespace().getCollectionName(), mongoTemplate.count(new Query(), Individual.class), null);
-                if (!taggedVariants.isEmpty())
-                	taggedVarColl.insertMany(taggedVariants);	// otherwise there is apparently no variant in the DB
+            	ArrayList<AbstractVariantData> taggedVariants = tagVariants(mongoTemplate, variantColl.getNamespace().getCollectionName(), mongoTemplate.count(new Query(), Individual.class));
+                if (!taggedVariants.isEmpty()) {	// otherwise there is apparently no variant in the DB
+                	List<Document> docs = taggedVariants.stream().map(var -> new Document("_id", var.getVariantId())).toList();
+                	System.err.println(docs);
+                	taggedVarColl.insertMany(docs);
+                }
             }
         };
         t.start();

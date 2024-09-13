@@ -46,7 +46,6 @@ import org.springframework.data.mongodb.core.MongoTemplate;
 import com.mongodb.BasicDBList;
 import com.mongodb.client.MongoCollection;
 
-import fr.cirad.mgdb.exporting.AbstractExportWritingThread;
 import fr.cirad.mgdb.exporting.IExportHandler;
 import fr.cirad.mgdb.exporting.tools.ExportManager;
 import fr.cirad.mgdb.model.mongo.maintypes.GenotypingSample;
@@ -140,7 +139,7 @@ public abstract class AbstractIndividualOrientedExportHandler implements IExport
 				StringBuilder[] individualGenotypeBuffers = new StringBuilder[individualPositions.size()];	// keeping all files open leads to failure (see ulimit command), keeping them closed and reopening them each time we need to write a genotype is too time consuming: so our compromise is to reopen them only once per chunk
 				try
 				{
-				    markerRunsToWrite.forEach(runsToWrite -> {
+				    m_markerRunsToWrite.forEach(runsToWrite -> {
 						if (progress.isAborted() || progress.getError() != null)
 							return;
 
@@ -205,10 +204,17 @@ public abstract class AbstractIndividualOrientedExportHandler implements IExport
 					progress.setError("Error creating temp files: " + e.getMessage());
 				}
 			}
+
+			@Override
+			public void writeChunkRunsSynchronously(Collection<Collection<VariantRunData>> markerRunsToWrite,
+					List<String> orderedMarkerIDs, OutputStream mainOS, OutputStream warningkOS) {
+				// TODO Auto-generated method stub
+				
+			}
 		};
 		
-		ExportManager exportManager = new ExportManager(mongoTemplate, nAssemblyId, collWithPojoCodec, VariantRunData.class, vrdQuery, samplesToExport, true, nQueryChunkSize, writingThread, markerCount, null, progress);
-		exportManager.readAndWrite();
+		ExportManager exportManager = null;//new ExportManager(mongoTemplate, nAssemblyId, collWithPojoCodec, VariantRunData.class, vrdQuery, samplesToExport, true, nQueryChunkSize, writingThread, markerCount, null, progress);
+		exportManager.readAndWrite(null);
 		
 	 	if (!progress.isAborted())
 	 		LOG.info("createExportFiles took " + (System.currentTimeMillis() - before)/1000d + "s to process " + markerCount + " variants and " + files.length + " individuals");
@@ -269,7 +275,7 @@ public abstract class AbstractIndividualOrientedExportHandler implements IExport
 		return individualOrientedExportHandlers;
 	}
 	
-	protected String findOutMostFrequentGenotype(String line, FileWriter warningFileWriter, int nMarkerIndex, String individualId) throws IOException {
+	protected String findOutMostFrequentGenotype(String line, OutputStream warningOS, int nMarkerIndex, String individualId) throws IOException {
         String mostFrequentGenotype = null;
         if (!line.isEmpty()) {
             List<String> genotypes = Helper.split(line, "|");
@@ -295,8 +301,8 @@ public abstract class AbstractIndividualOrientedExportHandler implements IExport
                     List<Integer> reverseSortedGtCounts = genotypeCounts.values().stream().sorted(Comparator.reverseOrder()).collect(Collectors.toList());
                     if (reverseSortedGtCounts.get(0) == reverseSortedGtCounts.get(1))
                         mostFrequentGenotype = null;
-                    if (warningFileWriter != null)
-                        warningFileWriter.write("- Dissimilar genotypes found for variant n. " + nMarkerIndex + ", individual " + individualId + ". " + (mostFrequentGenotype == null ? "Exporting as missing data" : "Exporting most frequent: " + mostFrequentGenotype.replaceAll(" ", "/")) + "\n");
+                    if (warningOS != null)
+                    	warningOS.write(("- Dissimilar genotypes found for variant n. " + nMarkerIndex + ", individual " + individualId + ". " + (mostFrequentGenotype == null ? "Exporting as missing data" : "Exporting most frequent: " + mostFrequentGenotype.replaceAll(" ", "/")) + "\n").getBytes());
                 }
             }
         }
