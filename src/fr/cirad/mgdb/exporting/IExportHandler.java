@@ -224,7 +224,8 @@ public interface IExportHandler
     	}
     	finally {
     		for (File f : chunkFiles)
-    			f.delete();
+    			if (f != null)
+    				f.delete();
     	}
 	}
 }
