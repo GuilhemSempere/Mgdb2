@@ -200,30 +200,30 @@ public interface IExportHandler
         return result;
     }
     
-    public static void writeWarnings(ZipOutputStream zos, File[] warningFiles, String exportName) throws IOException {
+    public static void writeZipEntryFromChunkFiles(ZipOutputStream zos, File[] chunkFiles, String sZipEntryFileName) throws IOException {
     	try {
-	        int nWarningCount = 0;
-	        for (File f : warningFiles) {
+	        int chunkCount = 0;
+	        for (File f : chunkFiles) {
 		    	if (f.length() > 0) {
 		            BufferedReader in = new BufferedReader(new FileReader(f));
 		            String sLine;
 		            while ((sLine = in.readLine()) != null) {
-		            	if (nWarningCount == 0)
-		                    zos.putNextEntry(new ZipEntry(exportName + "-REMARKS.txt"));
+		            	if (chunkCount == 0)
+		                    zos.putNextEntry(new ZipEntry(sZipEntryFileName));
 		                zos.write((sLine + "\n").getBytes());
-		                nWarningCount++;
+		                chunkCount++;
 		            }
 		            in.close();
 		    	}
 		    	f.delete();
 	        }
-	        if (nWarningCount > 0) {
-		        LOG.info("Number of warnings for export (" + exportName + "): " + nWarningCount);
+	        if (chunkCount > 0) {
+		        LOG.debug("Number of entries in export file " + sZipEntryFileName + ": " + chunkCount);
 		        zos.closeEntry();
 	        }
     	}
     	finally {
-    		for (File f : warningFiles)
+    		for (File f : chunkFiles)
     			f.delete();
     	}
 	}
