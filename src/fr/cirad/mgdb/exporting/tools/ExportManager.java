@@ -16,8 +16,10 @@
  *******************************************************************************/
 package fr.cirad.mgdb.exporting.tools;
 
+import java.io.BufferedInputStream;
 import java.io.BufferedOutputStream;
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
@@ -29,6 +31,9 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Timer;
+import java.util.TimerTask;
+import java.util.concurrent.ConcurrentSkipListSet;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
@@ -36,7 +41,6 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
 
-import org.apache.commons.io.FileUtils;
 import org.apache.log4j.Logger;
 import org.bson.Document;
 import org.bson.codecs.configuration.CodecRegistries;
@@ -134,6 +138,7 @@ public class ExportManager
     
     private Integer nAssemblyId;
     
+    private File[] chunkGenotypeFiles;
     private File[] chunkVariantFiles;
     private File[] chunkWarningFiles;
 
@@ -245,8 +250,9 @@ public class ExportManager
         	throw new IOException("markerCount may not be null");
 
         Future<Void>[] chunkExportTasks = new Future[(int) Math.ceil((float) markerCount / nQueryChunkSize)];
-        File[] chunkGenotypeFiles = new File[chunkExportTasks.length];
-        chunkVariantFiles = new File[chunkExportTasks.length];
+        chunkGenotypeFiles = new File[chunkExportTasks.length];
+        if (exportWriter.writesVariantFiles())
+        	chunkVariantFiles = new File[chunkExportTasks.length];
         chunkWarningFiles = new File[chunkExportTasks.length];
         
         LOG.debug("Exporting from " + varColl.getNamespace().getCollectionName() + " in " + chunkExportTasks.length + " chunks of size " + nQueryChunkSize);
@@ -254,8 +260,9 @@ public class ExportManager
         ExecutorService executor = MongoTemplateManager.getExecutor(module);
         String taskGroup = "export_" + System.currentTimeMillis() + "_" + progress.getProcessId();
         
-        AtomicInteger nChunkIndex = new AtomicInteger(0), nWrittenmarkerCount = new AtomicInteger(0), nSpeedEstimationCompletedQueryCount = new AtomicInteger(0);
+        AtomicInteger nChunkIndex = new AtomicInteger(0), nNextChunkToAppendToMainOS = new AtomicInteger(0), nSpeedEstimationCompletedQueryCount = new AtomicInteger(0);
         AtomicLong timeSpentReadingWithoutProjectStage = new AtomicLong(0), timeSpentReadingWithProjectStage = new AtomicLong(0);
+        ConcurrentSkipListSet<Integer> extractedChunks = new ConcurrentSkipListSet<>();
         
         try {
 	        MongoCollection<VariantRunData> runColl = mongoTemplate.getDb().withCodecRegistry(ExportManager.pojoCodecRegistry).getCollection(mongoTemplate.getCollectionName(VariantRunData.class), VariantRunData.class);
@@ -283,14 +290,16 @@ public class ExportManager
 	
 	            			OutputStream genotypeChunkOS = null, variantChunkOS = null, warningChunkOS = null;
 	            			try {
-		            			File mainChunkFile = File.createTempFile(nFinalChunkIndex + "__genotypes__", "__" + taskGroup), variantChunkFile = File.createTempFile(nFinalChunkIndex + "__variants__", "__" + taskGroup), warningChunkFile = File.createTempFile(nFinalChunkIndex + "__warnings__", "__" + taskGroup);
-		            			chunkGenotypeFiles[nFinalChunkIndex - 1] = mainChunkFile;
-		            			genotypeChunkOS = new BufferedOutputStream(new FileOutputStream(mainChunkFile));
-		            			chunkVariantFiles[nFinalChunkIndex - 1] = variantChunkFile;
-		            			variantChunkOS = new BufferedOutputStream(new FileOutputStream(variantChunkFile));
+		            			File genotypeChunkFile = File.createTempFile(nFinalChunkIndex + "__genotypes__", "__" + taskGroup), warningChunkFile = File.createTempFile(nFinalChunkIndex + "__warnings__", "__" + taskGroup);
+		            			chunkGenotypeFiles[nFinalChunkIndex - 1] = genotypeChunkFile;
+		            			genotypeChunkOS = new BufferedOutputStream(new FileOutputStream(genotypeChunkFile), 16384);
+		            			if (exportWriter.writesVariantFiles()) {
+		            				File variantChunkFile = File.createTempFile(nFinalChunkIndex + "__variants__", "__" + taskGroup);
+			            			chunkVariantFiles[nFinalChunkIndex - 1] = variantChunkFile;
+			            			variantChunkOS = new BufferedOutputStream(new FileOutputStream(variantChunkFile), 16384);
+		            			}
 		            			chunkWarningFiles[nFinalChunkIndex - 1] = warningChunkFile;
-		            			warningChunkOS = new BufferedOutputStream(new FileOutputStream(warningChunkFile));
-
+		            			warningChunkOS = new BufferedOutputStream(new FileOutputStream(warningChunkFile), 16384);
 		            			
 		                        BasicDBList matchAndList = new BasicDBList();
 		                        if (!projectFilterList.isEmpty())
@@ -361,30 +370,40 @@ public class ExportManager
 		        	                chunkMarkerRunsToWrite.put(previousVarId, currentMarkerRuns);
 		        	                currentMarkerRuns = new ArrayList<>(involvedRunCount);
 		                        }
-	
-		                        nWrittenmarkerCount.addAndGet(chunkMarkerIDs.size());
-		                        previousVarId = null;
-		
-	                            progress.setCurrentStepProgress(nWrittenmarkerCount.get() * 100l / markerCount);
+
+	                            progress.setCurrentStepProgress(extractedChunks.size() * 100l / chunkGenotypeFiles.length);
 		                        exportWriter.writeChunkRuns(chunkMarkerRunsToWrite.values(), chunkMarkerIDs, genotypeChunkOS, variantChunkOS, warningChunkOS);
+								if (genotypeChunkOS != null)
+									genotypeChunkOS.close();
+	            				if (variantChunkOS != null)
+									variantChunkOS.close();
+	            				if (warningChunkOS != null)
+									warningChunkOS.close();
+		        		        if (exportWriter.writesVariantFiles() && chunkVariantFiles[nFinalChunkIndex - 1] != null && chunkVariantFiles[nFinalChunkIndex - 1].length() == 0) 
+		        		        	chunkVariantFiles[nFinalChunkIndex - 1].delete();	// only keep non-empty files
+		        		        if (chunkWarningFiles[nFinalChunkIndex - 1] != null && chunkWarningFiles[nFinalChunkIndex - 1].length() == 0) 
+		        		        	chunkWarningFiles[nFinalChunkIndex - 1].delete();	// only keep non-empty files
+		        		        
+		                        extractedChunks.add(nFinalChunkIndex - 1);
+		                        previousVarId = null;
+		        		        
+		                        synchronized (chunkGenotypeFiles) {
+		                        	while (extractedChunks.contains(nNextChunkToAppendToMainOS.get()) && nNextChunkToAppendToMainOS.get() < chunkGenotypeFiles.length)
+		                        		appendChunkToMainOS(chunkGenotypeFiles[nNextChunkToAppendToMainOS.getAndIncrement()], os);
+		                        }
 	
 		                        chunkMarkerRunsToWrite = new LinkedHashMap<>(nQueryChunkSize);
 	                		}
 	                		catch (Exception e) {
 	                			progress.setError(e.getMessage());
-	                			LOG.error(e);
+	                			LOG.error("Error exporting data", e);
 	                			return;
 	                		}
-	            			finally {
-								try {
-									if (genotypeChunkOS != null)
-										genotypeChunkOS.close();
-		            				if (variantChunkOS != null)
-										variantChunkOS.close();
-		            				if (warningChunkOS != null)
-										warningChunkOS.close();
-								} catch (IOException ignored) {}
-	            			}
+//	            			finally {
+//								try {
+//
+//								} catch (IOException ignored) {}
+//	            			}
 		            	}
 	            	};
 	            	
@@ -401,56 +420,121 @@ public class ExportManager
 	        for (Future<Void> t : chunkExportTasks) // wait for all threads before moving to next phase
 	        	if (t != null)	// we can have null tasks with IGV exports
 	        		t.get();
-	
-            progress.setCurrentStepProgress(nWrittenmarkerCount.get() * 100l / markerCount);
 	        
 	        progress.addStep("Merging results");
 	        progress.moveToNextStep();
-	        for (int i=0; i<chunkGenotypeFiles.length; i++)
-		        if (chunkGenotypeFiles[i] != null) {	// we can have null file tasks with IGV exports
-		        	os.write(FileUtils.readFileToByteArray(chunkGenotypeFiles[i]));
-		        	progress.setCurrentStepProgress(i * 100l / chunkGenotypeFiles.length);
-		        }
+	        int nFirstChunkToAppend = nNextChunkToAppendToMainOS.get();
+	        for (int i=nFirstChunkToAppend; i<chunkGenotypeFiles.length; i++) {
+		        appendChunkToMainOS(chunkGenotypeFiles[i], os);
+	        	progress.setCurrentStepProgress((i - nFirstChunkToAppend) * 100l / (chunkGenotypeFiles.length - nFirstChunkToAppend));
+	        }
         }
         catch (Exception e) {
         	LOG.error("Error exporting from " + module,e);
     		for (Future<Void> t : chunkExportTasks)
     			if (t != null)
     				t.cancel(true);
-            for (File f : chunkVariantFiles)
-            	if (f != null)
-            		f.delete();
-    		for (File f : chunkWarningFiles)
-            	if (f != null)
-            		f.delete();
+    		cleanupOutputFiles();
             return;
         }
         finally {
-//        	os.close();
 	        markerCursor.close();
 	        for (int i=0; i<chunkGenotypeFiles.length; i++) {
-		        if (chunkGenotypeFiles[i] != null) 
+		        if (chunkGenotypeFiles[i] != null && chunkGenotypeFiles[i].exists()) 
 		        	chunkGenotypeFiles[i].delete();	// delete all genotype files because if everything went well their contents have been written to the OutputStream
-		        if (chunkVariantFiles[i] != null && chunkVariantFiles[i].length() == 0) 
+		        if (exportWriter.writesVariantFiles() && chunkVariantFiles[i] != null && chunkVariantFiles[i].length() == 0) 
 		        	chunkVariantFiles[i].delete();	// only keep non-empty files
 		        if (chunkWarningFiles[i] != null && chunkWarningFiles[i].length() == 0) 
 		        	chunkWarningFiles[i].delete();	// only keep non-empty files
 	        }
+	        
+			new Timer().schedule(new TimerTask() {
+			    @Override
+			    public void run() {
+			    	cleanupOutputFiles();
+			    }
+			}, 1000 * 60 * 2);	// delete remaining files after 2 minutes, in case calling code didn't handle that
         }
     }
+    
+    private void appendChunkToMainOS(File chunkFile, OutputStream os) throws IOException {
+        if (chunkFile != null) {	// we can have null files with IGV exports      	
+        	try (BufferedInputStream bis = new BufferedInputStream(new FileInputStream(chunkFile))) {
+    		    byte[] buffer = new byte[16384];
+    		    int bytesRead;
 
-    public File[] getVariantFiles() {
-		return chunkVariantFiles;
-	}
+    		    while ((bytesRead = bis.read(buffer)) != -1)
+    		        os.write(buffer, 0, bytesRead);
+    		}
+        	chunkFile.delete();
+        }
+    }
+    
+    private void cleanupOutputFiles() {
+	    for (File f : chunkGenotypeFiles)
+        	if (f != null)
+        		f.delete();
+	    if (chunkVariantFiles != null)
+		    for (File f : chunkVariantFiles)
+	        	if (f != null)
+	        		f.delete();
+		for (File f : chunkWarningFiles)
+        	if (f != null)
+        		f.delete();
+    }
 
-	public File[] getWarningFiles() {
-		return chunkWarningFiles;
+	public ExportOutputs getOutputs() {
+		return new ExportOutputs(chunkGenotypeFiles, chunkVariantFiles, chunkWarningFiles);
 	}
+    
+    public static class ExportOutputs
+    {
+        public ExportOutputs(File[] chunkGenotypeFiles, File[] chunkVariantFiles, File[] chunkWarningFiles) {
+			super();
+			this.chunkGenotypeFiles = chunkGenotypeFiles;
+			this.chunkVariantFiles = chunkVariantFiles;
+			this.chunkWarningFiles = chunkWarningFiles;
+		}
+
+		private File[] chunkGenotypeFiles;
+        private File[] chunkVariantFiles;
+        private File[] chunkWarningFiles;
+
+        // may be used to replace variant-oriented files with individual-oriented files
+    	public void setGenotypeFiles(File[] chunkGenotypeFiles) {
+    		this.chunkGenotypeFiles = chunkGenotypeFiles;
+    	}
+    	
+    	public File[] getGenotypeFiles() {
+    		return chunkGenotypeFiles;
+    	}
+    	
+        public File[] getVariantFiles() {
+    		return chunkVariantFiles;
+    	}
+
+    	public File[] getWarningFiles() {
+    		return chunkWarningFiles;
+    	}
+    }
     
     public static abstract class AbstractExportWriter
     {
     	static final Logger LOG = Logger.getLogger(AbstractExportWriter.class);
-    	    	
-    	abstract public void writeChunkRuns(Collection<Collection<VariantRunData>> markerRunsToWrite, List<String> orderedMarkerIDs, OutputStream genotypeOS, OutputStream variantOS, OutputStream warningkOS) throws IOException;
+    	
+    	protected boolean fWritesVariantFile = true;
+
+		public AbstractExportWriter() {
+		}
+
+		public AbstractExportWriter(boolean fWritesVariantFile) {
+			this.fWritesVariantFile = fWritesVariantFile;
+		}
+
+    	public boolean writesVariantFiles() {
+			return fWritesVariantFile;
+		}
+
+		abstract public void writeChunkRuns(Collection<Collection<VariantRunData>> markerRunsToWrite, List<String> orderedMarkerIDs, OutputStream genotypeOS, OutputStream variantOS, OutputStream warningkOS) throws IOException;
     }
 }

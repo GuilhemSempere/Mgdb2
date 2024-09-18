@@ -57,7 +57,7 @@ public interface IExportHandler
 	static final Collation collationObj = Collation.builder().numericOrdering(true).locale("en_US").build();
 	
 	/** The Constant nMaxChunkSizeInMb. */
-	static final int nMaxChunkSizeInMb = 2;
+	static final int nMaxChunkSizeInMb = 5;
 	
 	/** The Constant LINE_SEPARATOR. */
 	static final String LINE_SEPARATOR = "\n";
@@ -204,8 +204,8 @@ public interface IExportHandler
     	try {
 	        int chunkCount = 0;
 	        for (File f : chunkFiles) {
-		    	if (f.length() > 0) {
-		            BufferedReader in = new BufferedReader(new FileReader(f));
+		    	if (f.length() > 0)
+		    	try (BufferedReader in = new BufferedReader(new FileReader(f))) {
 		            String sLine;
 		            while ((sLine = in.readLine()) != null) {
 		            	if (chunkCount == 0)
