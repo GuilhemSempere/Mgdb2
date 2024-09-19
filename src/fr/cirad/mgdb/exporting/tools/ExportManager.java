@@ -373,20 +373,15 @@ public class ExportManager
 
 	                            progress.setCurrentStepProgress(extractedChunks.size() * 100l / chunkGenotypeFiles.length);
 		                        exportWriter.writeChunkRuns(chunkMarkerRunsToWrite.values(), chunkMarkerIDs, genotypeChunkOS, variantChunkOS, warningChunkOS);
-								if (genotypeChunkOS != null)
-									genotypeChunkOS.close();
-	            				if (variantChunkOS != null)
-									variantChunkOS.close();
-	            				if (warningChunkOS != null)
-									warningChunkOS.close();
 		        		        if (exportWriter.writesVariantFiles() && chunkVariantFiles[nFinalChunkIndex - 1] != null && chunkVariantFiles[nFinalChunkIndex - 1].length() == 0) 
 		        		        	chunkVariantFiles[nFinalChunkIndex - 1].delete();	// only keep non-empty files
 		        		        if (chunkWarningFiles[nFinalChunkIndex - 1] != null && chunkWarningFiles[nFinalChunkIndex - 1].length() == 0) 
 		        		        	chunkWarningFiles[nFinalChunkIndex - 1].delete();	// only keep non-empty files
 		        		        
+		        		        genotypeChunkOS.close();	// make sure it's completely written out before the file gets read
 		                        extractedChunks.add(nFinalChunkIndex - 1);
 		                        previousVarId = null;
-		        		        
+
 		                        synchronized (chunkGenotypeFiles) {
 		                        	while (extractedChunks.contains(nNextChunkToAppendToMainOS.get()) && nNextChunkToAppendToMainOS.get() < chunkGenotypeFiles.length)
 		                        		appendChunkToMainOS(chunkGenotypeFiles[nNextChunkToAppendToMainOS.getAndIncrement()], os);
@@ -399,11 +394,16 @@ public class ExportManager
 	                			LOG.error("Error exporting data", e);
 	                			return;
 	                		}
-//	            			finally {
-//								try {
-//
-//								} catch (IOException ignored) {}
-//	            			}
+	            			finally {
+								try {
+									if (genotypeChunkOS != null)
+										genotypeChunkOS.close();	// already closed if everything went well, so just in case...
+		            				if (variantChunkOS != null)
+										variantChunkOS.close();
+		            				if (warningChunkOS != null)
+										warningChunkOS.close();
+								} catch (IOException ignored) {}
+	            			}
 		            	}
 	            	};
 	            	
