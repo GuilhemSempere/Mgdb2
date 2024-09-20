@@ -51,6 +51,8 @@ public abstract class AbstractMarkerOrientedExportHandler implements IExportHand
 	/** The marker oriented export handlers. */
 	static private TreeMap<String, AbstractMarkerOrientedExportHandler> markerOrientedExportHandlers = null;
 
+	protected String tmpFolderPath;
+
     /**
      * Export data.
      *
@@ -158,5 +160,9 @@ public abstract class AbstractMarkerOrientedExportHandler implements IExportHand
 	public String getExportContentType() {
 		return "application/zip";
 	}
-
+	
+	@Override
+	public void setTmpFolder(String tmpFolderPath) {
+		this.tmpFolderPath = tmpFolderPath;	
+	}
 }
