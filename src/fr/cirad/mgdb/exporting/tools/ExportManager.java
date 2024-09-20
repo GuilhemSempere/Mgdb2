@@ -141,6 +141,8 @@ public class ExportManager
     private File[] chunkGenotypeFiles;
     private File[] chunkVariantFiles;
     private File[] chunkWarningFiles;
+    
+	private File dataExtractionFolder;
 
     public static final CodecRegistry pojoCodecRegistry = CodecRegistries.fromRegistries(MongoClientSettings.getDefaultCodecRegistry(), CodecRegistries.fromProviders(PojoCodecProvider.builder().register(new IntKeyMapPropertyCodecProvider()).automatic(true).build()));
 
@@ -209,6 +211,17 @@ public class ExportManager
             }
         }
     }
+	
+	public void setTmpExtractionFolder(String extractionDirToUse) {
+		try {
+			dataExtractionFolder = new File(extractionDirToUse);
+			dataExtractionFolder.mkdirs();
+		}
+		catch (Exception e) {
+			dataExtractionFolder = null;
+			LOG.error("Unable to use folder " + extractionDirToUse + " for extaction. Files will be written to the default temp folder.");
+		}
+	}
 
     public void readAndWrite(OutputStream os) throws IOException, InterruptedException, ExecutionException {
         List<String> currentMarkerIDs = new ArrayList<>(nQueryChunkSize);
@@ -231,7 +244,7 @@ public class ExportManager
                 pipeline.add(matchStageForVariantColl);
             }
             catch (Exception e) {
-            	LOG.error("Error translating peoject filter from VRD format to Variant format: " + matchStageForVariantColl);
+            	LOG.error("Error translating peoject filter from VRD format to Variant format: " + matchStageForVariantColl, e);
             }
         }
         pipeline.add(sortStage);
@@ -276,7 +289,7 @@ public class ExportManager
 	                		f.delete();
 	                break;
 	            }
-	
+	            
 	            currentMarkerIDs.add(markerCursor.next().getString("_id"));
 	
 	            if (currentMarkerIDs.size() >= nQueryChunkSize || !markerCursor.hasNext()) {	// current variant ID list is large enough to start exporting chunk
@@ -290,11 +303,11 @@ public class ExportManager
 	
 	            			OutputStream genotypeChunkOS = null, variantChunkOS = null, warningChunkOS = null;
 	            			try {
-		            			File genotypeChunkFile = File.createTempFile(nFinalChunkIndex + "__genotypes__", "__" + taskGroup), warningChunkFile = File.createTempFile(nFinalChunkIndex + "__warnings__", "__" + taskGroup);
+		            			File genotypeChunkFile = File.createTempFile(nFinalChunkIndex + "__genotypes__", "__" + taskGroup, dataExtractionFolder), warningChunkFile = File.createTempFile(nFinalChunkIndex + "__warnings__", "__" + taskGroup, dataExtractionFolder);
 		            			chunkGenotypeFiles[nFinalChunkIndex - 1] = genotypeChunkFile;
 		            			genotypeChunkOS = new BufferedOutputStream(new FileOutputStream(genotypeChunkFile), 16384);
 		            			if (exportWriter.writesVariantFiles()) {
-		            				File variantChunkFile = File.createTempFile(nFinalChunkIndex + "__variants__", "__" + taskGroup);
+		            				File variantChunkFile = File.createTempFile(nFinalChunkIndex + "__variants__", "__" + taskGroup, dataExtractionFolder);
 			            			chunkVariantFiles[nFinalChunkIndex - 1] = variantChunkFile;
 			            			variantChunkOS = new BufferedOutputStream(new FileOutputStream(variantChunkFile), 16384);
 		            			}
@@ -373,15 +386,21 @@ public class ExportManager
 
 	                            progress.setCurrentStepProgress(extractedChunks.size() * 100l / chunkGenotypeFiles.length);
 		                        exportWriter.writeChunkRuns(chunkMarkerRunsToWrite.values(), chunkMarkerIDs, genotypeChunkOS, variantChunkOS, warningChunkOS);
+		                        
+		        		    	// make sure data is completely written out before the files gets read
+		        		        genotypeChunkOS.close();
+	            				if (variantChunkOS != null)
+									variantChunkOS.close();
+								warningChunkOS.close();
+		                        extractedChunks.add(nFinalChunkIndex - 1);
+		                        previousVarId = null;
+		                        
+		                        // early cleanup to avoid having too many empty files all over the place
 		        		        if (exportWriter.writesVariantFiles() && chunkVariantFiles[nFinalChunkIndex - 1] != null && chunkVariantFiles[nFinalChunkIndex - 1].length() == 0) 
 		        		        	chunkVariantFiles[nFinalChunkIndex - 1].delete();	// only keep non-empty files
 		        		        if (chunkWarningFiles[nFinalChunkIndex - 1] != null && chunkWarningFiles[nFinalChunkIndex - 1].length() == 0) 
 		        		        	chunkWarningFiles[nFinalChunkIndex - 1].delete();	// only keep non-empty files
 		        		        
-		        		        genotypeChunkOS.close();	// make sure it's completely written out before the file gets read
-		                        extractedChunks.add(nFinalChunkIndex - 1);
-		                        previousVarId = null;
-
 		                        synchronized (chunkGenotypeFiles) {
 		                        	while (extractedChunks.contains(nNextChunkToAppendToMainOS.get()) && nNextChunkToAppendToMainOS.get() < chunkGenotypeFiles.length)
 		                        		appendChunkToMainOS(chunkGenotypeFiles[nNextChunkToAppendToMainOS.getAndIncrement()], os);
@@ -395,13 +414,11 @@ public class ExportManager
 	                			return;
 	                		}
 	            			finally {
-								try {
-									if (genotypeChunkOS != null)
-										genotypeChunkOS.close();	// already closed if everything went well, so just in case...
+								try {	// these should be already closed if everything went well, so just in case...
+									genotypeChunkOS.close();
 		            				if (variantChunkOS != null)
 										variantChunkOS.close();
-		            				if (warningChunkOS != null)
-										warningChunkOS.close();
+									warningChunkOS.close();
 								} catch (IOException ignored) {}
 	            			}
 		            	}
@@ -411,7 +428,7 @@ public class ExportManager
 	                currentMarkerIDs = new ArrayList<>(nQueryChunkSize);
 	            }
 	        }
-	        
+
 	        if (executor instanceof GroupedExecutor)
 	        	((GroupedExecutor) executor).shutdown(taskGroup);
 	        else
@@ -438,6 +455,7 @@ public class ExportManager
             return;
         }
         finally {
+        	os.flush();
 	        markerCursor.close();
 	        for (int i=0; i<chunkGenotypeFiles.length; i++) {
 		        if (chunkGenotypeFiles[i] != null && chunkGenotypeFiles[i].exists()) 
