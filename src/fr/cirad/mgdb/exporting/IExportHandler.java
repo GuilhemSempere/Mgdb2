@@ -119,6 +119,8 @@ public interface IExportHandler
 	 */
 	public List<String> getSupportedVariantTypes();
 	
+	public void setTmpFolder(String tmpFolderPath);
+	
 	public static boolean addMetadataEntryIfAny(String fileName, String sModule, String sExportingUser, Collection<String> exportedIndividuals, Collection<String> individualMetadataFieldsToExport, ZipOutputStream zos, String initialContents) throws IOException {
 		ByteArrayOutputStream baos = new ByteArrayOutputStream();
         if (!writeMetadataFile(sModule, sExportingUser, exportedIndividuals, individualMetadataFieldsToExport, baos))
@@ -201,21 +203,29 @@ public interface IExportHandler
     }
     
     public static void writeZipEntryFromChunkFiles(ZipOutputStream zos, File[] chunkFiles, String sZipEntryFileName) throws IOException {
+    	writeZipEntryFromChunkFiles(zos, chunkFiles, sZipEntryFileName, null);
+    }
+
+    public static void writeZipEntryFromChunkFiles(ZipOutputStream zos, File[] chunkFiles, String sZipEntryFileName, String headerLine) throws IOException {
     	try {
 	        int chunkCount = 0;
 	        for (File f : chunkFiles) {
-		    	if (f.length() > 0)
-		    	try (BufferedReader in = new BufferedReader(new FileReader(f))) {
-		            String sLine;
-		            while ((sLine = in.readLine()) != null) {
-		            	if (chunkCount == 0)
-		                    zos.putNextEntry(new ZipEntry(sZipEntryFileName));
-		                zos.write((sLine + "\n").getBytes());
-		                chunkCount++;
-		            }
-		            in.close();
+		    	if (f != null && f.length() > 0) {
+			    	try (BufferedReader in = new BufferedReader(new FileReader(f))) {
+			            String sLine;
+			            while ((sLine = in.readLine()) != null) {
+			            	if (chunkCount == 0) {
+			                    zos.putNextEntry(new ZipEntry(sZipEntryFileName));
+			                    if (headerLine != null)
+			                    	zos.write((headerLine + "\n").getBytes());
+			            	}
+			            	zos.write((sLine + "\n").getBytes());
+			                chunkCount++;
+			            }
+			            in.close();
+			    	}
+			    	f.delete();
 		    	}
-		    	f.delete();
 	        }
 	        if (chunkCount > 0) {
 		        LOG.debug("Number of entries in export file " + sZipEntryFileName + ": " + chunkCount);
