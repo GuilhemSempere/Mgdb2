@@ -57,7 +57,7 @@ public interface IExportHandler
 	static final Collation collationObj = Collation.builder().numericOrdering(true).locale("en_US").build();
 	
 	/** The Constant nMaxChunkSizeInMb. */
-	static final int nMaxChunkSizeInMb = 5;
+	static final int nMaxChunkSizeInMb = 2;	// many different values were tested, this really looks like the best compromise
 	
 	/** The Constant LINE_SEPARATOR. */
 	static final String LINE_SEPARATOR = "\n";

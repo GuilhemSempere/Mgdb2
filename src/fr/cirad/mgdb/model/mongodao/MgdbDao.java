@@ -211,7 +211,7 @@ public class MgdbDao {
         MongoCollection<Document> variantColl = mongoTemplate.getCollection(mongoTemplate.getCollectionName(VariantData.class)), runColl = mongoTemplate.getCollection(mongoTemplate.getCollectionName(VariantRunData.class));
 
         // make sure positions are indexed with correct collation etc...
-        ensurePositionIndexes(mongoTemplate, Arrays.asList(variantColl, runColl));
+        ensurePositionIndexes(mongoTemplate, Arrays.asList(variantColl, runColl), false, false);
         if (!variantColl.find(new BasicDBObject()).projection(new BasicDBObject("_id", 1)).limit(1).cursor().hasNext())
         	throw new NoSuchElementException("No variants found in database!");
 
@@ -323,11 +323,7 @@ public class MgdbDao {
 	        }
         return nResult;
     }
-    
-    public static int ensurePositionIndexes(MongoTemplate mongoTemplate, Collection<MongoCollection<Document>> varColls) {
-        return ensurePositionIndexes(mongoTemplate, varColls, false);
-    }
-    
+
     /**
      * Ensures position indexes are correct in passed collections. Supports
      * variants, variantRunData and temporary collections Removes incorrect
@@ -336,9 +332,11 @@ public class MgdbDao {
      * @param mongoTemplate the mongoTemplate
      * @param varColls variant collections to ensure indexes on
      * @param fEvenIfCollectionIsEmpty if true, create indexes no matter if collections contains documents
+     * @param fWaitForCompletion if true, method does not return before index creation is complete
      * @return the number of indexes that were created
+     * @throws InterruptedException 
      */
-    public static int ensurePositionIndexes(MongoTemplate mongoTemplate, Collection<MongoCollection<Document>> varColls, boolean fEvenIfCollectionIsEmpty) {
+    public static int ensurePositionIndexes(MongoTemplate mongoTemplate, Collection<MongoCollection<Document>> varColls, boolean fEvenIfCollectionIsEmpty, boolean fWaitForCompletion) throws InterruptedException {
         int nResult = 0;
         
         List<String> variantTypes = getVariantTypes(mongoTemplate, null);
@@ -398,6 +396,8 @@ public class MgdbDao {
 //	                    }
 	                }
 	            }
+	            
+	            List<Thread> threads = new ArrayList<>();
 
 	            if (!fFoundStartSiteIndex) {
 	                Thread ssIndexCreationThread = new Thread() {
@@ -406,7 +406,7 @@ public class MgdbDao {
 	                        coll.createIndex(ssIndexKeys);
 	                    }
 	                };
-	                ssIndexCreationThread.start();
+	                threads.add(ssIndexCreationThread);
 	                nResult++;
 	            }
 	            
@@ -417,7 +417,7 @@ public class MgdbDao {
 	                        coll.createIndex(esIndexKeys);
 	                    }
 	                };
-	                esIndexCreationThread.start();
+	                threads.add(esIndexCreationThread);
 	                nResult++;
 	            }
 	
@@ -434,7 +434,7 @@ public class MgdbDao {
 	                        coll.createIndex(startCompoundIndexKeys, new IndexOptions().collation(IExportHandler.collationObj));
 	                    }
 	                };
-	                ssIndexCreationThread.start();
+	                threads.add(ssIndexCreationThread);
 	
 	                nResult++;
 	            }
@@ -452,10 +452,17 @@ public class MgdbDao {
 	                        coll.createIndex(endCompoundIndexKeys, new IndexOptions().collation(IExportHandler.collationObj));
 	                    }
 	                };
-	                esIndexCreationThread.start();
+	                threads.add(esIndexCreationThread);
 	
 	                nResult++;
 	            }
+
+		        for (Thread t : threads)
+		        	t.start();
+
+		        if (fWaitForCompletion)
+		        	for (Thread t : threads)
+			        	t.join();
 	        }
         }
         return nResult;
