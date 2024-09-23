@@ -16,7 +16,10 @@
  *******************************************************************************/
 package fr.cirad.mgdb.exporting;
 
+import java.io.BufferedReader;
 import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.io.FileReader;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -54,7 +57,7 @@ public interface IExportHandler
 	static final Collation collationObj = Collation.builder().numericOrdering(true).locale("en_US").build();
 	
 	/** The Constant nMaxChunkSizeInMb. */
-	static final int nMaxChunkSizeInMb = 2;
+	static final int nMaxChunkSizeInMb = 5;
 	
 	/** The Constant LINE_SEPARATOR. */
 	static final String LINE_SEPARATOR = "\n";
@@ -115,6 +118,8 @@ public interface IExportHandler
 	 * @return the supported variant types
 	 */
 	public List<String> getSupportedVariantTypes();
+	
+	public void setTmpFolder(String tmpFolderPath);
 	
 	public static boolean addMetadataEntryIfAny(String fileName, String sModule, String sExportingUser, Collection<String> exportedIndividuals, Collection<String> individualMetadataFieldsToExport, ZipOutputStream zos, String initialContents) throws IOException {
 		ByteArrayOutputStream baos = new ByteArrayOutputStream();
@@ -196,4 +201,41 @@ public interface IExportHandler
     		}
         return result;
     }
+    
+    public static void writeZipEntryFromChunkFiles(ZipOutputStream zos, File[] chunkFiles, String sZipEntryFileName) throws IOException {
+    	writeZipEntryFromChunkFiles(zos, chunkFiles, sZipEntryFileName, null);
+    }
+
+    public static void writeZipEntryFromChunkFiles(ZipOutputStream zos, File[] chunkFiles, String sZipEntryFileName, String headerLine) throws IOException {
+    	try {
+	        int chunkCount = 0;
+	        for (File f : chunkFiles) {
+		    	if (f != null && f.length() > 0) {
+			    	try (BufferedReader in = new BufferedReader(new FileReader(f))) {
+			            String sLine;
+			            while ((sLine = in.readLine()) != null) {
+			            	if (chunkCount == 0) {
+			                    zos.putNextEntry(new ZipEntry(sZipEntryFileName));
+			                    if (headerLine != null)
+			                    	zos.write((headerLine + "\n").getBytes());
+			            	}
+			            	zos.write((sLine + "\n").getBytes());
+			                chunkCount++;
+			            }
+			            in.close();
+			    	}
+			    	f.delete();
+		    	}
+	        }
+	        if (chunkCount > 0) {
+		        LOG.debug("Number of entries in export file " + sZipEntryFileName + ": " + chunkCount);
+		        zos.closeEntry();
+	        }
+    	}
+    	finally {
+    		for (File f : chunkFiles)
+    			if (f != null)
+    				f.delete();
+    	}
+	}
 }

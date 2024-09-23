@@ -16,7 +16,7 @@
  *******************************************************************************/
 package fr.cirad.mgdb.model.mongo.subtypes;
 
-import java.io.FileWriter;
+import java.io.OutputStream;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
@@ -29,7 +29,6 @@ import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.TreeMap;
 import java.util.TreeSet;
-import java.util.Map.Entry;
 import java.util.stream.Collectors;
 
 import org.apache.commons.lang3.StringUtils;
@@ -655,12 +654,12 @@ abstract public class AbstractVariantData
 	 * @param individuals List of individual IDs for each group
 	 * @param annotationFieldThresholds the annotation field thresholds for each group
 	 * @param previousPhasingIds the previous phasing ids
-	 * @param warningFileWriter the warning file writer
+	 * @param warningOS the warning file writer
 	 * @param synonym the synonym
 	 * @return the variant context
 	 * @throws Exception the exception
 	 */
-	public VariantContext toVariantContext(MongoTemplate mongoTemplate, Collection<VariantRunData> runs, Integer nAssemblyId, boolean exportVariantIDs, List<GenotypingSample> samplesToExport, Map<String, Integer> individualPositions, Map<String /*population*/, Collection<String>> individuals, Map<String /*population*/, HashMap<String, Float>> annotationFieldThresholds, HashMap<Integer, Object> previousPhasingIds, FileWriter warningFileWriter, String synonym) throws Exception
+	public VariantContext toVariantContext(MongoTemplate mongoTemplate, Collection<VariantRunData> runs, Integer nAssemblyId, boolean exportVariantIDs, Collection<GenotypingSample> samplesToExport, Map<String, Integer> individualPositions, Map<String /*population*/, Collection<String>> individuals, Map<String /*population*/, HashMap<String, Float>> annotationFieldThresholds, HashMap<Integer, Object> previousPhasingIds, OutputStream warningOS, String synonym) throws Exception
 	{
 		ArrayList<Genotype> genotypes = new ArrayList<Genotype>();
 		String sRefAllele = knownAlleles.isEmpty() ? null : knownAlleles.iterator().next();
@@ -729,15 +728,15 @@ abstract public class AbstractVariantData
                 }
             }
 
-            if (warningFileWriter != null && genotypeCounts.size() > 1) {
+            if (warningOS != null && genotypeCounts.size() > 1) {
                 List<Integer> reverseSortedGtCounts = genotypeCounts.values().stream().sorted(Comparator.reverseOrder()).collect(Collectors.toList());
                 if (reverseSortedGtCounts.get(0) == reverseSortedGtCounts.get(1))
                     mostFrequentGenotype = null;
             }
 
             if (mostFrequentGenotype == null) {
-                if (warningFileWriter != null && genotypeCounts.size() > 1)
-                    warningFileWriter.write("- Dissimilar genotypes found for variant " + (synonym == null ? getVariantId() : synonym) + ", individual " + entry.getKey() + ". " + "Exporting as missing data\n");
+                if (warningOS != null && genotypeCounts.size() > 1)
+                    warningOS.write(("- Dissimilar genotypes found for variant " + (synonym == null ? getVariantId() : synonym) + ", individual " + entry.getKey() + ". " + "Exporting as missing data\n").getBytes());
 
                 continue;    // no genotype for this individual
             }
@@ -754,8 +753,8 @@ abstract public class AbstractVariantData
                 genotypeStringCache.put(gtCode, alleles);
             }
             
-            if (warningFileWriter != null && genotypeCounts.size() > 1)
-                warningFileWriter.write("- Dissimilar genotypes found for variant " + (synonym == null ? getVariantId() : synonym) + ", individual " + entry.getKey() + ". " + "Exporting most frequent: " + StringUtils.join(alleles, "/") + "\n");
+            if (warningOS != null && genotypeCounts.size() > 1)
+                warningOS.write(("- Dissimilar genotypes found for variant " + (synonym == null ? getVariantId() : synonym) + ", individual " + entry.getKey() + ". " + "Exporting most frequent: " + StringUtils.join(alleles, "/") + "\n").getBytes());
 
             ArrayList<Allele> individualAlleles = new ArrayList<>(alleles.size());
             previousPhasingIds.put(spId, currentPhId == null ? getVariantId() : currentPhId);
