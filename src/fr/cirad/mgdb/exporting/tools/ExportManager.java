@@ -425,7 +425,7 @@ public class ExportManager
                 		appendChunkToMainOS(chunkGenotypeFiles[nNextChunkToAppendToMainOS.getAndIncrement()], os);
 	        	}
 
-	        progress.addStep("Merging results");
+	        progress.insertStep("Merging results");
 	        progress.moveToNextStep();
 	        int nFirstChunkToAppend = nNextChunkToAppendToMainOS.get();
 	        for (int i=nFirstChunkToAppend; i<chunkGenotypeFiles.length; i++) {
