@@ -505,16 +505,15 @@ abstract public class AbstractVariantData
         return knownAlleles;
     }
 
-//	/**
-//	 * Gets the known allele list.
-//	 *
-//	 * @return the known allele list
-//	 */
-//	public List<String> getKnownAlleleList() {
-//		if (knownAlleleList == null || getKnownAlleles().size() > knownAlleleList.size())
-//			knownAlleleList = new ArrayList<String>(getKnownAlleles());
-//		return knownAlleleList;
-//	}
+    /*
+     * Safely gets the known alleles (by default no particular behavior, but may be overridden by subclasses to fix possible missing information)
+     *
+     * @return the known alleles
+     */
+    public SetUniqueListWithConstructor<String> safelyGetKnownAlleles(MongoTemplate mongoTemplate) throws NoSuchElementException
+    {
+        return getKnownAlleles();
+    }
 
     /**
      * Sets the known allele list.
@@ -560,7 +559,7 @@ abstract public class AbstractVariantData
         if (code == null)
             return new ArrayList<>(0);
 
-        try    {
+        try {
             return Arrays.stream(code.split("[\\|/]")).map(alleleCodeIndex -> alleleList.get(Integer.parseInt(alleleCodeIndex))).collect(Collectors.toList());
         }
         catch (IndexOutOfBoundsException ioobe) {
@@ -569,7 +568,7 @@ abstract public class AbstractVariantData
     }
 
     /**
-     * Safely gets the alleles from genotype code (retrieves eventual missing alleles from corresponding VariantData document)
+     * Safely gets the alleles from genotype code (by default no particular behavior, but may be overridden by subclasses to fix possible missing information)
      *
      * @param code the code
      * @param mongoTemplate the MongoTemplate to use for fixing allele list if incomplete
@@ -579,17 +578,10 @@ abstract public class AbstractVariantData
     public List<String> safelyGetAllelesFromGenotypeCode(String code, MongoTemplate mongoTemplate) throws NoSuchElementException
     {
         try {
-            return staticGetAllelesFromGenotypeCode(getKnownAlleles(), code);
+            return staticGetAllelesFromGenotypeCode(safelyGetKnownAlleles(mongoTemplate), code);
         }
-        catch (NoSuchElementException e1) {
-            setKnownAlleles(mongoTemplate.findById(getVariantId(), VariantData.class).getKnownAlleles());
-            mongoTemplate.save(this);
-            try {
-                return staticGetAllelesFromGenotypeCode(getKnownAlleles(), code);
-            }
-            catch (NoSuchElementException e2) {
-                throw new NoSuchElementException("Variant " + this + " - " + e2.getMessage());
-            }
+        catch (NoSuchElementException e) {
+            throw new NoSuchElementException("Variant " + this + " - " + e.getMessage());
         }
     }
 
