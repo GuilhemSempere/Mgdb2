@@ -55,6 +55,9 @@ public abstract class AbstractTokenManager {
     
     abstract public boolean canUserWriteToProject(Collection<? extends GrantedAuthority> authorities, String sModule, int projectId);
     abstract public boolean canUserWriteToProject(String token, String sModule, int projectId);
+    
+    abstract public boolean canUserEditCallsInProject(Collection<? extends GrantedAuthority> authorities, String sModule, int projectId);
+    abstract public boolean canUserEditCallsInProject(String token, String sModule, int projectId);
 
 	abstract public void cleanupTokenMap();
 	abstract public void clearTokensTiedToAuthentication(Authentication auth);

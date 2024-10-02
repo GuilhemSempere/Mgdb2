@@ -58,6 +58,7 @@ import fr.cirad.mgdb.model.mongo.maintypes.DBVCFHeader;
 import fr.cirad.mgdb.model.mongo.maintypes.DBVCFHeader.VcfHeaderId;
 import fr.cirad.mgdb.model.mongo.maintypes.GenotypingProject;
 import fr.cirad.mgdb.model.mongo.maintypes.VariantRunData;
+import fr.cirad.mgdb.model.mongo.subtypes.ReferencePosition;
 import fr.cirad.mgdb.model.mongo.subtypes.Run;
 import fr.cirad.mgdb.model.mongo.subtypes.VariantRunDataId;
 import fr.cirad.tools.Helper;
@@ -105,7 +106,11 @@ public class SnpEffAnnotationService {
 		
 		int nBatchSize = 200;
 		long nTotalNumberOfVRDInDB = Helper.estimDocCount(template, VariantRunData.class);
-		MongoCursor<Document> vrdCursor = template.getCollection(MongoTemplateManager.getMongoCollectionName(VariantRunData.class)).find(vrdQuery).projection(Projections.fields(Projections.include(VariantRunData.FIELDNAME_KNOWN_ALLELES, VariantRunData.FIELDNAME_REFERENCE_POSITION))).batchSize(nBatchSize).cursor();
+		MongoCursor<Document> vrdCursor = template.getCollection(MongoTemplateManager.getMongoCollectionName(VariantRunData.class))
+												.find(vrdQuery)
+												.projection(Projections.fields(Projections.include(VariantRunData.FIELDNAME_KNOWN_ALLELES, nAssembly != null ? VariantRunData.FIELDNAME_POSITIONS + "." + nAssembly : VariantRunData.FIELDNAME_REFERENCE_POSITION)))
+												.batchSize(nBatchSize)
+												.cursor();
 
 		progress.addStep("Processing variants");
 		progress.moveToNextStep();
@@ -124,7 +129,7 @@ public class SnpEffAnnotationService {
 				executorService.execute(new Thread() {
 					public void run() {
 						Assembly.setThreadAssembly(nAssembly);
-						BulkOperations bulkOperations = template.bulkOps(BulkOperations.BulkMode.UNORDERED, VariantRunData.class);
+						BulkOperations bulkOperations = null;
 						for (Document doc : vrdChunkToProcess) {
 							VariantRunData vrd = template.getConverter().read(VariantRunData.class, doc);
 							
@@ -153,15 +158,19 @@ public class SnpEffAnnotationService {
 			                    Update update = new Update();
 			                    for (String key : variantAnnotations.keySet())
 			                    	update.set(VariantRunData.SECTION_ADDITIONAL_INFO + "." + key, variantAnnotations.get(key));
+			                    if (bulkOperations == null)
+			                    	bulkOperations = template.bulkOps(BulkOperations.BulkMode.UNORDERED, VariantRunData.class);
 			                    bulkOperations.updateOne(q, update);
 							}
 							else
 								LOG.warn("Failed to annotate variant " + vrd.getId());
 							processedVrdCount.incrementAndGet();
 						}
-			            BulkWriteResult wr = bulkOperations.execute();
-//			            if (wr.getModifiedCount() > 0)
-//			            	LOG.debug("Database " + module + ": " + wr.getModifiedCount() + " VRD records annotated");
+						if (bulkOperations != null) {
+				            BulkWriteResult wr = bulkOperations.execute();
+				            if (wr.getModifiedCount() > 0)
+				            	LOG.debug("Database " + module + ": " + wr.getModifiedCount() + " VRD records annotated");
+						}
 						progress.setCurrentStepProgress(processedVrdCount.get() * 100 / nTotalNumberOfVRDInDB);
 					}
 				});

@@ -17,17 +17,23 @@
 package fr.cirad.mgdb.model.mongo.maintypes;
 
 import java.util.HashMap;
+import java.util.List;
+import java.util.NoSuchElementException;
 
 import org.bson.codecs.pojo.annotations.BsonProperty;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.annotation.TypeAlias;
+import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.mapping.Document;
 import org.springframework.data.mongodb.core.mapping.Field;
+import org.springframework.data.mongodb.core.query.Criteria;
+import org.springframework.data.mongodb.core.query.Query;
+import org.springframework.data.mongodb.core.query.Update;
 
 import fr.cirad.mgdb.model.mongo.subtypes.AbstractVariantData;
 import fr.cirad.mgdb.model.mongo.subtypes.SampleGenotype;
 import fr.cirad.mgdb.model.mongo.subtypes.VariantRunDataId;
-import fr.cirad.tools.Helper;
+import fr.cirad.tools.SetUniqueListWithConstructor;
 
 /**
  * The Class VariantRunData.
@@ -152,5 +158,55 @@ public class VariantRunData extends AbstractVariantData
 			return super.toString();
 
 		return getId().toString();
+	}
+	
+    /**
+     * Safely gets known alleles (retrieves eventual missing alleles from corresponding VariantData document)
+     *
+     * @param mongoTemplate the MongoTemplate to use for fixing allele list if incomplete
+     * @throws Exception the exception
+     */
+	@Override
+	public SetUniqueListWithConstructor<String> safelyGetKnownAlleles(MongoTemplate mongoTemplate) throws NoSuchElementException
+    {
+        if (knownAlleles == null || knownAlleles.isEmpty())
+        	fixKnownAlleles(mongoTemplate);	// looks like this run doesn't know any alleles for the given variant
+        return getKnownAlleles();
+    }
+	
+    /**
+     * Safely gets the alleles from genotype code (retrieves eventual missing alleles from corresponding VariantData document)
+     *
+     * @param code the code
+     * @param mongoTemplate the MongoTemplate to use for fixing allele list if incomplete
+     * @return the alleles from genotype code
+     * @throws Exception the exception
+     */
+    public List<String> safelyGetAllelesFromGenotypeCode(String code, MongoTemplate mongoTemplate) throws NoSuchElementException
+    {
+        try {
+            return staticGetAllelesFromGenotypeCode(safelyGetKnownAlleles(mongoTemplate), code);
+        }
+        catch (NoSuchElementException e1) {	// looks like only some alleles were known by this run
+        	fixKnownAlleles(mongoTemplate);
+            try {
+                return staticGetAllelesFromGenotypeCode(getKnownAlleles(), code);
+            }
+            catch (NoSuchElementException e2) {
+                throw new NoSuchElementException("Variant " + this + " - " + e2.getMessage());
+            }
+        }
+    }
+
+	private void fixKnownAlleles(MongoTemplate mongoTemplate) {
+    	knownAlleles = mongoTemplate.findById(getVariantId(), VariantData.class).getKnownAlleles();
+        if (knownAlleles != null) {	// fix current document
+            Query q = new Query(new Criteria().andOperator(
+            		Criteria.where("_id." + VariantRunDataId.FIELDNAME_VARIANT_ID).is(id.getVariantId()),
+            		Criteria.where("_id." + VariantRunDataId.FIELDNAME_PROJECT_ID).is(id.getProjectId()),
+            		Criteria.where("_id." + VariantRunDataId.FIELDNAME_RUNNAME).is(id.getRunName())
+            ));
+            mongoTemplate.updateFirst(q, new Update().set(FIELDNAME_KNOWN_ALLELES, knownAlleles), VariantRunData.class);
+        }
 	}
 }

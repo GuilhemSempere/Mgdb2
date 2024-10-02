@@ -344,4 +344,12 @@ public class ProgressIndicator
 			cancelledRemovals.add(progress.getProcessId());		// client is re-querying before we had the time to remove this process from our list: cancel its removal otherwise it won't be able to track it
 		progressIndicators.put(progress.getProcessId(), progress);
 	}
+
+	/**
+	 * Insert a step right after the current one
+	 * @param sStepLabel
+	 */
+	public void insertStep(String sStepLabel) {
+		m_stepLabels.add(m_currentStepNumber + 1, sStepLabel);
+	}
 }

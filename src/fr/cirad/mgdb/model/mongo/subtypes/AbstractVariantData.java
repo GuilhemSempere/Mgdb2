@@ -16,7 +16,7 @@
  *******************************************************************************/
 package fr.cirad.mgdb.model.mongo.subtypes;
 
-import java.io.FileWriter;
+import java.io.OutputStream;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
@@ -29,7 +29,6 @@ import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.TreeMap;
 import java.util.TreeSet;
-import java.util.Map.Entry;
 import java.util.stream.Collectors;
 
 import org.apache.commons.lang3.StringUtils;
@@ -506,16 +505,15 @@ abstract public class AbstractVariantData
         return knownAlleles;
     }
 
-//	/**
-//	 * Gets the known allele list.
-//	 *
-//	 * @return the known allele list
-//	 */
-//	public List<String> getKnownAlleleList() {
-//		if (knownAlleleList == null || getKnownAlleles().size() > knownAlleleList.size())
-//			knownAlleleList = new ArrayList<String>(getKnownAlleles());
-//		return knownAlleleList;
-//	}
+    /*
+     * Safely gets the known alleles (by default no particular behavior, but may be overridden by subclasses to fix possible missing information)
+     *
+     * @return the known alleles
+     */
+    public SetUniqueListWithConstructor<String> safelyGetKnownAlleles(MongoTemplate mongoTemplate) throws NoSuchElementException
+    {
+        return getKnownAlleles();
+    }
 
     /**
      * Sets the known allele list.
@@ -561,7 +559,7 @@ abstract public class AbstractVariantData
         if (code == null)
             return new ArrayList<>(0);
 
-        try    {
+        try {
             return Arrays.stream(code.split("[\\|/]")).map(alleleCodeIndex -> alleleList.get(Integer.parseInt(alleleCodeIndex))).collect(Collectors.toList());
         }
         catch (IndexOutOfBoundsException ioobe) {
@@ -570,7 +568,7 @@ abstract public class AbstractVariantData
     }
 
     /**
-     * Safely gets the alleles from genotype code (retrieves eventual missing alleles from corresponding VariantData document)
+     * Safely gets the alleles from genotype code (by default no particular behavior, but may be overridden by subclasses to fix possible missing information)
      *
      * @param code the code
      * @param mongoTemplate the MongoTemplate to use for fixing allele list if incomplete
@@ -580,17 +578,10 @@ abstract public class AbstractVariantData
     public List<String> safelyGetAllelesFromGenotypeCode(String code, MongoTemplate mongoTemplate) throws NoSuchElementException
     {
         try {
-            return staticGetAllelesFromGenotypeCode(getKnownAlleles(), code);
+            return staticGetAllelesFromGenotypeCode(safelyGetKnownAlleles(mongoTemplate), code);
         }
-        catch (NoSuchElementException e1) {
-            setKnownAlleles(mongoTemplate.findById(getVariantId(), VariantData.class).getKnownAlleles());
-            mongoTemplate.save(this);
-            try {
-                return staticGetAllelesFromGenotypeCode(getKnownAlleles(), code);
-            }
-            catch (NoSuchElementException e2) {
-                throw new NoSuchElementException("Variant " + this + " - " + e2.getMessage());
-            }
+        catch (NoSuchElementException e) {
+            throw new NoSuchElementException("Variant " + this + " - " + e.getMessage());
         }
     }
 
@@ -655,12 +646,12 @@ abstract public class AbstractVariantData
 	 * @param individuals List of individual IDs for each group
 	 * @param annotationFieldThresholds the annotation field thresholds for each group
 	 * @param previousPhasingIds the previous phasing ids
-	 * @param warningFileWriter the warning file writer
+	 * @param warningOS the warning file writer
 	 * @param synonym the synonym
 	 * @return the variant context
 	 * @throws Exception the exception
 	 */
-	public VariantContext toVariantContext(MongoTemplate mongoTemplate, Collection<VariantRunData> runs, Integer nAssemblyId, boolean exportVariantIDs, List<GenotypingSample> samplesToExport, Map<String, Integer> individualPositions, Map<String /*population*/, Collection<String>> individuals, Map<String /*population*/, HashMap<String, Float>> annotationFieldThresholds, HashMap<Integer, Object> previousPhasingIds, FileWriter warningFileWriter, String synonym) throws Exception
+	public VariantContext toVariantContext(MongoTemplate mongoTemplate, Collection<VariantRunData> runs, Integer nAssemblyId, boolean exportVariantIDs, Collection<GenotypingSample> samplesToExport, Map<String, Integer> individualPositions, Map<String /*population*/, Collection<String>> individuals, Map<String /*population*/, HashMap<String, Float>> annotationFieldThresholds, HashMap<Integer, Object> previousPhasingIds, OutputStream warningOS, String synonym) throws Exception
 	{
 		ArrayList<Genotype> genotypes = new ArrayList<Genotype>();
 		String sRefAllele = knownAlleles.isEmpty() ? null : knownAlleles.iterator().next();
@@ -729,15 +720,15 @@ abstract public class AbstractVariantData
                 }
             }
 
-            if (warningFileWriter != null && genotypeCounts.size() > 1) {
+            if (warningOS != null && genotypeCounts.size() > 1) {
                 List<Integer> reverseSortedGtCounts = genotypeCounts.values().stream().sorted(Comparator.reverseOrder()).collect(Collectors.toList());
                 if (reverseSortedGtCounts.get(0) == reverseSortedGtCounts.get(1))
                     mostFrequentGenotype = null;
             }
 
             if (mostFrequentGenotype == null) {
-                if (warningFileWriter != null && genotypeCounts.size() > 1)
-                    warningFileWriter.write("- Dissimilar genotypes found for variant " + (synonym == null ? getVariantId() : synonym) + ", individual " + entry.getKey() + ". " + "Exporting as missing data\n");
+                if (warningOS != null && genotypeCounts.size() > 1)
+                    warningOS.write(("- Dissimilar genotypes found for variant " + (synonym == null ? getVariantId() : synonym) + ", individual " + entry.getKey() + ". " + "Exporting as missing data\n").getBytes());
 
                 continue;    // no genotype for this individual
             }
@@ -754,8 +745,8 @@ abstract public class AbstractVariantData
                 genotypeStringCache.put(gtCode, alleles);
             }
             
-            if (warningFileWriter != null && genotypeCounts.size() > 1)
-                warningFileWriter.write("- Dissimilar genotypes found for variant " + (synonym == null ? getVariantId() : synonym) + ", individual " + entry.getKey() + ". " + "Exporting most frequent: " + StringUtils.join(alleles, "/") + "\n");
+            if (warningOS != null && genotypeCounts.size() > 1)
+                warningOS.write(("- Dissimilar genotypes found for variant " + (synonym == null ? getVariantId() : synonym) + ", individual " + entry.getKey() + ". " + "Exporting most frequent: " + StringUtils.join(alleles, "/") + "\n").getBytes());
 
             ArrayList<Allele> individualAlleles = new ArrayList<>(alleles.size());
             previousPhasingIds.put(spId, currentPhId == null ? getVariantId() : currentPhId);

@@ -16,9 +16,13 @@
  *******************************************************************************/
 package fr.cirad.mgdb.exporting.tools;
 
-import java.io.FileWriter;
+import java.io.BufferedInputStream;
+import java.io.BufferedOutputStream;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
 import java.io.IOException;
-import java.util.ArrayDeque;
+import java.io.OutputStream;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
@@ -27,8 +31,14 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.concurrent.CompletableFuture;
+import java.util.Timer;
+import java.util.TimerTask;
+import java.util.concurrent.ConcurrentSkipListSet;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Future;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
 
 import org.apache.log4j.Logger;
@@ -47,11 +57,11 @@ import com.mongodb.MongoClientSettings;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoCursor;
 
-import fr.cirad.mgdb.exporting.AbstractExportWritingThread;
 import fr.cirad.mgdb.exporting.IExportHandler;
 import fr.cirad.mgdb.model.mongo.maintypes.Assembly;
 import fr.cirad.mgdb.model.mongo.maintypes.GenotypingProject;
 import fr.cirad.mgdb.model.mongo.maintypes.GenotypingSample;
+import fr.cirad.mgdb.model.mongo.maintypes.VariantData;
 import fr.cirad.mgdb.model.mongo.maintypes.VariantRunData;
 import fr.cirad.mgdb.model.mongo.subtypes.AbstractVariantData;
 import fr.cirad.mgdb.model.mongo.subtypes.ReferencePosition;
@@ -60,6 +70,8 @@ import fr.cirad.tools.AlphaNumericComparator;
 import fr.cirad.tools.Helper;
 import fr.cirad.tools.ProgressIndicator;
 import fr.cirad.tools.mongo.MongoTemplateManager;
+import fr.cirad.tools.query.GroupedExecutor;
+import fr.cirad.tools.query.GroupedExecutor.TaskWrapper;
 
 /**
  * The class ExportManager.
@@ -101,11 +113,9 @@ public class ExportManager
     
     private boolean fWorkingOnTempColl;
     
-    private FileWriter warningFileWriter;
+    private String module;
     
-    private MongoTemplate mongoTemplate;
-    
-    private AbstractExportWritingThread writingThread;
+    private AbstractExportWriter exportWriter;
     
     private Long markerCount;
     
@@ -117,7 +127,7 @@ public class ExportManager
     
     int involvedRunCount;
     
-    private BasicDBObject matchStage = null;
+    private BasicDBObject variantMatchStage = null;
     private BasicDBObject sortStage = null;
     private BasicDBObject projectStage = null;
     
@@ -126,16 +136,21 @@ public class ExportManager
     private ArrayList<BasicDBObject> projectFilterList = new ArrayList<>();
     
     private Integer nAssemblyId;
+    
+    private File[] chunkGenotypeFiles;
+    private File[] chunkVariantFiles;
+    private File[] chunkWarningFiles;
+    
+	private File dataExtractionFolder;
 
     public static final CodecRegistry pojoCodecRegistry = CodecRegistries.fromRegistries(MongoClientSettings.getDefaultCodecRegistry(), CodecRegistries.fromProviders(PojoCodecProvider.builder().register(new IntKeyMapPropertyCodecProvider()).automatic(true).build()));
-    
-    public ExportManager(MongoTemplate mongoTemplate, Integer nAssemblyId, MongoCollection<Document> varColl, Class resultType, BasicDBList vrdQuery, Collection<GenotypingSample> samplesToExport, boolean fIncludeMetadata, int nQueryChunkSize, AbstractExportWritingThread writingThread, Long markerCount, FileWriter warningFileWriter, ProgressIndicator progress) {
+
+	public ExportManager(String sModule, Integer nAssemblyId, MongoCollection<Document> varColl, Class resultType, BasicDBList variantQuery, Collection<GenotypingSample> samplesToExport, boolean fIncludeMetadata, int nQueryChunkSize, AbstractExportWriter exportWriter, Long markerCount, ProgressIndicator progress) {
         this.progress = progress;
         this.nQueryChunkSize = nQueryChunkSize;
-        this.warningFileWriter = warningFileWriter;
-        this.mongoTemplate = mongoTemplate;
+        this.module = sModule;
         this.nAssemblyId = nAssemblyId;
-        this.writingThread = writingThread;
+        this.exportWriter = exportWriter;
         this.markerCount = markerCount;
         this.varColl = varColl;
         this.resultType = resultType;
@@ -149,6 +164,8 @@ public class ExportManager
         // optimization 1: filling in involvedProjectRuns will provide means to apply filtering on project and/or run fields when exporting from temporary collection
         HashMap<Integer, List<String>> involvedProjectRuns = Helper.getRunsByProjectInSampleCollection(samplesToExport);
         involvedRunCount = involvedProjectRuns.values().stream().mapToInt(b -> b.size()).sum();
+
+        MongoTemplate mongoTemplate = MongoTemplateManager.get(module);
 
         for (int projId : involvedProjectRuns.keySet()) {
             List<String> projectInvolvedRuns = involvedProjectRuns.get(projId);
@@ -164,8 +181,8 @@ public class ExportManager
         sampleIDsToExport = samplesToExport == null ? new ArrayList<>() : samplesToExport.stream().map(sp -> sp.getId()).collect(Collectors.toList());
         Collection<Integer> sampleIDsNotToExport = percentageOfExportedSamples >= 98 ? new ArrayList<>() /* if almost all individuals are being exported we directly omit the $project stage */ : (percentageOfExportedSamples > 50 ? mongoTemplate.findDistinct(new Query(Criteria.where("_id").not().in(sampleIDsToExport)), "_id", GenotypingSample.class, Integer.class) : null);
 
-        if (!fWorkingOnTempColl && !vrdQuery.isEmpty())
-            matchStage = new BasicDBObject("$match",  new BasicDBObject("$and", vrdQuery));
+        if (!variantQuery.isEmpty())
+            variantMatchStage = new BasicDBObject("$match", new BasicDBObject("$and", variantQuery));
 
         Document projection = new Document();
         if (sampleIDsNotToExport == null) {    // inclusive $project (less than a half of the samples are being exported)
@@ -186,258 +203,343 @@ public class ExportManager
                 projection.append(AbstractVariantData.SECTION_ADDITIONAL_INFO, 0);
 
             projectStage = new BasicDBObject("$project", projection);
-            if (markerCount != null && markerCount > 5000 && nTotalNumberOfSamplesInDB > 200 && sampleIDsNotToExport != null && !sampleIDsNotToExport.isEmpty()) {   // we may only attempt evaluating if it's worth removing $project when exported markers are numerous enough, overall sample count is large enough and more than a half of them is involved
+            if (markerCount > 5000 && nTotalNumberOfSamplesInDB > 200 && sampleIDsNotToExport != null && !sampleIDsNotToExport.isEmpty()) {   // we may only attempt evaluating if it's worth removing $project when exported markers are numerous enough, overall sample count is large enough and more than a half of them is involved
                 double nTotalChunkCount = Math.ceil(markerCount.intValue() / nQueryChunkSize);
                 if (nTotalChunkCount > 30)   // at least 10 chunks would be used for comparison, we only bother doing it if the optimization can be applied to at least 20 others
                     nNumberOfChunksUsedForSpeedEstimation = markerCount == null ? 5 : Math.max(5, (int) nTotalChunkCount / 100 /*1% of the whole stuff*/);
             }
         }
     }
+	
+	public void setTmpExtractionFolder(String extractionDirToUse) {
+		try {
+			dataExtractionFolder = new File(extractionDirToUse);
+			dataExtractionFolder.mkdirs();
+		}
+		catch (Exception e) {
+			dataExtractionFolder = null;
+			LOG.error("Unable to use folder " + extractionDirToUse + " for extaction. Files will be written to the default temp folder.");
+		}
+	}
 
-	public void readAndWrite() throws IOException, InterruptedException, ExecutionException {        
-        if (fWorkingOnTempColl)
-            exportFromTempColl();
-        else
-            exportDirectlyFromRuns();
-    }
-    
-    /**
-     * Exports by $match-ing successive chunks of variant IDs in VariantRunData. Would have thought using $lookup with a single cursor would be faster, but it's much slower
-     * 
-     * @throws IOException
-     * @throws InterruptedException
-     * @throws ExecutionException
-     */
-    private void exportFromTempColl() throws IOException, InterruptedException, ExecutionException {
-        CompletableFuture<Void> future = null;        
-        List<VariantRunData> currentMarkerRuns = new ArrayList<>(involvedRunCount);
+    public void readAndWrite(OutputStream os) throws IOException, InterruptedException, ExecutionException {
         List<String> currentMarkerIDs = new ArrayList<>(nQueryChunkSize);
-        String varId = null, previousVarId = null;
-        int nWrittenmarkerCount = 0;
-        
+
         VariantRunDataComparator vrdComparator = new VariantRunDataComparator(nAssemblyId);
         
         List<BasicDBObject> pipeline = new ArrayList<>();
-        if (matchStage != null)
-            pipeline.add(matchStage);   // there can be a $match on temp colls (for example to apply a range when displaying IGV data)
+        if (!fWorkingOnTempColl && variantMatchStage != null)
+        	pipeline.add(variantMatchStage);
         pipeline.add(sortStage);
         pipeline.add(new BasicDBObject("$project", new BasicDBObject("_id", 1)));
 
-        MongoCursor<Document> markerCursor = varColl.aggregate(pipeline, Document.class).collation(IExportHandler.collationObj).allowDiskUse(true).batchSize(nQueryChunkSize).iterator();   /*FIXME: didn't find a way to set noCursorTimeOut on aggregation cursors*/
-
-        // pipeline object will be re-used to query VariantRunData, we won't need the $project stage for that
+        MongoTemplate mongoTemplate = MongoTemplateManager.get(module);
+        
+        MongoCollection<Document> collForQueryingIDs = fWorkingOnTempColl ? varColl : mongoTemplate.getCollection(mongoTemplate.getCollectionName(VariantData.class));
+        MongoCursor<Document> markerCursor = collForQueryingIDs.aggregate(pipeline, Document.class).collation(IExportHandler.collationObj).allowDiskUse(true).batchSize(nQueryChunkSize).iterator();   /*FIXME: didn't find a way to set noCursorTimeOut on aggregation cursors*/
+        
+        // pipeline reference will be re-used to query VariantRunData
         pipeline = new ArrayList<>();
         pipeline.add(sortStage);
         
-        int nChunkIndex = 0;
-        long chunkProcessingStartTime = System.currentTimeMillis(), timeSpentReadingWithoutProjectStage = -1;
+        if (markerCount == null)
+        	throw new IOException("markerCount may not be null");
+
+        Future<Void>[] chunkExportTasks = new Future[(int) Math.ceil((float) markerCount / nQueryChunkSize)];
+        chunkGenotypeFiles = new File[chunkExportTasks.length];
+        if (exportWriter.writesVariantFiles())
+        	chunkVariantFiles = new File[chunkExportTasks.length];
+        chunkWarningFiles = new File[chunkExportTasks.length];
         
-        MongoCollection<VariantRunData> runColl = mongoTemplate.getDb().withCodecRegistry(ExportManager.pojoCodecRegistry).getCollection(mongoTemplate.getCollectionName(VariantRunData.class), VariantRunData.class);
-        while (markerCursor.hasNext()) {
-            if (progress.isAborted() || progress.getError() != null ) {
-                if (warningFileWriter != null)
-                    warningFileWriter.close();
-                return;
-            }
-            
-            currentMarkerIDs.add(markerCursor.next().getString("_id"));
-                        
-            if (currentMarkerIDs.size() >= nQueryChunkSize || !markerCursor.hasNext()) {	// current variant ID list is large enough to start exporting chunk
-                nChunkIndex++;
+        LOG.debug("Exporting from " + varColl.getNamespace().getCollectionName() + " in " + chunkExportTasks.length + " chunks of size " + nQueryChunkSize);
+        
+        ExecutorService executor = MongoTemplateManager.getExecutor(module);
+        String taskGroup = "export_" + System.currentTimeMillis() + "_" + progress.getProcessId();
+        
+        AtomicInteger nChunkIndex = new AtomicInteger(0), nNextChunkToAppendToMainOS = new AtomicInteger(0), nSpeedEstimationCompletedQueryCount = new AtomicInteger(0);
+        AtomicLong timeSpentReadingWithoutProjectStage = new AtomicLong(0), timeSpentReadingWithProjectStage = new AtomicLong(0);
+        ConcurrentSkipListSet<Integer> extractedChunks = new ConcurrentSkipListSet<>();
+        
+        try {
+	        MongoCollection<VariantRunData> runColl = mongoTemplate.getDb().withCodecRegistry(ExportManager.pojoCodecRegistry).getCollection(mongoTemplate.getCollectionName(VariantRunData.class), VariantRunData.class);
+	        while (markerCursor.hasNext()) {
+	            if (progress.isAborted() || progress.getError() != null) {
+	        		for (Future<Void> t : chunkExportTasks)
+	        			if (t != null)
+	        				t.cancel(true);
+	                for (File f : chunkWarningFiles)
+	                	if (f != null)
+	                		f.delete();
+	                break;
+	            }
 
-                BasicDBList matchAndList = new BasicDBList();
-                if (!projectFilterList.isEmpty())
-                    matchAndList.add(projectFilterList.size() == 1 ? projectFilterList.get(0) : new BasicDBObject("$or", projectFilterList));
-                matchAndList.add(new BasicDBObject("_id." + VariantRunDataId.FIELDNAME_VARIANT_ID, new BasicDBObject("$in", currentMarkerIDs)));
+	            currentMarkerIDs.add(markerCursor.next().getString("_id"));
+	
+	            if (currentMarkerIDs.size() >= nQueryChunkSize || !markerCursor.hasNext()) {	// current variant ID list is large enough to start exporting chunk
+	            	List<String> chunkMarkerIDs = currentMarkerIDs;
+	            	List<BasicDBObject> chunkPipeline = new ArrayList<>(pipeline);
+	            	int nFinalChunkIndex = nChunkIndex.incrementAndGet();
+	            	Thread chunkExportThread = new Thread() {
+	            		public void run() {
+	            			if (progress.isAborted() || progress.getError() != null)
+	            				return;
+	
+	            			OutputStream genotypeChunkOS = null, variantChunkOS = null, warningChunkOS = null;
+	            			try {
+		            			File genotypeChunkFile = File.createTempFile(nFinalChunkIndex + "__genotypes__", "__" + taskGroup, dataExtractionFolder), warningChunkFile = File.createTempFile(nFinalChunkIndex + "__warnings__", "__" + taskGroup, dataExtractionFolder);
+		            			chunkGenotypeFiles[nFinalChunkIndex - 1] = genotypeChunkFile;
+		            			genotypeChunkOS = new BufferedOutputStream(new FileOutputStream(genotypeChunkFile), 16384);
+		            			if (exportWriter.writesVariantFiles()) {
+		            				File variantChunkFile = File.createTempFile(nFinalChunkIndex + "__variants__", "__" + taskGroup, dataExtractionFolder);
+			            			chunkVariantFiles[nFinalChunkIndex - 1] = variantChunkFile;
+			            			variantChunkOS = new BufferedOutputStream(new FileOutputStream(variantChunkFile), 16384);
+		            			}
+		            			chunkWarningFiles[nFinalChunkIndex - 1] = warningChunkFile;
+		            			warningChunkOS = new BufferedOutputStream(new FileOutputStream(warningChunkFile), 16384);
+		            			
+		                        BasicDBList matchAndList = new BasicDBList();
+		                        if (!projectFilterList.isEmpty())
+		                            matchAndList.add(projectFilterList.size() == 1 ? projectFilterList.get(0) : new BasicDBObject("$or", projectFilterList));
+		                        matchAndList.add(new BasicDBObject("_id." + VariantRunDataId.FIELDNAME_VARIANT_ID, new BasicDBObject("$in", chunkMarkerIDs)));
+		
+		                        chunkPipeline.add(0, new BasicDBObject("$match", new BasicDBObject("$and", matchAndList)));
+	
+	                        	if (projectStage != null && (nNumberOfChunksUsedForSpeedEstimation == null || nFinalChunkIndex <= nNumberOfChunksUsedForSpeedEstimation))
+	                                chunkPipeline.add(projectStage);
+	
+//	                        	if (nFinalChunkIndex == 1)
+//	                        		LOG.debug("Export pipeline: " + chunkPipeline);
+		
+	                			if (progress.isAborted() || progress.getError() != null)
+	                				return;
 
-                BasicDBObject initialMatchStage = new BasicDBObject("$match", new BasicDBObject("$and", matchAndList));
-                if (varId == null)
-                    pipeline.add(0, initialMatchStage);    // first time we set this stage, it's an insertion
-                else
-                    pipeline.set(0, initialMatchStage);    // replace existing $match
+		            			long chunkProcessingStartTime = System.currentTimeMillis();
+		                        ArrayList<VariantRunData> runs = runColl.aggregate(chunkPipeline, VariantRunData.class).allowDiskUse(true).into(new ArrayList<>(chunkMarkerIDs.size())); // we don't use collation here because it leads to unexpected behaviour (sometimes fetches some additional variants to those in chunkMarkerIDs) => we'll have to sort each chunk by hand
 
-                if (nChunkIndex == 1) {
-                	if (nNumberOfChunksUsedForSpeedEstimation == null && projectStage != null)
-                		pipeline.add(projectStage);	// it was decided to use this $project and not to test removing it
-                    LOG.debug("Export pipeline: " + pipeline);
-                }
+		                        if (nNumberOfChunksUsedForSpeedEstimation != null) {  // chunkPipeline contains a $project stage that we need to assess: let's compare execution speed with and without it (best option depends on so many things that we can't find it out otherwise)
+			                        long chunkProcessingDuration = System.currentTimeMillis() - chunkProcessingStartTime;
+	
+			                        if (nFinalChunkIndex <= nNumberOfChunksUsedForSpeedEstimation) { // we just tested with $project, let's try without it now
+		                                timeSpentReadingWithProjectStage.addAndGet(chunkProcessingDuration);
+		                                nSpeedEstimationCompletedQueryCount.incrementAndGet();
+		                            }
+		                            else if (nFinalChunkIndex <= 2 * nNumberOfChunksUsedForSpeedEstimation) {
+		                            	timeSpentReadingWithoutProjectStage.addAndGet(chunkProcessingDuration);
+		                                nSpeedEstimationCompletedQueryCount.incrementAndGet();
+		                            }
+			                        
+	                                if (nSpeedEstimationCompletedQueryCount.get() == 2 * nNumberOfChunksUsedForSpeedEstimation) {
+	//                            		System.err.println(nFinalChunkIndex + ": timeSpentReadingWithProjectStage: " + timeSpentReadingWithProjectStage.get());
+	//	                                System.err.println(nFinalChunkIndex + ": timeSpentReadingWithoutProjectStage: " + timeSpentReadingWithoutProjectStage);
+	//	                            	System.err.println(nSpeedEstimationCompletedQueryCount.get() + " / " + nFinalChunkIndex + " -> " + (float) timeSpentReadingWithoutProjectStage.get() / timeSpentReadingWithProjectStage.get());
+		                                if ((float) timeSpentReadingWithoutProjectStage.get() / timeSpentReadingWithProjectStage.get() <= .75) {    // removing $project provided more than 25% speed-up : let's do the rest of the export without $project
+		                                	projectStage = null;
+		                                    LOG.debug("Exporting without $project stage");
+		                                }
+		                                nNumberOfChunksUsedForSpeedEstimation = null;	// we want to do this only once
+	                                }
+		                        }
+		                        
+		                        Collections.sort(runs, vrdComparator);    // make sure variants within this chunk are correctly sorted
+		                        
+		                        LinkedHashMap<String /*variant ID*/, Collection<VariantRunData>> chunkMarkerRunsToWrite = new LinkedHashMap<>(chunkMarkerIDs.size());
+		                        for (String variantId : chunkMarkerIDs)
+		                        	chunkMarkerRunsToWrite.put(variantId, null);	// there must be an entry for each exported variant
+		                        
+		                        String varId = null, previousVarId = null;
+		                        List<VariantRunData> currentMarkerRuns = new ArrayList<>(involvedRunCount);
+		                        for (VariantRunData vrd : runs) {
+		                			if (progress.isAborted() || progress.getError() != null)
+		                				return;
+	
+		                            varId = vrd.getId().getVariantId();
+		                            
+		                            if (previousVarId != null && !varId.equals(previousVarId)) {
+		                                chunkMarkerRunsToWrite.put(previousVarId, currentMarkerRuns);
+		                                currentMarkerRuns = new ArrayList<>(involvedRunCount);
+		                            }
+		                            currentMarkerRuns.add(vrd);
+		                            previousVarId = varId;
+		                        }
+		                        
+		                        if (!currentMarkerRuns.isEmpty()) {	// add runs for this chunk's last variant (among those we have data for)
+		        	                chunkMarkerRunsToWrite.put(previousVarId, currentMarkerRuns);
+		        	                currentMarkerRuns = new ArrayList<>(involvedRunCount);
+		                        }
 
-                ArrayList<VariantRunData> runs = runColl.aggregate(pipeline, VariantRunData.class).allowDiskUse(true).into(new ArrayList<>(currentMarkerIDs.size())); // we don't use collation here because it leads to unexpected behaviour (sometimes fetches some additional variants to those in currentMarkerIDs) => we'll have to sort each chunk by hand
-                Collections.sort(runs, vrdComparator);    // make sure variants within this chunk are correctly sorted
-                
-                LinkedHashMap<String /*variant ID*/, Collection<VariantRunData>> chunkMarkerRunsToWrite = new LinkedHashMap<>(currentMarkerIDs.size());
-                for (String variantId : currentMarkerIDs)
-                	chunkMarkerRunsToWrite.put(variantId, null);	// there must be an entry for each exported variant
-                
-                for (VariantRunData vrd : runs) {
-                    varId = vrd.getId().getVariantId();
-                    
-                    if (previousVarId != null && !varId.equals(previousVarId)) {
-                        chunkMarkerRunsToWrite.put(previousVarId, currentMarkerRuns);
-                        currentMarkerRuns = new ArrayList<>(involvedRunCount);
-                    }
-                    currentMarkerRuns.add(vrd);
-                    previousVarId = varId;
-                }
-                
-                if (!currentMarkerRuns.isEmpty()) {	// add runs for this chunk's last variant (among those we have data for)
-	                chunkMarkerRunsToWrite.put(previousVarId, currentMarkerRuns);
-	                currentMarkerRuns = new ArrayList<>(involvedRunCount);
-                }
+	                            progress.setCurrentStepProgress(extractedChunks.size() * 100l / chunkGenotypeFiles.length);
+		                        exportWriter.writeChunkRuns(chunkMarkerRunsToWrite.values(), chunkMarkerIDs, genotypeChunkOS, variantChunkOS, warningChunkOS);
+		                        
+		        		    	// make sure data is completely written out before the files get read
+		        		        genotypeChunkOS.close();
+	            				if (variantChunkOS != null)
+									variantChunkOS.close();
+								warningChunkOS.close();
+		                        extractedChunks.add(nFinalChunkIndex - 1);
+		                        previousVarId = null;
+		                        
+		                        // early cleanup to avoid having too many empty files all over the place
+		        		        if (exportWriter.writesVariantFiles() && chunkVariantFiles[nFinalChunkIndex - 1] != null && chunkVariantFiles[nFinalChunkIndex - 1].length() == 0) 
+		        		        	chunkVariantFiles[nFinalChunkIndex - 1].delete();	// only keep non-empty files
+		        		        if (chunkWarningFiles[nFinalChunkIndex - 1] != null && chunkWarningFiles[nFinalChunkIndex - 1].length() == 0) 
+		        		        	chunkWarningFiles[nFinalChunkIndex - 1].delete();	// only keep non-empty files
 
-                if (nNumberOfChunksUsedForSpeedEstimation != null) {  // pipeline contains a $project stage that we need to assess: let's compare execution speed with and without it (best option depends on so many things that we can't find it out otherwise)
-                    if (nChunkIndex == nNumberOfChunksUsedForSpeedEstimation) { // we just tested without $project, let's try with it now
-                        timeSpentReadingWithoutProjectStage = System.currentTimeMillis() - chunkProcessingStartTime;
-                        pipeline.add(projectStage);
-                    }
-                    else if (nChunkIndex == 2 * nNumberOfChunksUsedForSpeedEstimation) {
-                        long timeSpentReadingWithProjectStage = System.currentTimeMillis() - chunkProcessingStartTime;
-                        if ((float) timeSpentReadingWithoutProjectStage / timeSpentReadingWithProjectStage <= .75) {    // removing $project provided more than 25% speed-up : let's do the rest of the export without $project
-                            pipeline.remove(projectStage);
-                            LOG.debug("Exporting without $project stage");
-                        }
-                    }
-                    chunkProcessingStartTime = System.currentTimeMillis();
-                }
+//		        		        synchronized (chunkGenotypeFiles) {
+//		                        	while (extractedChunks.contains(nNextChunkToAppendToMainOS.get()) && nNextChunkToAppendToMainOS.get() < chunkGenotypeFiles.length)
+//		                        		appendChunkToMainOS(chunkGenotypeFiles[nNextChunkToAppendToMainOS.getAndIncrement()], os);
+//		                        }
+	
+		                        chunkMarkerRunsToWrite = new LinkedHashMap<>(nQueryChunkSize);
+	                		}
+	                		catch (Exception e) {
+	                			progress.setError(e.getMessage());
+	                			LOG.error("Error exporting data", e);
+	                			return;
+	                		}
+	            			finally {
+								try {	// these should be already closed if everything went well, so just in case...
+									genotypeChunkOS.close();
+		            				if (variantChunkOS != null)
+										variantChunkOS.close();
+									warningChunkOS.close();
+								} catch (IOException ignored) {}
+	            			}
+		            	}
+	            	};
+	            	
+	                chunkExportTasks[nFinalChunkIndex - 1] = (Future<Void>) executor.submit(new TaskWrapper(taskGroup, chunkExportThread));
+	                currentMarkerIDs = new ArrayList<>(nQueryChunkSize);
+	            }
+	        }
+	        
+	        if (executor instanceof GroupedExecutor)
+	        	((GroupedExecutor) executor).shutdown(taskGroup);
+	        else
+	        	executor.shutdown();
+	        
+	        for (Future<Void> t : chunkExportTasks) // wait for all threads before moving to next phase
+	        	if (t != null) {	// we can have null tasks with IGV exports
+	        		t.get();
 
-                if (future != null && !future.isDone()) {
-//                    long b4 = System.currentTimeMillis();
-                    future.get();
-//                    long delay = System.currentTimeMillis() - b4;
-//                    if (delay > 100)
-//                        LOG.debug(progress.getProcessId() + " waited " + delay + "ms before writing variant " + nWrittenmarkerCount/* + ", increasing nQueryChunkSize from " + nQueryChunkSize + " to " + nQueryChunkSize*2*/);
-                }
-                
-                nWrittenmarkerCount += currentMarkerIDs.size();
-                previousVarId = null;
+                	while (extractedChunks.contains(nNextChunkToAppendToMainOS.get()) && nNextChunkToAppendToMainOS.get() < chunkGenotypeFiles.length)
+                		appendChunkToMainOS(chunkGenotypeFiles[nNextChunkToAppendToMainOS.getAndIncrement()], os);
+	        	}
 
-                if (markerCount != null)
-                    progress.setCurrentStepProgress(nWrittenmarkerCount * 100l / markerCount);
-                future = writingThread.writeChunkRuns(chunkMarkerRunsToWrite.values(), currentMarkerIDs);
-                chunkMarkerRunsToWrite = new LinkedHashMap<>(nQueryChunkSize);
-                
-                currentMarkerIDs = new ArrayList<>(nQueryChunkSize);
-            }
+	        progress.insertStep("Merging results");
+	        progress.moveToNextStep();
+	        int nFirstChunkToAppend = nNextChunkToAppendToMainOS.get();
+	        for (int i=nFirstChunkToAppend; i<chunkGenotypeFiles.length; i++) {
+		        appendChunkToMainOS(chunkGenotypeFiles[i], os);
+	        	progress.setCurrentStepProgress((i - nFirstChunkToAppend) * 100l / (chunkGenotypeFiles.length - nFirstChunkToAppend));
+	        }
         }
+        catch (Exception e) {
+        	LOG.error("Error exporting from " + module, e);
+    		for (Future<Void> t : chunkExportTasks)
+    			if (t != null)
+    				t.cancel(true);
+    		cleanupOutputFiles();
+            return;
+        }
+        finally {
+        	os.flush();
+	        markerCursor.close();
+	        for (int i=0; i<chunkGenotypeFiles.length; i++) {
+		        if (chunkGenotypeFiles[i] != null && chunkGenotypeFiles[i].exists()) 
+		        	chunkGenotypeFiles[i].delete();	// delete all genotype files because if everything went well their contents have been written to the OutputStream
+		        if (exportWriter.writesVariantFiles() && chunkVariantFiles[i] != null && chunkVariantFiles[i].length() == 0) 
+		        	chunkVariantFiles[i].delete();	// only keep non-empty files
+		        if (chunkWarningFiles[i] != null && chunkWarningFiles[i].length() == 0) 
+		        	chunkWarningFiles[i].delete();	// only keep non-empty files
+	        }
+	        
+			new Timer().schedule(new TimerTask() {
+			    @Override
+			    public void run() {
+			    	cleanupOutputFiles();
+			    }
+			}, 1000 * 60 * 2);	// delete remaining files after 2 minutes, in case calling code didn't handle that
+        }
+    }
+    
+    private void appendChunkToMainOS(File chunkFile, OutputStream os) throws IOException, InterruptedException {
+        if (chunkFile != null) {	// we can have null files with IGV exports
+        	try (BufferedInputStream bis = new BufferedInputStream(new FileInputStream(chunkFile))) {
+    		    byte[] buffer = new byte[8192];
+    		    int bytesRead;
 
-        if (future != null && !future.isDone())
-            future.get();
-        markerCursor.close();
-        if (markerCount != null)
-            progress.setCurrentStepProgress(nWrittenmarkerCount * 100l / markerCount);
+    		    while ((bytesRead = bis.read(buffer)) != -1)
+    		        os.write(buffer, 0, bytesRead);
+    		}
+        	chunkFile.delete();
+        }
+    }
+    
+    private void cleanupOutputFiles() {
+	    for (File f : chunkGenotypeFiles)
+        	if (f != null)
+        		f.delete();
+	    if (chunkVariantFiles != null)
+		    for (File f : chunkVariantFiles)
+	        	if (f != null)
+	        		f.delete();
+		for (File f : chunkWarningFiles)
+        	if (f != null)
+        		f.delete();
     }
 
-    private void exportDirectlyFromRuns() throws IOException, InterruptedException, ExecutionException {
-        CompletableFuture<Void> future = null;
-        Collection<Collection<VariantRunData>> tempMarkerRunsToWrite = new ArrayDeque<>(nQueryChunkSize);
-        List<VariantRunData> currentMarkerRuns = new ArrayList<>();
-        String varId = null, previousVarId = null;
-        List<String> orderedVariantIds = new ArrayList<>();
-        int nTotalWrittenMarkerCount = 0;
-        
-        List<BasicDBObject> pipeline = new ArrayList<>();
-        if (matchStage != null)
-            pipeline.add(matchStage);
-        
-        pipeline.add(sortStage);
-        int nPosAfterSortStage = pipeline.size();
-        if (projectStage != null)
-            pipeline.add(projectStage);
-        LOG.debug("Export pipeline: " + pipeline);
-        
-        final MongoCursor[] markerCursors = new MongoCursor[2]; // First item always exists. Second only exists if we need to compare speed with and without $project stage
-        Thread threadCreatingComparisonCursor = null;
-        if (nNumberOfChunksUsedForSpeedEstimation != null) {  // pipeline contains a $project stage that we need to assess: let's compare execution speed with and without it (best option depends on so many things that we can't find it out otherwise)
-            List<BasicDBObject> pipelineClone = new ArrayList<>(pipeline);
-            pipelineClone.add(nPosAfterSortStage, new BasicDBObject("$skip", nQueryChunkSize * nNumberOfChunksUsedForSpeedEstimation));
-            threadCreatingComparisonCursor = new Thread() {
-                public void run() {                   
-                    markerCursors[1] = varColl.aggregate(pipelineClone, resultType).collation(IExportHandler.collationObj).allowDiskUse(true).batchSize(nQueryChunkSize).iterator();   /*FIXME: didn't find a way to set noCursorTimeOut on aggregation cursors*/
-                }
-            };
-            threadCreatingComparisonCursor.start();
+	public ExportOutputs getOutputs() {
+		return new ExportOutputs(chunkGenotypeFiles, chunkVariantFiles, chunkWarningFiles);
+	}
+    
+    public static class ExportOutputs
+    {
+        public ExportOutputs(File[] chunkGenotypeFiles, File[] chunkVariantFiles, File[] chunkWarningFiles) {
+			super();
+			this.chunkGenotypeFiles = chunkGenotypeFiles;
+			this.chunkVariantFiles = chunkVariantFiles;
+			this.chunkWarningFiles = chunkWarningFiles;
+		}
 
-            pipeline.remove(pipeline.size() - 1);   // remove $project
-        }
+		private File[] chunkGenotypeFiles;
+        private File[] chunkVariantFiles;
+        private File[] chunkWarningFiles;
 
-        markerCursors[0] = varColl.aggregate(pipeline, resultType).collation(IExportHandler.collationObj).allowDiskUse(true).batchSize(nQueryChunkSize).iterator();   /*FIXME: didn't find a way to set noCursorTimeOut on aggregation cursors*/
+        // may be used to replace variant-oriented files with individual-oriented files
+    	public void setGenotypeFiles(File[] chunkGenotypeFiles) {
+    		this.chunkGenotypeFiles = chunkGenotypeFiles;
+    	}
+    	
+    	public File[] getGenotypeFiles() {
+    		return chunkGenotypeFiles;
+    	}
+    	
+        public File[] getVariantFiles() {
+    		return chunkVariantFiles;
+    	}
 
-        if (threadCreatingComparisonCursor != null)
-            threadCreatingComparisonCursor.join();
-        
-        MongoCursor markerCursor = markerCursors[0];
-        int nChunkIndex = 0;
-        long chunkProcessingStartTime = System.currentTimeMillis(), timeSpentReadingWithoutProjectStage = -1;
-        while (markerCursor.hasNext()) {
-            if (progress.isAborted() || progress.getError() != null ) {
-                if (warningFileWriter != null)
-                    warningFileWriter.close();
-                return;
-            }
+    	public File[] getWarningFiles() {
+    		return chunkWarningFiles;
+    	}
+    }
+    
+    public static abstract class AbstractExportWriter
+    {
+    	static final Logger LOG = Logger.getLogger(AbstractExportWriter.class);
+    	
+    	protected boolean fWritesVariantFile = true;
 
-            VariantRunData vrd = (VariantRunData) markerCursor.next();
-            varId = vrd.getVariantId();
+		public AbstractExportWriter() {
+		}
 
-            if (previousVarId != null && !varId.equals(previousVarId)) {	// switching to the next variant
-                tempMarkerRunsToWrite.add(currentMarkerRuns);
-                orderedVariantIds.add(previousVarId);
-                currentMarkerRuns = new ArrayList<>();
-                nTotalWrittenMarkerCount++;
-            }
+		public AbstractExportWriter(boolean fWritesVariantFile) {
+			this.fWritesVariantFile = fWritesVariantFile;
+		}
 
-            currentMarkerRuns.add(vrd);
+    	public boolean writesVariantFiles() {
+			return fWritesVariantFile;
+		}
 
-            if (!markerCursor.hasNext()) {
-                tempMarkerRunsToWrite.add(currentMarkerRuns);    // special case, when the end of the cursor is being reached
-                orderedVariantIds.add(varId);
-                nTotalWrittenMarkerCount++;
-            }
-
-            if (tempMarkerRunsToWrite.size() >= nQueryChunkSize || !markerCursor.hasNext()) {
-                nChunkIndex++;
-
-                if (markerCursors[1] != null) {
-                    if (nChunkIndex == nNumberOfChunksUsedForSpeedEstimation) { // we just tested without $project, let's try with it now
-                        timeSpentReadingWithoutProjectStage = System.currentTimeMillis() - chunkProcessingStartTime;
-                        markerCursor = markerCursors[1];
-                        currentMarkerRuns.clear();	// if we don't do this the same run will be read twice (once by each cursor)
-                    }
-                    else if (nChunkIndex == 2 * nNumberOfChunksUsedForSpeedEstimation) {
-                        long timeSpentReadingWithProjectStage = System.currentTimeMillis() - chunkProcessingStartTime;
-                        if ((float) timeSpentReadingWithoutProjectStage / timeSpentReadingWithProjectStage <= .75) {    // removing $project provided more than 25% speed-up : let's do the rest of the export without $project
-                            markerCursor.close();
-                            markerCursor = markerCursors[0];
-                            for (int i=0; i<nQueryChunkSize * nNumberOfChunksUsedForSpeedEstimation; i++)
-                                markerCursor.tryNext();
-                            LOG.debug("Exporting without $project stage");
-                        }
-                        else
-                            markerCursors[0].close();
-                    }
-                    chunkProcessingStartTime = System.currentTimeMillis();
-                }
-
-                if (future != null && !future.isDone()) {
-//                    long b4 = System.currentTimeMillis();
-                    future.get();
-//                    long delay = System.currentTimeMillis() - b4;
-//                    if (delay > 100) {
-//                        LOG.debug(progress.getProcessId() + " waited " + delay + "ms before writing variant " + nWrittenmarkerCount/* + ", increasing nQueryChunkSize from " + nQueryChunkSize + " to " + nQueryChunkSize*2*/);
-                }
-
-                if (markerCount != null && markerCount > 0)
-                    progress.setCurrentStepProgress(nTotalWrittenMarkerCount * 100l / markerCount);
-                future = writingThread.writeChunkRuns(tempMarkerRunsToWrite, orderedVariantIds);
-                tempMarkerRunsToWrite = new ArrayDeque<>(nQueryChunkSize);
-                orderedVariantIds = new ArrayList<>();
-            }
-           	previousVarId = currentMarkerRuns.isEmpty() ? null : varId;	// if we emptied currentMarkerRuns it's because we switched to markerCursors[1] so the last VRD we encountered is going to be read again using $project 
-        }
-
-        if (future != null && !future.isDone())
-            future.get();
-        markerCursor.close();
-        if (markerCount != null && markerCount > 0)
-            progress.setCurrentStepProgress(nTotalWrittenMarkerCount * 100l / markerCount);
+		abstract public void writeChunkRuns(Collection<Collection<VariantRunData>> markerRunsToWrite, List<String> orderedMarkerIDs, OutputStream genotypeOS, OutputStream variantOS, OutputStream warningkOS) throws IOException;
     }
 }

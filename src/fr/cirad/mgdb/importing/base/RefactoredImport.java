@@ -62,7 +62,7 @@ public abstract class RefactoredImport extends AbstractGenotypeImport {
     protected boolean m_fImportUnknownVariants = false;
     protected int m_ploidy = 2;
     protected Integer m_maxExpectedAlleleCount = null;	// if set, will issue warnings when exceeded
-    final static protected String validAlleleRegex = "[\\*AaTtGgCc]+".intern();
+    final static protected String validAlleleRegex = "[\\*AaTtGgCcNnIiDd]+".intern();
     
 	public void setMaxExpectedAlleleCount(Integer maxExpectedAlleleCount) {
 		m_maxExpectedAlleleCount = maxExpectedAlleleCount;
@@ -139,7 +139,7 @@ public abstract class RefactoredImport extends AbstractGenotypeImport {
             final Collection<Integer> assemblyIDs = mongoTemplate.findDistinct(new Query(), "_id", Assembly.class, Integer.class);
             if (assemblyIDs.isEmpty())
             	assemblyIDs.add(null);	// old-style, assembly-less DB
-            AtomicInteger nLineIndex = new AtomicInteger(-1);
+            AtomicInteger nLineIndex = new AtomicInteger(-1), ignoredVariants = new AtomicInteger();
             
             final int projId = project.getId();
 
@@ -199,8 +199,10 @@ public abstract class RefactoredImport extends AbstractGenotypeImport {
 										continue; // skip non-variant positions that are not already known
                                 }
 
-                                if (variantId == null && !m_fImportUnknownVariants)
+                                if (variantId == null && !m_fImportUnknownVariants) {
                                     LOG.warn("Skipping unknown variant: " + providedVariantId);
+                                    ignoredVariants.incrementAndGet();
+                                }
                                 else if (variantId != null && variantId.toString().startsWith("*"))
                                 {
                                     LOG.warn("Skipping deprecated variant data: " + providedVariantId);
@@ -288,6 +290,9 @@ public abstract class RefactoredImport extends AbstractGenotypeImport {
                 importThreads[i].join();
             saveService.shutdown();
             saveService.awaitTermination(Integer.MAX_VALUE, TimeUnit.DAYS);
+            
+            if (ignoredVariants.get() > 0)
+            	LOG.warn("Number of ignored variants: " + ignoredVariants);
 
             if (progress.getError() != null || progress.isAborted())
             	return count.get();
@@ -323,20 +328,24 @@ public abstract class RefactoredImport extends AbstractGenotypeImport {
             if (alleles[i][0] == null)
                 continue;  // Do not add missing genotypes
 
-            for (String allele : alleles[i]) {
-                Integer alleleIndex = alleleIndexMap.get(allele);
+            for (int j=0; j<alleles[i].length; j++) {
+				if (!alleles[i][j].matches(validAlleleRegex))
+                	throw new Exception("Invalid allele '" + alleles[i][j] + "' provided for " + sIndOrSp + " at variant" + variantToFeed.getId());
+
+            	if ("I".equals(alleles[i][j]))
+            		alleles[i][j] = "NN";
+            	else if ("D".equals(alleles[i][j]))
+            		alleles[i][j] = "N";
+
+                Integer alleleIndex = alleleIndexMap.get(alleles[i][j]);
                 if (alleleIndex != null)
                 	continue;	// we already have this one
 
-				if (allele.matches(validAlleleRegex )) {
-                    alleleIndex = variantToFeed.getKnownAlleles().size();
-                    variantToFeed.getKnownAlleles().add(allele);
-                    alleleIndexMap.put(allele, alleleIndex);
-                }
-                else
-                	throw new Exception("Invalid allele '" + allele + "' provided for " + sIndOrSp + " at variant" + variantToFeed.getId());
+                alleleIndex = variantToFeed.getKnownAlleles().size();
+                variantToFeed.getKnownAlleles().add(alleles[i][j]);
+                alleleIndexMap.put(alleles[i][j], alleleIndex);
             }
-
+            
             try {
             	Stream<String> alleleStream;
             	if (alleles[i].length == 1 && m_ploidy > 1) {	// it's a collapsed homozygous that we need to expand
@@ -347,6 +356,7 @@ public abstract class RefactoredImport extends AbstractGenotypeImport {
             	}
             	else
             		alleleStream = Arrays.stream(alleles[i]);
+
             	SampleGenotype aGT = new SampleGenotype(alleleStream.map(allele -> alleleIndexMap.get(allele)).sorted().map(index -> index.toString()).collect(Collectors.joining("/")));
                 vrd.getSampleGenotypes().put(m_providedIdToSampleMap.get(sIndOrSp).getId(), aGT);
             }
