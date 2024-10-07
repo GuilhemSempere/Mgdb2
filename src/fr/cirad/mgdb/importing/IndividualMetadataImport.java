@@ -131,7 +131,7 @@ public class IndividualMetadataImport {
         for (int i = 0; i < cells.size(); i++) {
             String cell = cells.get(i);
             if (!cell.isEmpty() && (fieldsToImport == null || fieldsToImport.contains(cell.toLowerCase())))
-                columnLabels.put(i, cell);
+                columnLabels.put(i, cell.replaceAll("\\.", "_"));
         }
     	return columnLabels;
     }
