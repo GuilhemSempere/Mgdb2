@@ -485,6 +485,7 @@ public class MongoTemplateManager implements ApplicationContextAware {
                 dataSourceProperties.put((fPublic ? "*" : "") + sModule + (fHidden ? "*" : ""), propValues[0] + "," + propValues[1] + "," + ncbiTaxonIdNameAndSpecies);
                 fos = new FileOutputStream(f);
                 dataSourceProperties.store(fos, null);
+                setTaxon(sModule, ncbiTaxonIdNameAndSpecies);
                 
                 if (fPublic)
                     publicDatabases.add(sModule);
