@@ -85,4 +85,6 @@ public abstract class AbstractTokenManager {
 			auth = SecurityContextHolder.getContext().getAuthentication();
         return auth == null || "anonymousUser".equals(auth.getName()) ? "anonymousUser" : auth.getName();	    
 	}
+        
+    abstract public Collection<String> listReadableDBs(String token);
 }
