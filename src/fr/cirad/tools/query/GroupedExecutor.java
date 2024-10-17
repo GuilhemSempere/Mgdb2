@@ -11,7 +11,11 @@ public class GroupedExecutor extends ThreadPoolExecutor {
 	public GroupedExecutor(int poolSize) {
 		super(poolSize, poolSize, 0L, TimeUnit.MILLISECONDS, new GroupedBlockingQueue<>(), Executors.defaultThreadFactory());
 	}
-
+    
+    public int getGroupCount() {
+    	return ((GroupedBlockingQueue) getQueue()).getGroupCount();
+    }
+    
     protected <T> RunnableFuture<T> newTaskFor(Runnable runnable, T value) {
         return new GroupedFutureTask<T>(runnable, value);
     }

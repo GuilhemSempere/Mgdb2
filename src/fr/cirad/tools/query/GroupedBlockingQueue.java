@@ -32,6 +32,10 @@ public class GroupedBlockingQueue<E> implements BlockingQueue<E> {
         taskGroups = new HashMap<>();
     }
     
+    public int getGroupCount() {
+    	return taskGroups.size();
+    }
+    
 	public void shutdown(String group) {
 		synchronized (shutdownGroups) {
 			shutdownGroups.add(group);
