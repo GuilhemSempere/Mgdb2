@@ -823,7 +823,7 @@ public class MongoTemplateManager implements ApplicationContextAware {
 	public static ExecutorService getExecutor(String sModule) {
 		GroupedExecutor executor = moduleExecutors.get(sModule);
 		if (executor != null) {
-			LOG.debug("Returning executor " + executor.hashCode() + " for module " + sModule + ", currently handling " + executor.getGroupCount() + " groups and " + executor.getTaskCount() + " tasks");
+			LOG.debug("Returning executor " + executor.hashCode() + " for module " + sModule + " (" + executor + ")");
 			return executor;
 		}
 		return new ThreadPoolExecutor(INITIAL_NUMBER_OF_SIMULTANEOUS_QUERY_THREADS, MAXIMUM_NUMBER_OF_SIMULTANEOUS_QUERY_THREADS, Long.MAX_VALUE, TimeUnit.DAYS, new LinkedBlockingQueue<>(), new ThreadPoolExecutor.CallerRunsPolicy());

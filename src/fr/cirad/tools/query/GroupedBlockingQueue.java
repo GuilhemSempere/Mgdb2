@@ -374,4 +374,8 @@ public class GroupedBlockingQueue<E> implements BlockingQueue<E> {
         }
         throw new NoSuchElementException();
     }
+    
+    public List<Integer> getGroupQueueCounts() {
+    	return taskGroups.values().stream().map(g -> g.size()).toList();
+    }
 }

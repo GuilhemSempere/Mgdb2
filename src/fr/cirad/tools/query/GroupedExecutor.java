@@ -41,6 +41,10 @@ public class GroupedExecutor extends ThreadPoolExecutor {
             return task;
         }
     }
+    
+    public String toString() {
+    	return "active tasks:" + getActiveCount() + "; tasks queued by group:" + ((GroupedBlockingQueue) getQueue()).getGroupQueueCounts();
+    }
 
     static public class TaskWrapper implements Runnable {
         private final String group;
