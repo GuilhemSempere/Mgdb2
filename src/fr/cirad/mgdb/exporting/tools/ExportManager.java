@@ -225,18 +225,23 @@ public class ExportManager
 	}
 
     public void readAndWrite(OutputStream os) throws IOException, InterruptedException, ExecutionException {
+        if (markerCount == null)
+        	throw new IOException("markerCount may not be null");
+        
+        if (markerCount == 0)
+        	return;
+
         List<String> currentMarkerIDs = new ArrayList<>(nQueryChunkSize);
 
         VariantRunDataComparator vrdComparator = new VariantRunDataComparator(nAssemblyId);
         
         List<BasicDBObject> pipeline = new ArrayList<>();
-        if (!fWorkingOnTempColl && variantMatchStage != null)
+        if (variantMatchStage != null)
         	pipeline.add(variantMatchStage);
         pipeline.add(sortStage);
         pipeline.add(new BasicDBObject("$project", new BasicDBObject("_id", 1)));
 
-        MongoTemplate mongoTemplate = MongoTemplateManager.get(module);
-        
+        MongoTemplate mongoTemplate = MongoTemplateManager.get(module);        
         MongoCollection<Document> collForQueryingIDs = fWorkingOnTempColl ? varColl : mongoTemplate.getCollection(mongoTemplate.getCollectionName(VariantData.class));
         MongoCursor<Document> markerCursor = collForQueryingIDs.aggregate(pipeline, Document.class).collation(IExportHandler.collationObj).allowDiskUse(true).batchSize(nQueryChunkSize).iterator();   /*FIXME: didn't find a way to set noCursorTimeOut on aggregation cursors*/
         
@@ -248,6 +253,7 @@ public class ExportManager
         	throw new IOException("markerCount may not be null");
 
         Future<Void>[] chunkExportTasks = new Future[(int) Math.ceil((float) markerCount / nQueryChunkSize)];
+        System.err.println(chunkExportTasks.length);
         chunkGenotypeFiles = new File[chunkExportTasks.length];
         if (exportWriter.writesVariantFiles())
         	chunkVariantFiles = new File[chunkExportTasks.length];
@@ -289,7 +295,13 @@ public class ExportManager
 	            			OutputStream genotypeChunkOS = null, variantChunkOS = null, warningChunkOS = null;
 	            			try {
 		            			File genotypeChunkFile = File.createTempFile(nFinalChunkIndex + "__genotypes__", "__" + taskGroup, dataExtractionFolder), warningChunkFile = File.createTempFile(nFinalChunkIndex + "__warnings__", "__" + taskGroup, dataExtractionFolder);
-		            			chunkGenotypeFiles[nFinalChunkIndex - 1] = genotypeChunkFile;
+		    	            	try {
+			            			chunkGenotypeFiles[nFinalChunkIndex - 1] = genotypeChunkFile;
+		    	            	}
+		    	            	catch (ArrayIndexOutOfBoundsException e) {
+		    	            		e.printStackTrace();
+		    	            	}
+		            			
 		            			genotypeChunkOS = new BufferedOutputStream(new FileOutputStream(genotypeChunkFile), 16384);
 		            			if (exportWriter.writesVariantFiles()) {
 		            				File variantChunkFile = File.createTempFile(nFinalChunkIndex + "__variants__", "__" + taskGroup, dataExtractionFolder);
@@ -409,7 +421,12 @@ public class ExportManager
 		            	}
 	            	};
 	            	
-	                chunkExportTasks[nFinalChunkIndex - 1] = (Future<Void>) executor.submit(new TaskWrapper(taskGroup, chunkExportThread));
+	            	try {
+	            		chunkExportTasks[nFinalChunkIndex - 1] = (Future<Void>) executor.submit(new TaskWrapper(taskGroup, chunkExportThread));
+	            	}
+	            	catch (ArrayIndexOutOfBoundsException e) {
+	            		e.printStackTrace();
+	            	}
 	                currentMarkerIDs = new ArrayList<>(nQueryChunkSize);
 	            }
 	        }
