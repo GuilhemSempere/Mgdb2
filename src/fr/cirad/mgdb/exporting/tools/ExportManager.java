@@ -253,7 +253,6 @@ public class ExportManager
         	throw new IOException("markerCount may not be null");
 
         Future<Void>[] chunkExportTasks = new Future[(int) Math.ceil((float) markerCount / nQueryChunkSize)];
-        System.err.println(chunkExportTasks.length);
         chunkGenotypeFiles = new File[chunkExportTasks.length];
         if (exportWriter.writesVariantFiles())
         	chunkVariantFiles = new File[chunkExportTasks.length];
@@ -295,13 +294,8 @@ public class ExportManager
 	            			OutputStream genotypeChunkOS = null, variantChunkOS = null, warningChunkOS = null;
 	            			try {
 		            			File genotypeChunkFile = File.createTempFile(nFinalChunkIndex + "__genotypes__", "__" + taskGroup, dataExtractionFolder), warningChunkFile = File.createTempFile(nFinalChunkIndex + "__warnings__", "__" + taskGroup, dataExtractionFolder);
-		    	            	try {
-			            			chunkGenotypeFiles[nFinalChunkIndex - 1] = genotypeChunkFile;
-		    	            	}
-		    	            	catch (ArrayIndexOutOfBoundsException e) {
-		    	            		e.printStackTrace();
-		    	            	}
-		            			
+		            			chunkGenotypeFiles[nFinalChunkIndex - 1] = genotypeChunkFile;
+
 		            			genotypeChunkOS = new BufferedOutputStream(new FileOutputStream(genotypeChunkFile), 16384);
 		            			if (exportWriter.writesVariantFiles()) {
 		            				File variantChunkFile = File.createTempFile(nFinalChunkIndex + "__variants__", "__" + taskGroup, dataExtractionFolder);
@@ -421,12 +415,7 @@ public class ExportManager
 		            	}
 	            	};
 	            	
-	            	try {
-	            		chunkExportTasks[nFinalChunkIndex - 1] = (Future<Void>) executor.submit(new TaskWrapper(taskGroup, chunkExportThread));
-	            	}
-	            	catch (ArrayIndexOutOfBoundsException e) {
-	            		e.printStackTrace();
-	            	}
+            		chunkExportTasks[nFinalChunkIndex - 1] = (Future<Void>) executor.submit(new TaskWrapper(taskGroup, chunkExportThread));
 	                currentMarkerIDs = new ArrayList<>(nQueryChunkSize);
 	            }
 	        }
