@@ -226,7 +226,6 @@ public class MgdbDao {
             	ArrayList<AbstractVariantData> taggedVariants = tagVariants(mongoTemplate, variantColl.getNamespace().getCollectionName(), mongoTemplate.count(new Query(), Individual.class));
                 if (!taggedVariants.isEmpty()) {	// otherwise there is apparently no variant in the DB
                 	List<Document> docs = taggedVariants.stream().map(var -> new Document("_id", var.getVariantId())).toList();
-                	System.err.println(docs);
                 	taggedVarColl.insertMany(docs);
                 }
             }

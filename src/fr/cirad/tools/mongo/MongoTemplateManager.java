@@ -339,7 +339,7 @@ public class MongoTemplateManager implements ApplicationContextAware {
 						MgdbDao.ensurePositionIndexes(mongoTemplate, Arrays.asList(mongoTemplate.getCollection(mongoTemplate.getCollectionName(VariantData.class))), false, false);	// FIXME: move to end of addRunsToVariantCollectionIfNecessary()
 						MgdbDao.createGeneCacheIfNecessary(db, MgdbDao.COLLECTION_NAME_GENE_CACHE);
                     } catch (Exception e) {
-						LOG.error("Error while adding run info to variants colleciton for db " + db, e);
+						LOG.error("Error while adding run info to variants collection for db " + db, e);
 					}
         		}
         	});
