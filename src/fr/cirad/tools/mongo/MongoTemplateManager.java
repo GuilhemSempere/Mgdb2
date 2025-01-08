@@ -837,4 +837,32 @@ public class MongoTemplateManager implements ApplicationContextAware {
     			ge.getValue().shutdownNow();
     		}
     }
+
+	/**
+	     * Gets the temporary variant collection.
+	     *
+	     * @param sModule the module
+	     * @param processID the process id
+	     * @param fEmptyItBeforeHand whether or not to empty it beforehand
+	     * @return the temporary variant collection
+		 * @throws InterruptedException 
+     */
+    public static MongoCollection<Document> getTemporaryVariantCollection(String sModule, String processID, boolean fEmptyItBeforeHand, boolean fIndexPositionFieldsEvenIfCollectionIsEmpty, boolean fWaitForIndexCreationCompletion) throws InterruptedException {
+        MongoTemplate mongoTemplate = get(sModule);
+        MongoCollection<Document> tmpColl = mongoTemplate.getCollection(TEMP_COLL_PREFIX + Helper.convertToMD5(processID));
+        if (fEmptyItBeforeHand) {
+
+//            ArrayList<StackTraceElement> keptStackTraceElements = new ArrayList<>();
+//            Exception e = new Exception("Check stack trace");
+//            for (StackTraceElement ste : e.getStackTrace())
+//                if (ste.toString().startsWith("fr.cirad."))
+//                    keptStackTraceElements.add(ste);
+//            e.setStackTrace(keptStackTraceElements.toArray(new StackTraceElement[keptStackTraceElements.size()]));
+//            LOG.debug("Dropping " + sModule + "." + tmpColl.getName() + " from getTemporaryVariantCollection", e);
+
+            tmpColl.drop();
+            MgdbDao.ensurePositionIndexes(mongoTemplate, Arrays.asList(tmpColl), fIndexPositionFieldsEvenIfCollectionIsEmpty, fWaitForIndexCreationCompletion);    // make sure we have indexes defined as required in v2.4
+        }
+        return tmpColl;
+	}
 }
