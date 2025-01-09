@@ -66,7 +66,7 @@ public abstract class AbstractTokenManager {
 
     abstract public void setSessionTimeoutInSeconds(int sessionTimeoutInSeconds);
     
-    public String readToken(HttpServletRequest request)
+    static public String readToken(HttpServletRequest request)
     {
     	String token = null;
     	if (request != null)
