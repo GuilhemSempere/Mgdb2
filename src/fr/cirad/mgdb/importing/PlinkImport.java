@@ -35,7 +35,6 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
-import org.apache.commons.lang3.StringUtils;
 import org.apache.log4j.Logger;
 import org.springframework.beans.factory.BeanDefinitionStoreException;
 import org.springframework.context.support.GenericXmlApplicationContext;
@@ -537,7 +536,7 @@ public class PlinkImport extends RefactoredImport {
 				                                                .distinct()
 				                                                .map(allele -> {
 				                                                					try {
-				                                                						return Allele.create(allele);
+				                                                						return Allele.create(allele.equals("I") ? "NN" : (allele.equals("D") ? "N" : allele));
 										                                            } catch (IllegalArgumentException e) {
 										                                            	throw new IllegalArgumentException("Variant " + variantName + " - " + e.getClass().getName() + ": " + e.getMessage());
 										                                            }

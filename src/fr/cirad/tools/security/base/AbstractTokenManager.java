@@ -55,6 +55,9 @@ public abstract class AbstractTokenManager {
     
     abstract public boolean canUserWriteToProject(Collection<? extends GrantedAuthority> authorities, String sModule, int projectId);
     abstract public boolean canUserWriteToProject(String token, String sModule, int projectId);
+    
+    abstract public boolean canUserEditCallsInProject(Collection<? extends GrantedAuthority> authorities, String sModule, int projectId);
+    abstract public boolean canUserEditCallsInProject(String token, String sModule, int projectId);
 
 	abstract public void cleanupTokenMap();
 	abstract public void clearTokensTiedToAuthentication(Authentication auth);
@@ -63,7 +66,7 @@ public abstract class AbstractTokenManager {
 
     abstract public void setSessionTimeoutInSeconds(int sessionTimeoutInSeconds);
     
-    public String readToken(HttpServletRequest request)
+    static public String readToken(HttpServletRequest request)
     {
     	String token = null;
     	if (request != null)
@@ -82,4 +85,6 @@ public abstract class AbstractTokenManager {
 			auth = SecurityContextHolder.getContext().getAuthentication();
         return auth == null || "anonymousUser".equals(auth.getName()) ? "anonymousUser" : auth.getName();	    
 	}
+        
+    abstract public Collection<String> listReadableDBs(String token);
 }

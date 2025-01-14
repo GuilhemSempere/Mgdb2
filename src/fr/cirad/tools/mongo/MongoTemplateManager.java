@@ -336,10 +336,10 @@ public class MongoTemplateManager implements ApplicationContextAware {
                     	MongoTemplate mongoTemplate = templateMap.get(db);
 						MgdbDao.addRunsToVariantCollectionIfNecessary(mongoTemplate);
 						MgdbDao.ensureCustomMetadataIndexes(mongoTemplate);
-						MgdbDao.ensurePositionIndexes(mongoTemplate, Arrays.asList(mongoTemplate.getCollection(mongoTemplate.getCollectionName(VariantData.class))));	// FIXME: move to end of addRunsToVariantCollectionIfNecessary()
+						MgdbDao.ensurePositionIndexes(mongoTemplate, Arrays.asList(mongoTemplate.getCollection(mongoTemplate.getCollectionName(VariantData.class))), false, false);	// FIXME: move to end of addRunsToVariantCollectionIfNecessary()
 						MgdbDao.createGeneCacheIfNecessary(db, MgdbDao.COLLECTION_NAME_GENE_CACHE);
                     } catch (Exception e) {
-						LOG.error("Error while adding run info to variants colleciton for db " + db, e);
+						LOG.error("Error while adding run info to variants collection for db " + db, e);
 					}
         		}
         	});
@@ -379,7 +379,7 @@ public class MongoTemplateManager implements ApplicationContextAware {
         MongoTemplate mongoTemplate = new MongoTemplate(client, sDbName);
         ((MappingMongoConverter) mongoTemplate.getConverter()).setMapKeyDotReplacement(DOT_REPLACEMENT_STRING);
 
-        MgdbDao.ensurePositionIndexes(mongoTemplate, Arrays.asList(mongoTemplate.getCollection(mongoTemplate.getCollectionName(VariantData.class)), mongoTemplate.getCollection(mongoTemplate.getCollectionName(VariantRunData.class))));	// make sure we have indexes defined as required in v2.4
+        MgdbDao.ensurePositionIndexes(mongoTemplate, Arrays.asList(mongoTemplate.getCollection(mongoTemplate.getCollectionName(VariantData.class)), mongoTemplate.getCollection(mongoTemplate.getCollectionName(VariantRunData.class))), false, false);	// make sure we have indexes defined as required in v2.4
 
         return mongoTemplate;
     }
@@ -485,6 +485,7 @@ public class MongoTemplateManager implements ApplicationContextAware {
                 dataSourceProperties.put((fPublic ? "*" : "") + sModule + (fHidden ? "*" : ""), propValues[0] + "," + propValues[1] + "," + ncbiTaxonIdNameAndSpecies);
                 fos = new FileOutputStream(f);
                 dataSourceProperties.store(fos, null);
+                setTaxon(sModule, ncbiTaxonIdNameAndSpecies);
                 
                 if (fPublic)
                     publicDatabases.add(sModule);
@@ -821,7 +822,11 @@ public class MongoTemplateManager implements ApplicationContextAware {
 
 	public static ExecutorService getExecutor(String sModule) {
 		GroupedExecutor executor = moduleExecutors.get(sModule);
-		return executor != null ? executor : new ThreadPoolExecutor(INITIAL_NUMBER_OF_SIMULTANEOUS_QUERY_THREADS, MAXIMUM_NUMBER_OF_SIMULTANEOUS_QUERY_THREADS, Long.MAX_VALUE, TimeUnit.DAYS, new LinkedBlockingQueue<>(), new ThreadPoolExecutor.CallerRunsPolicy());
+		if (executor != null) {
+			LOG.debug("Returning executor " + executor.hashCode() + " for module " + sModule + " (" + executor + ")");
+			return executor;
+		}
+		return new ThreadPoolExecutor(INITIAL_NUMBER_OF_SIMULTANEOUS_QUERY_THREADS, MAXIMUM_NUMBER_OF_SIMULTANEOUS_QUERY_THREADS, Long.MAX_VALUE, TimeUnit.DAYS, new LinkedBlockingQueue<>(), new ThreadPoolExecutor.CallerRunsPolicy());
 	}
 	
     @PreDestroy
@@ -832,4 +837,32 @@ public class MongoTemplateManager implements ApplicationContextAware {
     			ge.getValue().shutdownNow();
     		}
     }
+
+	/**
+	     * Gets the temporary variant collection.
+	     *
+	     * @param sModule the module
+	     * @param processID the process id
+	     * @param fEmptyItBeforeHand whether or not to empty it beforehand
+	     * @return the temporary variant collection
+		 * @throws InterruptedException 
+     */
+    public static MongoCollection<Document> getTemporaryVariantCollection(String sModule, String processID, boolean fEmptyItBeforeHand, boolean fIndexPositionFieldsEvenIfCollectionIsEmpty, boolean fWaitForIndexCreationCompletion) throws InterruptedException {
+        MongoTemplate mongoTemplate = get(sModule);
+        MongoCollection<Document> tmpColl = mongoTemplate.getCollection(TEMP_COLL_PREFIX + Helper.convertToMD5(processID));
+        if (fEmptyItBeforeHand) {
+
+//            ArrayList<StackTraceElement> keptStackTraceElements = new ArrayList<>();
+//            Exception e = new Exception("Check stack trace");
+//            for (StackTraceElement ste : e.getStackTrace())
+//                if (ste.toString().startsWith("fr.cirad."))
+//                    keptStackTraceElements.add(ste);
+//            e.setStackTrace(keptStackTraceElements.toArray(new StackTraceElement[keptStackTraceElements.size()]));
+//            LOG.debug("Dropping " + sModule + "." + tmpColl.getName() + " from getTemporaryVariantCollection", e);
+
+            tmpColl.drop();
+            MgdbDao.ensurePositionIndexes(mongoTemplate, Arrays.asList(tmpColl), fIndexPositionFieldsEvenIfCollectionIsEmpty, fWaitForIndexCreationCompletion);    // make sure we have indexes defined as required in v2.4
+        }
+        return tmpColl;
+	}
 }

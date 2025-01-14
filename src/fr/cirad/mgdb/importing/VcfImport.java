@@ -471,6 +471,9 @@ public class VcfImport extends AbstractGenotypeImport {
                 mongoTemplate.insert(project);
             
             if (!distinctEncounteredGeneNames.isEmpty()) {
+                progress.addStep("Building gene list cache");
+                progress.moveToNextStep();
+
 	            BulkOperations bulkOperations = mongoTemplate.bulkOps(BulkOperations.BulkMode.UNORDERED, MgdbDao.COLLECTION_NAME_GENE_CACHE);
 	            for (String geneName : distinctEncounteredGeneNames) {
 	                Update update = new Update();
