@@ -135,12 +135,12 @@ public class InitialVariantImport {
 //      fw.close();
      
         if (args.length < 2)
-            throw new Exception("You must pass 2 parameters as arguments: DATASOURCE name, exhaustive variant list TSV file.");
+            throw new Exception("You must pass 2 parameters as arguments: DATASOURCE name, exhaustive variant list TSV file. An optional 3rd parameter is accepted as a String prefix for generating variant IDs at import");
 
-        new InitialVariantImport(null).insertVariantsAndSynonyms(args[0], args[1]);
+        new InitialVariantImport(null).insertVariantsAndSynonyms(args[0], args[1], args.length > 2 ? args[2] : null);
     }
     
-    public void insertVariantsAndSynonyms(String sModule, String sImportFilePath) throws Exception
+    public void insertVariantsAndSynonyms(String sModule, String sImportFilePath, String idPrefix) throws Exception
     {
         File chipInfoFile = new File(sImportFilePath);
         if (!chipInfoFile.exists() || chipInfoFile.isDirectory())
@@ -233,6 +233,7 @@ public class InitialVariantImport {
                     }
                 });
 
+                int nVariantIndex = 1;
                 final MongoTemplate finalMongoTemplate = mongoTemplate;
                 do
                 {
@@ -241,7 +242,7 @@ public class InitialVariantImport {
                         List<String> cells = Helper.split(sLine, "\t");
                         if (cells.size() < 7)
                         	LOG.warn("Skipping incomplete line: " + sLine);
-                        VariantData variant = new VariantData(cells.get(idColIndex));
+                        VariantData variant = new VariantData(idPrefix == null ? cells.get(idColIndex) : (idPrefix + String.format("%09d", nVariantIndex++)));
                         variant.setType(cells.get(typeColIndex));
                         if (alleleColIndex != -1) {
 	                        String alleles = cells.get(alleleColIndex);
