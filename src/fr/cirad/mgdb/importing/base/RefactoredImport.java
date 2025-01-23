@@ -229,8 +229,20 @@ public abstract class RefactoredImport extends AbstractGenotypeImport {
 
                                             if (fInconsistentData)
                                                 LOG.warn("Not adding inconsistent data: " + providedVariantId + " / " + individuals[nIndividualIndex]);
-                                            else 
+                                            else {
+                                            	if (!m_fImportUnknownVariants && m_maxExpectedAlleleCount == 2 && variant.getKnownAlleles().size() == 2 && variant.getType().equals(Type.INDEL.toString()) && (Arrays.stream(genotype).filter(all -> "I".equalsIgnoreCase(all) || "D".equalsIgnoreCase(all))).count() > 0) {
+                                            		// We are considering a biallelic INDEL for which we already know the alleles. We don't want to import unknown alleles in that case
+                                            		if (variant.getKnownAlleles().get(0).length() == variant.getKnownAlleles().get(1).length())
+                                            			LOG.warn("Unable to recognize INDEL alleles for variant " + variant.getVariantId() + " because both have the same length!");
+                                            		String shortAllele = variant.getKnownAlleles().get(0).length() > variant.getKnownAlleles().get(1).length() ? variant.getKnownAlleles().get(1) : variant.getKnownAlleles().get(0);
+                                            		String longAllele = shortAllele.equals(variant.getKnownAlleles().get(0)) ? variant.getKnownAlleles().get(1) : variant.getKnownAlleles().get(0);
+                                            		for (int i=0; i<genotype.length; i++)
+                                           				genotype[i] = "I".equalsIgnoreCase(genotype[i]) ? longAllele : shortAllele;
+                                            	}
+                                            			
+                                            			
 	                                            alleles[nIndividualIndex] = genotype;
+                                            }
 	                                    }
                                         nIndividualIndex++;
                                     }
