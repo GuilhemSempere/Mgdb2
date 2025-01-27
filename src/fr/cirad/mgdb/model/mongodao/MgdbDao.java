@@ -279,6 +279,7 @@ public class MgdbDao {
         	add(VariantData.FIELDNAME_SYNONYMS + "." + VariantData.FIELDNAME_SYNONYM_TYPE_ID_ILLUMINA);
         	add(VariantData.FIELDNAME_SYNONYMS + "." + VariantData.FIELDNAME_SYNONYM_TYPE_ID_INTERNAL);
         	add(VariantData.FIELDNAME_SYNONYMS + "." + VariantData.FIELDNAME_SYNONYM_TYPE_ID_NCBI);
+        	add(VariantData.FIELDNAME_SYNONYMS + "." + VariantData.FIELDNAME_SYNONYM_TYPE_ID_AFFYMETRIX);
         }}, foundSynonymIndexes = new ArrayList<>();
         
         MongoCursor<Document> indexCursor = variantColl.listIndexes().cursor();
@@ -297,21 +298,13 @@ public class MgdbDao {
         }
         missingSynonymIndexes.removeAll(foundSynonymIndexes);
 
-        if (missingSynonymIndexes.contains(VariantData.FIELDNAME_SYNONYMS + "." + VariantData.FIELDNAME_SYNONYM_TYPE_ID_ILLUMINA) && (fEvenIfNoSuchSynonyms || variantColl.aggregate(Arrays.asList( new BasicDBObject("$limit", 100000), new BasicDBObject("$match", new BasicDBObject(VariantData.FIELDNAME_SYNONYMS + "." + VariantData.FIELDNAME_SYNONYM_TYPE_ID_ILLUMINA + ".0", new BasicDBObject("$exists", true))) )).iterator().hasNext())) {
-            LOG.debug("Creating index on field " + VariantData.FIELDNAME_SYNONYMS + "." + VariantData.FIELDNAME_SYNONYM_TYPE_ID_ILLUMINA + " of collection " + variantColl.getNamespace());
-            variantColl.createIndex(new BasicDBObject(VariantData.FIELDNAME_SYNONYMS + "." + VariantData.FIELDNAME_SYNONYM_TYPE_ID_ILLUMINA, 1));
-            nResult++;
-        }
-        if (missingSynonymIndexes.contains(VariantData.FIELDNAME_SYNONYMS + "." + VariantData.FIELDNAME_SYNONYM_TYPE_ID_INTERNAL) && (fEvenIfNoSuchSynonyms || variantColl.aggregate(Arrays.asList( new BasicDBObject("$limit", 100000), new BasicDBObject("$match", new BasicDBObject(VariantData.FIELDNAME_SYNONYMS + "." + VariantData.FIELDNAME_SYNONYM_TYPE_ID_INTERNAL + ".0", new BasicDBObject("$exists", true))) )).iterator().hasNext())) {
-        	LOG.debug("Creating index on field " + VariantData.FIELDNAME_SYNONYMS + "." + VariantData.FIELDNAME_SYNONYM_TYPE_ID_INTERNAL + " of collection " + variantColl.getNamespace());
-        	variantColl.createIndex(new BasicDBObject(VariantData.FIELDNAME_SYNONYMS + "." + VariantData.FIELDNAME_SYNONYM_TYPE_ID_INTERNAL, 1));
-        	nResult++;
-        }
-        if (missingSynonymIndexes.contains(VariantData.FIELDNAME_SYNONYMS + "." + VariantData.FIELDNAME_SYNONYM_TYPE_ID_NCBI) && (fEvenIfNoSuchSynonyms || variantColl.aggregate(Arrays.asList( new BasicDBObject("$limit", 100000), new BasicDBObject("$match", new BasicDBObject(VariantData.FIELDNAME_SYNONYMS + "." + VariantData.FIELDNAME_SYNONYM_TYPE_ID_NCBI + ".0", new BasicDBObject("$exists", true))) )).iterator().hasNext())) {
-            LOG.debug("Creating index on field " + VariantData.FIELDNAME_SYNONYMS + "." + VariantData.FIELDNAME_SYNONYM_TYPE_ID_NCBI + " of collection " + variantColl.getNamespace());
-            variantColl.createIndex(new BasicDBObject(VariantData.FIELDNAME_SYNONYMS + "." + VariantData.FIELDNAME_SYNONYM_TYPE_ID_NCBI, 1));
-            nResult++;
-        }
+        for (String idx : missingSynonymIndexes)
+	        if (fEvenIfNoSuchSynonyms || variantColl.aggregate(Arrays.asList( new BasicDBObject("$limit", 100000), new BasicDBObject("$match", new BasicDBObject(idx + ".0", new BasicDBObject("$exists", true))) )).iterator().hasNext()) {
+	            LOG.debug("Creating index on field " + idx + " of collection " + variantColl.getNamespace());
+	            variantColl.createIndex(new BasicDBObject(idx, 1));
+	            nResult++;
+	        }
+
         if (!fFoundTypeIndex)
 	        try {
 	            LOG.debug("Creating index on field " + VariantData.FIELDNAME_TYPE + " of collection " + variantColl.getNamespace());
