@@ -84,8 +84,8 @@ abstract public class AbstractVariantData
     /** The Constant FIELDNAME_SYNONYM_TYPE_ID_INTERNAL. */
     public final static String FIELDNAME_SYNONYM_TYPE_ID_INTERNAL = "in";
     
-    /** The Constant FIELDNAME_SYNONYM_TYPE_ID_AFFYMETRIX. */
-    public final static String FIELDNAME_SYNONYM_TYPE_ID_AFFYMETRIX = "ax";
+    /** The Constant FIELDNAME_SYNONYM_TYPE_ID_AXIOM. */
+    public final static String FIELDNAME_SYNONYM_TYPE_ID_AXIOM = "ax";
     
     /** The Constant SECTION_ADDITIONAL_INFO. */
     public final static String SECTION_ADDITIONAL_INFO = "ai";

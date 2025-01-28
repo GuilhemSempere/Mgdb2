@@ -81,7 +81,7 @@ public class InitialVariantImport {
     /** The Constant twoDecimalNF. */
     static private final NumberFormat twoDecimalNF = NumberFormat.getInstance();
     
-    static public final List<String> synonymColNames = Arrays.asList(VariantData.FIELDNAME_SYNONYM_TYPE_ID_ILLUMINA, VariantData.FIELDNAME_SYNONYM_TYPE_ID_AFFYMETRIX, VariantData.FIELDNAME_SYNONYM_TYPE_ID_NCBI, VariantData.FIELDNAME_SYNONYM_TYPE_ID_INTERNAL);
+    static public final List<String> synonymColNames = Arrays.asList(VariantData.FIELDNAME_SYNONYM_TYPE_ID_ILLUMINA, VariantData.FIELDNAME_SYNONYM_TYPE_ID_AXIOM, VariantData.FIELDNAME_SYNONYM_TYPE_ID_NCBI, VariantData.FIELDNAME_SYNONYM_TYPE_ID_INTERNAL);
     
     static private final String ASSEMBLY_POSITION_PREFIX = "pos-";
     
