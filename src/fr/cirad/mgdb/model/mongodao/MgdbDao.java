@@ -625,13 +625,12 @@ public class MgdbDao {
     public static TreeMap<String /*individual*/, ArrayList<GenotypingSample>> getSamplesByIndividualForProject(final String sModule, final int projId, final Collection<String> individuals) throws ObjectNotFoundException {
         TreeMap<String /*individual*/, ArrayList<GenotypingSample>> result = new TreeMap<>();
         MongoTemplate mongoTemplate = MongoTemplateManager.get(sModule);
-        if (mongoTemplate == null) {
+        if (mongoTemplate == null)
             throw new ObjectNotFoundException("Database " + sModule + " does not exist");
-        }
+
         Criteria crit = Criteria.where(GenotypingSample.FIELDNAME_PROJECT_ID).is(projId);
-        if (individuals != null && individuals.size() > 0) {
+        if (individuals != null)
             crit.andOperator(Criteria.where(GenotypingSample.FIELDNAME_INDIVIDUAL).in(individuals));
-        }
         Query q = new Query(crit);
 //		q.with(new Sort(Sort.Direction.ASC, GenotypingSample.SampleId.FIELDNAME_INDIVIDUAL));
         for (GenotypingSample sample : mongoTemplate.find(q, GenotypingSample.class)) {
