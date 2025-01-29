@@ -964,6 +964,13 @@ public class MgdbDao {
             }
         }.start();
         LOG.info("Launched async VRD cleanup for project " + nProjectId + " of module " + sModule);
+        
+        Update update = new Update();
+        update.pull(VariantData.FIELDNAME_RUNS, new Query(Criteria.where(Run.FIELDNAME_PROJECT_ID).is(nProjectId)));
+        UpdateResult projRefRemovalResult = mongoTemplate.updateMulti(new Query(Criteria.where(VariantData.FIELDNAME_RUNS + "." + Run.FIELDNAME_PROJECT_ID).is(nProjectId)), update, VariantData.class);
+        if (projRefRemovalResult.getModifiedCount() > 0)
+        	LOG.info("Removed " + projRefRemovalResult.getModifiedCount() + " project references in variants collection of module " + sModule);
+
 
         if (httpSessionFactory == null)
         	LOG.info("Skipped removal of BrAPI v2 VariantSet export files (apparently invoked from command line)");
