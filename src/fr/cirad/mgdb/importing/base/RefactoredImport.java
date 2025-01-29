@@ -267,7 +267,7 @@ public abstract class RefactoredImport extends AbstractGenotypeImport {
                                         project.getAlleleCounts().add(variant.getKnownAlleles().size());	// it's a TreeSet so it will only be added if it's not already present
                                     }
                                     else {
-                                    	ReferencePosition rp = variant.getReferencePosition(nAssemblyId);
+                                    	ReferencePosition rp = nAssemblyId != null ? variant.getReferencePosition(nAssemblyId) : null;
                                     	LOG.info("Skipping variant " + providedVariantId + (rp != null ? " positioned at " + rp.getSequence() + ":" + rp.getStartSite() : "") + " because its alleles are not known (only missing data provided so far)");
                                     }
 
@@ -377,7 +377,7 @@ public abstract class RefactoredImport extends AbstractGenotypeImport {
             }
         }
         
-        if (fImportUnknownVariants && variantToFeed.getReferencePosition(nAssemblyId) == null && sequence != null) // otherwise we leave it as it is (had some trouble with overridden end-sites)
+        if (nAssemblyId != null && fImportUnknownVariants && variantToFeed.getReferencePosition(nAssemblyId) == null && sequence != null) // otherwise we leave it as it is (had some trouble with overridden end-sites)
             variantToFeed.setReferencePosition(nAssemblyId, new ReferencePosition(sequence, bpPos, !variantToFeed.getKnownAlleles().isEmpty() ? bpPos + variantToFeed.getKnownAlleles().iterator().next().length() - 1 : null));
 
         if (!alleleIndexMap.isEmpty()) {
