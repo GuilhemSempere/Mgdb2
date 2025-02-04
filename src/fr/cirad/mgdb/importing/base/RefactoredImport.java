@@ -229,8 +229,20 @@ public abstract class RefactoredImport extends AbstractGenotypeImport {
 
                                             if (fInconsistentData)
                                                 LOG.warn("Not adding inconsistent data: " + providedVariantId + " / " + individuals[nIndividualIndex]);
-                                            else 
+                                            else {
+                                            	if (!m_fImportUnknownVariants && m_maxExpectedAlleleCount == 2 && variant.getKnownAlleles().size() == 2 && variant.getType().equals(Type.INDEL.toString()) && (Arrays.stream(genotype).filter(all -> "I".equalsIgnoreCase(all) || "D".equalsIgnoreCase(all))).count() > 0) {
+                                            		// We are considering a biallelic INDEL for which we already know the alleles. We don't want to import unknown alleles in that case
+                                            		if (variant.getKnownAlleles().get(0).length() == variant.getKnownAlleles().get(1).length())
+                                            			LOG.warn("Unable to recognize INDEL alleles for variant " + variant.getVariantId() + " because both have the same length!");
+                                            		String shortAllele = variant.getKnownAlleles().get(0).length() > variant.getKnownAlleles().get(1).length() ? variant.getKnownAlleles().get(1) : variant.getKnownAlleles().get(0);
+                                            		String longAllele = shortAllele.equals(variant.getKnownAlleles().get(0)) ? variant.getKnownAlleles().get(1) : variant.getKnownAlleles().get(0);
+                                            		for (int i=0; i<genotype.length; i++)
+                                           				genotype[i] = "I".equalsIgnoreCase(genotype[i]) ? longAllele : shortAllele;
+                                            	}
+                                            			
+                                            			
 	                                            alleles[nIndividualIndex] = genotype;
+                                            }
 	                                    }
                                         nIndividualIndex++;
                                     }
@@ -255,7 +267,7 @@ public abstract class RefactoredImport extends AbstractGenotypeImport {
                                         project.getAlleleCounts().add(variant.getKnownAlleles().size());	// it's a TreeSet so it will only be added if it's not already present
                                     }
                                     else {
-                                    	ReferencePosition rp = variant.getReferencePosition(nAssemblyId);
+                                    	ReferencePosition rp = nAssemblyId != null ? variant.getReferencePosition(nAssemblyId) : null;
                                     	LOG.info("Skipping variant " + providedVariantId + (rp != null ? " positioned at " + rp.getSequence() + ":" + rp.getStartSite() : "") + " because its alleles are not known (only missing data provided so far)");
                                     }
 
@@ -365,7 +377,7 @@ public abstract class RefactoredImport extends AbstractGenotypeImport {
             }
         }
         
-        if (fImportUnknownVariants && variantToFeed.getReferencePosition(nAssemblyId) == null && sequence != null) // otherwise we leave it as it is (had some trouble with overridden end-sites)
+        if (nAssemblyId != null && fImportUnknownVariants && variantToFeed.getReferencePosition(nAssemblyId) == null && sequence != null) // otherwise we leave it as it is (had some trouble with overridden end-sites)
             variantToFeed.setReferencePosition(nAssemblyId, new ReferencePosition(sequence, bpPos, !variantToFeed.getKnownAlleles().isEmpty() ? bpPos + variantToFeed.getKnownAlleles().iterator().next().length() - 1 : null));
 
         if (!alleleIndexMap.isEmpty()) {
