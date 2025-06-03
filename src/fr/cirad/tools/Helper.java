@@ -533,10 +533,29 @@ public class Helper {
         return true;
     }
     
+    public static String[] extractModuleAndProjectIDsFromReferenceSetIds(String semiColonSeparatedReferenceSetIDs) throws Exception {
+    	String[] result = new String[3];
+    	for (String referenceSetId : semiColonSeparatedReferenceSetIDs.split(",")) {
+    		String info[] = Helper.getInfoFromId(referenceSetId, 3);
+    		if (result[0] == null)
+    			result[0] = info[0];
+    		else if (!result[0].equals(info[0]))
+    			throw new Exception("Multiple projects are only supported within a single database!");
+    		if (result[1] == null)
+    			result[1] = info[1];
+    		else
+    			result[1] += "," + info[1];
+    		if (result[2] == null)
+    			result[2] = info[2];
+    		else
+    			result[2] += "," + info[2];
+    	}
+    	return result;
+    }
     
     public static String[] extractModuleAndProjectIDsFromVariantSetIds(String semiColonSeparatedVariantSetIDs) throws Exception {
     	String[] result = new String[2];
-    	for (String variantSetId : semiColonSeparatedVariantSetIDs.split(";")) {
+    	for (String variantSetId : semiColonSeparatedVariantSetIDs.split(",")) {
     		String info[] = Helper.getInfoFromId(variantSetId, 2);
     		if (result[0] == null)
     			result[0] = info[0];
@@ -545,7 +564,7 @@ public class Helper {
     		if (result[1] == null)
     			result[1] = info[1];
     		else
-    			result[1] += ";" + info[1];
+    			result[1] += "," + info[1];
     	}
     	return result;
     }
