@@ -40,6 +40,9 @@ public class Population
 	/** The Constant FIELDNAME_POPULATION_GROUP. */
 	public final static String FIELDNAME_POPULATION_GROUP = "pg";
 	
+	/** The Constant FIELDNAME_PARENT_POPULATION. */
+	public final static String FIELDNAME_PARENT_POPULATION = "pp";
+	
 	/**
 	* The Constant SECTION_ADDITIONAL_INFO.
 	*/
@@ -58,9 +61,13 @@ public class Population
 	private String description;	
 
 	/** The pop group. */
+	@Field(FIELDNAME_PARENT_POPULATION)
+	private String parentPop;	
+
+	/** The pop group. */
 	@Field(FIELDNAME_POPULATION_GROUP)
 	private String popGroup;	
-
+	
 	/**
 	* The additional info.
 	*/
@@ -150,6 +157,24 @@ public String getName() {
 	 */
 	public void setPopGroup(String popGroup) {
 		this.popGroup = popGroup;
+	}
+
+	/**
+	 * Gets the parent pop.
+	 *
+	 * @return the parent pop
+	 */
+	public String getParentPop() {
+		return parentPop;
+	}
+	
+	/**
+	 * Sets the parent pop.
+	 *
+	 * @param parentPop the new parent pop
+	 */
+	public void setParentPop(String parentPop) {
+		this.parentPop = parentPop;
 	}
 
 	/**
