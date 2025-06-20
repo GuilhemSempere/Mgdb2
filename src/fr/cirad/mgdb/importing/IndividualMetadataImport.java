@@ -233,8 +233,8 @@ public class IndividualMetadataImport {
                 nProcessedEntityCount++;
             }
 
-            if (targetEntityList.size() != new HashSet<>(targetEntityList).size())
-            	throw new Exception("The provided metadata contains duplicate " + targetTypeColName + "s");
+            if (targetEntityList.size() != new java.util.HashSet<>(targetEntityList).size())
+                throw new Exception("The provided metadata contains duplicate " + targetTypeColName + "s");
             else if (targetEntityList.size() == 0) { // a blank metadata file was submitted: let's delete any existing metadata
                 if (username == null) { // global metadata
                     bulkOperations.updateMulti(new Query(), new Update().unset(targetTypeColName.equals("sample") ? GenotypingSample.SECTION_ADDITIONAL_INFO : Individual.SECTION_ADDITIONAL_INFO));				
