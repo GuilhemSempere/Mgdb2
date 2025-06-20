@@ -329,26 +329,33 @@ public class HapMapImport extends AbstractGenotypeImport {
 	                                            if (!fDbAlreadyContainedIndividuals || finalMongoTemplate.findById(sIndividual, Individual.class) == null)  // we don't have any population data so we don't need to update the Individual if it already exists
 	                                                indsToAdd.add(new Individual(sIndividual));
 
-	                                            if (!indsToAdd.isEmpty() && indsToAdd.size() % 1000 == 0) {
-	                                            	finalMongoTemplate.insert(indsToAdd, Individual.class);
-	                                                indsToAdd = new HashSet<>();
-	                                            }
-
 	                                            int sampleId = AutoIncrementCounter.getNextSequence(finalMongoTemplate, MongoTemplateManager.getMongoCollectionName(GenotypingSample.class));
 	                                            m_providedIdToSampleMap.put(sIndOrSpId, new GenotypingSample(sampleId, finalProject.getId(), sRun, sIndividual, sampleToIndividualMap == null ? null : sIndOrSpId));   // add a sample for this individual to the project
 	                                        }
 	                                        
 	                                        // make sure provided sample names do not conflict with existing ones
 	                                        if (finalMongoTemplate.findOne(new Query(Criteria.where(GenotypingSample.FIELDNAME_NAME).in(m_providedIdToSampleMap.values().stream().map(sp -> sp.getSampleName()).toList())), GenotypingSample.class) != null) {
-	                                	        progress.setError("Some of the sample IDs provided in the mapping file already exist in this database!");
-	                                	        return;
-	                                		}
-	                                        
-	                                        finalMongoTemplate.insert(m_providedIdToSampleMap.values(), GenotypingSample.class);
-	                                        if (!indsToAdd.isEmpty()) {
-	                                        	finalMongoTemplate.insert(indsToAdd, Individual.class);
-	                                            indsToAdd = null;
-	                                        }	                    					
+	                                            progress.setError("Some of the sample IDs provided in the mapping file already exist in this database!");
+	                                            return;
+	                                        }
+
+	                                        final int importChunkSize = 1000;
+	                                        Thread sampleImportThread = new Thread() {
+	                                            public void run() {                 
+	                                                List<GenotypingSample> samplesToImport = new ArrayList<>(m_providedIdToSampleMap.values());
+	                                                for (int j=0; j<Math.ceil((float) m_providedIdToSampleMap.size() / importChunkSize); j++)
+	                                                    finalMongoTemplate.insert(samplesToImport.subList(j * importChunkSize, Math.min(samplesToImport.size(), (j + 1) * importChunkSize)), GenotypingSample.class);
+	                                                samplesToImport = null;
+	                                            }
+	                                        };
+	                                        sampleImportThread.start();
+
+	                                        List<Individual> individualsToImport = new ArrayList<>(indsToAdd);
+	                                        for (int j=0; j<Math.ceil((float) individualsToImport.size() / importChunkSize); j++)
+	                                        	finalMongoTemplate.insert(individualsToImport.subList(j * importChunkSize, Math.min(individualsToImport.size(), (j + 1) * importChunkSize)), Individual.class);
+	                                        individualsToImport = null;
+
+	                                        sampleImportThread.join();
 	                                        setSamplesPersisted(true);
 	                                		nNumberOfVariantsToSaveAtOnce.set(sampleIds.size() == 0 ? nMaxChunkSize : Math.max(1, nMaxChunkSize / sampleIds.size()));
 	                    					LOG.info("Importing by chunks of size " + nNumberOfVariantsToSaveAtOnce.get());
