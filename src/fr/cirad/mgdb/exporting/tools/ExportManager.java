@@ -33,6 +33,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Timer;
 import java.util.TimerTask;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.ConcurrentSkipListSet;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
@@ -54,6 +55,7 @@ import org.springframework.data.mongodb.core.query.Query;
 import com.mongodb.BasicDBList;
 import com.mongodb.BasicDBObject;
 import com.mongodb.MongoClientSettings;
+import com.mongodb.MongoInterruptedException;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoCursor;
 
@@ -400,8 +402,10 @@ public class ExportManager
 		                        chunkMarkerRunsToWrite = new LinkedHashMap<>(nQueryChunkSize);
 	                		}
 	                		catch (Exception e) {
-	                			progress.setError(e.getMessage());
-	                			LOG.error("Error exporting data", e);
+	                			if (!(e instanceof MongoInterruptedException && progress.isAborted())) {
+		                			progress.setError(e.getMessage());
+		                			LOG.error("Error exporting data", e);
+	                			}
 	                			return;
 	                		}
 	            			finally {
@@ -442,7 +446,8 @@ public class ExportManager
 	        }
         }
         catch (Exception e) {
-        	LOG.error("Error exporting from " + module, e);
+			if (!(e instanceof CancellationException && progress.isAborted()))
+				LOG.error("Error exporting from " + module, e);
     		for (Future<Void> t : chunkExportTasks)
     			if (t != null)
     				t.cancel(true);
