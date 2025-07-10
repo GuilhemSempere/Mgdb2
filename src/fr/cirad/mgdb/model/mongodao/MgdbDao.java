@@ -799,25 +799,36 @@ public class MgdbDao {
      * @param sCurrentUser username for whom to get custom metadata (optional)
      * @param projIDs a list of project IDs (optional)
      * @param spIDs a list of sample IDs (optional)
+     * @param filters the filters to apply (optional)
      * @return sample IDs mapped to sample objects with static metada +
      * custom metadata (if available). If spIDs is specified the list is
      * restricted by it, otherwise if projIDs is specified the list is
      * restricted by it, otherwise all database samples are returned
      */
-    public LinkedHashMap<Integer, GenotypingSample> loadSamplesWithAllMetadata(String module, String sCurrentUser, Collection<Integer> projIDs, Collection<Integer> spIDs) {
+    public LinkedHashMap<Integer, GenotypingSample> loadSamplesWithAllMetadata(String module, String sCurrentUser, Collection<Integer> projIDs, Collection<Integer> spIDs, LinkedHashMap<String, Set<String>> filters) {
         MongoTemplate mongoTemplate = MongoTemplateManager.get(module);
 
         // build the initial list of Sample objects
-        if (spIDs == null) {
+        if (spIDs == null)
             spIDs = mongoTemplate.findDistinct(projIDs == null || projIDs.isEmpty() ? new Query() : new Query(Criteria.where(GenotypingSample.FIELDNAME_PROJECT_ID).in(projIDs)), "_id", GenotypingSample.class, Integer.class);
-        }
-        Query q = new Query(Criteria.where("_id").in(spIDs));
-        q.with(Sort.by(Sort.Direction.ASC, "_id"));
-        Map<Integer, GenotypingSample> indMap = mongoTemplate.find(q, GenotypingSample.class).stream().collect(Collectors.toMap(GenotypingSample::getId, sp -> sp));
+
+        List<Criteria> crits = new ArrayList<>();
+       	crits.add(Criteria.where("_id").in(spIDs));
+       	
+        if (filters != null)
+	        for (Entry<String, Set<String>> filterEntry : filters.entrySet()) {
+	            Set<String> filterValues = filterEntry.getValue();
+	            if (!filterValues.isEmpty())
+	            	crits.add(Criteria.where(Individual.SECTION_ADDITIONAL_INFO + "." + filterEntry.getKey()).in(filterValues));
+	        }
+        
         LinkedHashMap<Integer, GenotypingSample> result = new LinkedHashMap<>();	// this one will be sorted according to the provided list
-        for (Integer spId : spIDs) {
-            result.put(spId, indMap.get(spId));
-        }
+
+        Query q = new Query(new Criteria().andOperator(crits.toArray(new Criteria[crits.size()])));
+        q.with(Sort.by(Sort.Direction.ASC, "_id"));
+        Map<Integer, GenotypingSample> spMap = mongoTemplate.find(q, GenotypingSample.class).stream().collect(Collectors.toMap(GenotypingSample::getId, sp -> sp));
+        for (Integer spId : spIDs)
+            result.put(spId, spMap.get(spId));
 
         boolean fGrabSessionAttributesFromThread = SessionAttributeAwareThread.class.isAssignableFrom(Thread.currentThread().getClass());
         LinkedHashMap<String, LinkedHashMap<String, Object>> sessionMetaData = (LinkedHashMap<String, LinkedHashMap<String, Object>>) (fGrabSessionAttributesFromThread ? ((SessionAttributeAwareThread) Thread.currentThread()).getSessionAttributes().get("samples_metadata_" + module) : httpSessionFactory.getObject().getAttribute("samples_metadata_" + module));
@@ -825,9 +836,9 @@ public class MgdbDao {
             if ("anonymousUser".equals(sCurrentUser)) {
             	if (sessionMetaData != null)
 	                for (Integer spID : spIDs) {
-	                    LinkedHashMap<String, Object> indSessionMetadata = sessionMetaData.get(spID);
-	                    if (indSessionMetadata != null && !indSessionMetadata.isEmpty())
-	                        result.get(spID).getAdditionalInfo().putAll(indSessionMetadata);
+	                    LinkedHashMap<String, Object> spSessionMetadata = sessionMetaData.get(spID);
+	                    if (spSessionMetadata != null && !spSessionMetadata.isEmpty())
+	                        result.get(spID).getAdditionalInfo().putAll(spSessionMetadata);
 	                }
             } else
                 for (CustomSampleMetadata cimd : mongoTemplate.find(new Query(new Criteria().andOperator(Criteria.where("_id." + CustomSampleMetadataId.FIELDNAME_USER).is(sCurrentUser), Criteria.where("_id." + CustomSampleMetadataId.FIELDNAME_SAMPLE_ID).in(spIDs))), CustomSampleMetadata.class))
@@ -1106,7 +1117,7 @@ public class MgdbDao {
         		if (val instanceof String)
         			result.computeIfAbsent(fieldName, k -> new HashSet<>()).add((String) val);
         		else if (wrongFormatFields.add(fieldName))
-        			LOG.info("Database " + module + ": Metadata type is not String for field " + fieldName);
+        			LOG.info("Database " + module + ": Individual metadata type is not String for field " + fieldName);
         	}
 			return null;
         }).count();
@@ -1114,6 +1125,31 @@ public class MgdbDao {
         return result;
     }
 
+    /**
+     * @param module the database name (mandatory)
+     * @param sCurrentUser username for whom to get custom metadata (optional)
+     * @param projID a project ID (optional)
+     * @param spIDs a list of sample IDs (optional)
+     * @return LinkedHashMap which contains all different metadata of the project
+     */
+	public LinkedHashMap<String, Set<String>> distinctSampleMetadata(String module, String sCurrentUser, Integer projID, Collection<Integer> spIDs) {
+        LinkedHashMap<String, Set<String>> result = new LinkedHashMap<>();	// this one will be sorted according to the provided list
+        HashSet<String> wrongFormatFields = new HashSet<>();
+        MgdbDao.getInstance().loadSamplesWithAllMetadata(module, sCurrentUser, Arrays.asList(projID), spIDs, null).values().stream().filter(ind -> ind.getAdditionalInfo() != null).map(sp -> {
+        	for (String fieldName : sp.getAdditionalInfo().keySet()) {
+        		Object val = sp.getAdditionalInfo().get(fieldName);
+        		if (val instanceof String)
+        			result.computeIfAbsent(fieldName, k -> new HashSet<>()).add((String) val);
+        		else if (wrongFormatFields.add(fieldName))
+        			LOG.info("Database " + module + ": Sample metadata type is not String for field " + fieldName);
+        	}
+			return null;
+        }).count();
+
+        return result;
+	}
+
+	
     public static void addRunsToVariantCollectionIfNecessary(MongoTemplate mongoTemplate) throws Exception {
         String variantDataCollName = mongoTemplate.getCollectionName(VariantData.class), copyCollectionName = variantDataCollName + "_copy";
         String info = "Ensuring presence of run info in variants collection for db " + mongoTemplate.getDb().getName();
