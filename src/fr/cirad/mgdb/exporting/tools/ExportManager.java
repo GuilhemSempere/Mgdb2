@@ -147,7 +147,7 @@ public class ExportManager
 
     public static final CodecRegistry pojoCodecRegistry = CodecRegistries.fromRegistries(MongoClientSettings.getDefaultCodecRegistry(), CodecRegistries.fromProviders(PojoCodecProvider.builder().register(new IntKeyMapPropertyCodecProvider()).automatic(true).build()));
 
-	public ExportManager(String sModule, Integer nAssemblyId, MongoCollection<Document> varColl, Class resultType, BasicDBList variantQuery, Collection<GenotypingSample> samplesToExport, boolean fIncludeMetadata, int nQueryChunkSize, AbstractExportWriter exportWriter, Long markerCount, ProgressIndicator progress) {
+	public ExportManager(String sModule, Integer nAssemblyId, MongoCollection<Document> varColl, Class resultType, Document variantQuery, Collection<GenotypingSample> samplesToExport, boolean fIncludeMetadata, int nQueryChunkSize, AbstractExportWriter exportWriter, Long markerCount, ProgressIndicator progress) {
         this.progress = progress;
         this.nQueryChunkSize = nQueryChunkSize;
         this.module = sModule;
@@ -185,8 +185,8 @@ public class ExportManager
         sampleIDsToExport = samplesToExport == null ? new ArrayList<>() : samplesToExport.stream().map(sp -> sp.getId()).collect(Collectors.toList());
         Collection<Integer> sampleIDsNotToExport = percentageOfExportedSamples >= 98 ? new ArrayList<>() /* if almost all individuals are being exported we directly omit the $project stage */ : (percentageOfExportedSamples > 50 ? mongoTemplate.findDistinct(new Query(Criteria.where("_id").not().in(sampleIDsToExport)), "_id", GenotypingSample.class, Integer.class) : null);
 
-        if (!variantQuery.isEmpty())
-            variantMatchStage = new BasicDBObject("$match", new BasicDBObject("$and", variantQuery));
+        if (variantQuery != null && !variantQuery.isEmpty())
+            variantMatchStage = new BasicDBObject("$match", variantQuery);
 
         Document projection = new Document();
         if (sampleIDsNotToExport == null) {    // inclusive $project (less than a half of the samples are being exported)
@@ -402,9 +402,10 @@ public class ExportManager
 		                        chunkMarkerRunsToWrite = new LinkedHashMap<>(nQueryChunkSize);
 	                		}
 	                		catch (Exception e) {
-	                			if (!(e instanceof MongoInterruptedException && progress.isAborted())) {
-		                			progress.setError(e.getMessage());
-		                			LOG.error("Error exporting data", e);
+	                			if (!(e instanceof MongoInterruptedException && progress.isAborted()) && progress.getError() == null) {
+	                				String sError = "Error exporting from " + module;
+	                				progress.setError(sError + " - " + e.getMessage());
+	                				LOG.error(sError, e);
 	                			}
 	                			return;
 	                		}
@@ -446,8 +447,11 @@ public class ExportManager
 	        }
         }
         catch (Exception e) {
-			if (!(e instanceof CancellationException && progress.isAborted()))
-				LOG.error("Error exporting from " + module, e);
+			if (!(e instanceof CancellationException && progress.isAborted()) && progress.getError() == null) {
+				String sError = "Error exporting from " + module;
+				progress.setError(sError + " - " + e.getMessage());
+				LOG.error(sError, e);
+			}
     		for (Future<Void> t : chunkExportTasks)
     			if (t != null)
     				t.cancel(true);
