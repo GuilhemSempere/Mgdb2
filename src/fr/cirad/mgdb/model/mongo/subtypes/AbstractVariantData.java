@@ -84,6 +84,9 @@ abstract public class AbstractVariantData
     /** The Constant FIELDNAME_SYNONYM_TYPE_ID_INTERNAL. */
     public final static String FIELDNAME_SYNONYM_TYPE_ID_INTERNAL = "in";
     
+    /** The Constant FIELDNAME_SYNONYM_TYPE_ID_AXIOM. */
+    public final static String FIELDNAME_SYNONYM_TYPE_ID_AXIOM = "ax";
+    
     /** The Constant SECTION_ADDITIONAL_INFO. */
     public final static String SECTION_ADDITIONAL_INFO = "ai";
 
@@ -978,25 +981,24 @@ abstract public class AbstractVariantData
     	StringBuffer sb = new StringBuffer("{");
     	
     	if (getVariantId() != null)
-    		sb.append("id:").append(getVariantId()).append("; ");
-    	sb.append("syn:");
+    		sb.append("id=").append(getVariantId()).append("; ");
+    	
+    	if (getType() != null)
+    		sb.append("ty=").append(getType()).append("; ");
     	
     	if (getSynonyms() != null && !getSynonyms().isEmpty()) {
+        	sb.append("syn=");
 	    	StringBuffer synSB = new StringBuffer();
 	    	for (TreeSet<String> syns : getSynonyms().values()) {
 	    		if (!synSB.isEmpty())
 	    			synSB.append(",");
 	    		synSB.append(StringUtils.join(syns, ","));
 	    	}
-	    	sb.append(synSB.toString());
-	    	sb.append("; ");
+	    	sb.append(synSB.toString()).append("; ");
     	}
     	
-    	if (!getPositions().isEmpty()) {
-	    	sb.append("pos:");
-	    	sb.append(StringUtils.join(getPositions().entrySet().stream().map(e -> new StringBuffer("(").append(e.getKey()).append(")").append(e.getValue().getSequence()).append(":").append(e.getValue().getStartSite()).toString()).toList(), ","));
-	    	sb.append("; ");
-    	}
+    	if (!getPositions().isEmpty())
+	    	sb.append(StringUtils.join(getPositions().entrySet().stream().map(e -> new StringBuffer("pos").append(e.getKey()).append("=").append(e.getValue().getSequence()).append(":").append(e.getValue().getStartSite()).toString()).toList(), ",")).append("; ");
     	
     	if (!getKnownAlleles().isEmpty())
     		sb.append("all:").append(StringUtils.join(getKnownAlleles(), "/"));

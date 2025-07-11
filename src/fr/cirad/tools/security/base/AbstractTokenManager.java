@@ -66,7 +66,7 @@ public abstract class AbstractTokenManager {
 
     abstract public void setSessionTimeoutInSeconds(int sessionTimeoutInSeconds);
     
-    public String readToken(HttpServletRequest request)
+    static public String readToken(HttpServletRequest request)
     {
     	String token = null;
     	if (request != null)
@@ -85,4 +85,6 @@ public abstract class AbstractTokenManager {
 			auth = SecurityContextHolder.getContext().getAuthentication();
         return auth == null || "anonymousUser".equals(auth.getName()) ? "anonymousUser" : auth.getName();	    
 	}
+        
+    abstract public Collection<String> listReadableDBs(String token);
 }

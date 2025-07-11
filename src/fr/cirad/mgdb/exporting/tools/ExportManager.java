@@ -33,6 +33,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Timer;
 import java.util.TimerTask;
+import java.util.concurrent.CancellationException;
 import java.util.concurrent.ConcurrentSkipListSet;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
@@ -54,6 +55,7 @@ import org.springframework.data.mongodb.core.query.Query;
 import com.mongodb.BasicDBList;
 import com.mongodb.BasicDBObject;
 import com.mongodb.MongoClientSettings;
+import com.mongodb.MongoInterruptedException;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoCursor;
 
@@ -167,12 +169,14 @@ public class ExportManager
 
         MongoTemplate mongoTemplate = MongoTemplateManager.get(module);
 
+        boolean fNotAllProjectsNeeded = Helper.estimDocCount(mongoTemplate, GenotypingProject.class) > involvedProjectRuns.size();	// if it's a multi-project DB we'd better filter on project field (less records treated, faster export)
         for (int projId : involvedProjectRuns.keySet()) {
             List<String> projectInvolvedRuns = involvedProjectRuns.get(projId);
-            if (projectInvolvedRuns.size() != mongoTemplate.findDistinct(new Query(Criteria.where("_id").is(projId)), GenotypingProject.FIELDNAME_RUNS, GenotypingProject.class, String.class).size()) {
-                // not all of this project's runs are involved: only match those (in the case of multi-project and/or multi-run databases, it is worth filtering on these fields to avoid parsing records related to unwanted samples)
-                projectFilterList.add(new BasicDBObject("$and", Arrays.asList(new BasicDBObject("_id." + VariantRunDataId.FIELDNAME_PROJECT_ID, projId), new BasicDBObject("_id." + VariantRunDataId.FIELDNAME_RUNNAME, new BasicDBObject("$in", projectInvolvedRuns)))));
-            }
+            BasicDBObject projectFilter = new BasicDBObject("_id." + VariantRunDataId.FIELDNAME_PROJECT_ID, projId);
+            // if not all of this project's runs are involved, only match the required ones
+            boolean fNotAllRunsNeeded = projectInvolvedRuns.size() != mongoTemplate.findDistinct(new Query(Criteria.where("_id").is(projId)), GenotypingProject.FIELDNAME_RUNS, GenotypingProject.class, String.class).size();
+            if (fNotAllProjectsNeeded || fNotAllRunsNeeded)
+                projectFilterList.add(fNotAllRunsNeeded ? new BasicDBObject("$and", Arrays.asList(projectFilter, new BasicDBObject("_id." + VariantRunDataId.FIELDNAME_RUNNAME, new BasicDBObject("$in", projectInvolvedRuns)))) : projectFilter);
         }
 
         // optimization 2: build the $project stage by excluding fields when over 50% of overall samples are selected; even remove that stage when exporting all (or almost all) samples (makes it much faster)
@@ -223,18 +227,23 @@ public class ExportManager
 	}
 
     public void readAndWrite(OutputStream os) throws IOException, InterruptedException, ExecutionException {
+        if (markerCount == null)
+        	throw new IOException("markerCount may not be null");
+        
+        if (markerCount == 0)
+        	return;
+
         List<String> currentMarkerIDs = new ArrayList<>(nQueryChunkSize);
 
         VariantRunDataComparator vrdComparator = new VariantRunDataComparator(nAssemblyId);
         
         List<BasicDBObject> pipeline = new ArrayList<>();
-        if (!fWorkingOnTempColl && variantMatchStage != null)
+        if (variantMatchStage != null)
         	pipeline.add(variantMatchStage);
         pipeline.add(sortStage);
         pipeline.add(new BasicDBObject("$project", new BasicDBObject("_id", 1)));
 
-        MongoTemplate mongoTemplate = MongoTemplateManager.get(module);
-        
+        MongoTemplate mongoTemplate = MongoTemplateManager.get(module);        
         MongoCollection<Document> collForQueryingIDs = fWorkingOnTempColl ? varColl : mongoTemplate.getCollection(mongoTemplate.getCollectionName(VariantData.class));
         MongoCursor<Document> markerCursor = collForQueryingIDs.aggregate(pipeline, Document.class).collation(IExportHandler.collationObj).allowDiskUse(true).batchSize(nQueryChunkSize).iterator();   /*FIXME: didn't find a way to set noCursorTimeOut on aggregation cursors*/
         
@@ -288,6 +297,7 @@ public class ExportManager
 	            			try {
 		            			File genotypeChunkFile = File.createTempFile(nFinalChunkIndex + "__genotypes__", "__" + taskGroup, dataExtractionFolder), warningChunkFile = File.createTempFile(nFinalChunkIndex + "__warnings__", "__" + taskGroup, dataExtractionFolder);
 		            			chunkGenotypeFiles[nFinalChunkIndex - 1] = genotypeChunkFile;
+
 		            			genotypeChunkOS = new BufferedOutputStream(new FileOutputStream(genotypeChunkFile), 16384);
 		            			if (exportWriter.writesVariantFiles()) {
 		            				File variantChunkFile = File.createTempFile(nFinalChunkIndex + "__variants__", "__" + taskGroup, dataExtractionFolder);
@@ -392,8 +402,10 @@ public class ExportManager
 		                        chunkMarkerRunsToWrite = new LinkedHashMap<>(nQueryChunkSize);
 	                		}
 	                		catch (Exception e) {
-	                			progress.setError(e.getMessage());
-	                			LOG.error("Error exporting data", e);
+	                			if (!(e instanceof MongoInterruptedException && progress.isAborted())) {
+		                			progress.setError(e.getMessage());
+		                			LOG.error("Error exporting data", e);
+	                			}
 	                			return;
 	                		}
 	            			finally {
@@ -407,7 +419,7 @@ public class ExportManager
 		            	}
 	            	};
 	            	
-	                chunkExportTasks[nFinalChunkIndex - 1] = (Future<Void>) executor.submit(new TaskWrapper(taskGroup, chunkExportThread));
+            		chunkExportTasks[nFinalChunkIndex - 1] = (Future<Void>) executor.submit(new TaskWrapper(taskGroup, chunkExportThread));
 	                currentMarkerIDs = new ArrayList<>(nQueryChunkSize);
 	            }
 	        }
@@ -434,7 +446,8 @@ public class ExportManager
 	        }
         }
         catch (Exception e) {
-        	LOG.error("Error exporting from " + module, e);
+			if (!(e instanceof CancellationException && progress.isAborted()))
+				LOG.error("Error exporting from " + module, e);
     		for (Future<Void> t : chunkExportTasks)
     			if (t != null)
     				t.cancel(true);

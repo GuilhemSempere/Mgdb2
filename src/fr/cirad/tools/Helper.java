@@ -23,8 +23,10 @@ import java.math.BigInteger;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -41,8 +43,15 @@ import org.springframework.data.mongodb.core.mapping.Field;
 
 import com.mongodb.BasicDBList;
 import com.mongodb.BasicDBObject;
+import com.mongodb.client.MongoCollection;
+import com.mongodb.client.MongoCursor;
 
+import fr.cirad.mgdb.exporting.IExportHandler;
+import fr.cirad.mgdb.model.mongo.maintypes.Assembly;
 import fr.cirad.mgdb.model.mongo.maintypes.GenotypingSample;
+import fr.cirad.mgdb.model.mongo.maintypes.VariantData;
+import fr.cirad.mgdb.model.mongo.subtypes.ReferencePosition;
+import fr.cirad.mgdb.model.mongo.subtypes.Run;
 import fr.cirad.mgdb.model.mongo.subtypes.VariantRunDataId;
 import fr.cirad.tools.mongo.MongoTemplateManager;
 
@@ -415,6 +424,113 @@ public class Helper {
             currentChunk.add(variantRuns);
         }
         return splitCollection;
+    }
+    
+    static private void mergeVariantQueryDBList(BasicDBObject matchStage, BasicDBList variantQueryDBList) {
+        Iterator<Object> queryItems = variantQueryDBList.iterator();
+        while (queryItems.hasNext()) {
+            BasicDBObject queryItem = (BasicDBObject)queryItems.next();
+            for (String key : queryItem.keySet()) {
+                if (queryItem.get(key) instanceof BasicDBObject) {
+                    BasicDBObject queryItemElement = (BasicDBObject)queryItem.get(key);
+                    if (matchStage.containsKey(key)) {
+                        if (matchStage.get(key) instanceof BasicDBObject) {
+                            BasicDBObject matchStageElement = (BasicDBObject)matchStage.get(key);
+                            for (String elementKey : queryItemElement.keySet()) {
+                                if (matchStageElement.containsKey(elementKey)) {
+                                    if (elementKey.equals("$lt") || elementKey.equals("$lte")) {
+                                        matchStageElement.put(elementKey, Math.min(matchStageElement.getLong(elementKey), queryItemElement.getLong(elementKey)));
+                                    } else if (elementKey.equals("$gt") || elementKey.equals("$gte")) {
+                                        matchStageElement.put(elementKey, Math.max(matchStageElement.getLong(elementKey), queryItemElement.getLong(elementKey)));
+                                    } else {
+                                        matchStageElement.put(elementKey, queryItemElement.get(elementKey));
+                                    }
+                                } else {
+                                    matchStageElement.put(elementKey, queryItemElement.get(elementKey));
+                                }
+                            }
+                        } else {
+                            matchStage.put(key, queryItemElement);
+                        }
+                    } else {
+                        matchStage.put(key, queryItemElement);
+                    }
+                } else {
+                    matchStage.put(key, queryItem.get(key));
+                }
+            }
+        }
+    }
+    
+    static public List<BasicDBObject> getIntervalQueries(int nIntervalCount, Collection<String> sequences, String variantType, long rangeMin, long rangeMax, BasicDBList variantQueryDBListToMerge) {
+        String refPosPathWithTrailingDot = Assembly.getThreadBoundVariantRefPosPath() + ".";
+        final int intervalSize = (int) Math.ceil(Math.max(1, ((rangeMax - rangeMin) / (nIntervalCount - 1))));
+
+        List<BasicDBObject> result = new ArrayList<>();
+        for (int i=0; i<nIntervalCount; i++) {
+            BasicDBObject initialMatchStage = new BasicDBObject();
+            if (sequences != null && !sequences.isEmpty())
+                initialMatchStage.put(refPosPathWithTrailingDot + ReferencePosition.FIELDNAME_SEQUENCE, new BasicDBObject("$in", sequences));
+            if (variantType != null)
+                initialMatchStage.put(VariantData.FIELDNAME_TYPE, variantType);
+            BasicDBObject positionSettings = new BasicDBObject();
+            positionSettings.put("$gte", rangeMin + (i*intervalSize));
+            positionSettings.put(i < nIntervalCount - 1 ? "$lt" : "$lte", i < nIntervalCount - 1 ? rangeMin + ((i+1)*intervalSize) : rangeMax);
+            String startSitePath = refPosPathWithTrailingDot + ReferencePosition.FIELDNAME_START_SITE;
+            initialMatchStage.put(startSitePath, positionSettings);
+            if (variantQueryDBListToMerge != null && !variantQueryDBListToMerge.isEmpty())
+                mergeVariantQueryDBList(initialMatchStage, variantQueryDBListToMerge);
+            result.add(initialMatchStage);
+        }
+        return result;
+    }
+    
+    static public boolean findDefaultRangeMinMax(String sModule, int nProjectId, String tmpCollName /* if null, main variant coll is used*/, String variantType, Collection<String> sequences, Long start, Long end, Long minMaxresult[])
+    {
+        final MongoTemplate mongoTemplate = MongoTemplateManager.get(sModule);
+        String refPosPathWithTrailingDot = Assembly.getThreadBoundVariantRefPosPath() + ".";
+        
+        BasicDBList matchAndList = new BasicDBList();
+        if (tmpCollName == null)
+            matchAndList.add(new BasicDBObject(VariantData.FIELDNAME_RUNS + "." + Run.FIELDNAME_PROJECT_ID, nProjectId));
+        if (sequences != null && !sequences.isEmpty())
+            matchAndList.add(new BasicDBObject(refPosPathWithTrailingDot + ReferencePosition.FIELDNAME_SEQUENCE, new BasicDBObject("$in", sequences)));
+        if ((start != null && start != -1) || (end != null && end != -1)) {
+            BasicDBObject posCrit = new BasicDBObject();
+            if (start != null && start != -1)
+                posCrit.put("$gte", start);
+            if (end != null && end != -1)
+                posCrit.put("$lte", end);
+            matchAndList.add(new BasicDBObject(refPosPathWithTrailingDot + ReferencePosition.FIELDNAME_START_SITE, posCrit));
+        }
+        if (variantType != null)
+            matchAndList.add(new BasicDBObject(VariantData.FIELDNAME_TYPE, variantType));
+        BasicDBObject match = new BasicDBObject("$match", new BasicDBObject("$and", matchAndList));
+        
+        BasicDBObject limit = new BasicDBObject("$limit", 1);
+        String startFieldPath = refPosPathWithTrailingDot + ReferencePosition.FIELDNAME_START_SITE;
+
+        MongoCollection<Document> usedVarColl = mongoTemplate.getCollection(tmpCollName == null ? mongoTemplate.getCollectionName(VariantData.class) : tmpCollName); 
+        if (minMaxresult[0] == null) {
+            BasicDBObject sort = new BasicDBObject("$sort", new BasicDBObject(startFieldPath, 1));
+            MongoCursor<Document> cursor = usedVarColl.aggregate(Arrays.asList(match, sort, limit)).iterator();
+            if (!cursor.hasNext())
+                return false;   // no variant found matching filter
+
+            Document aggResult = (Document) cursor.next();
+            minMaxresult[0] = (Long) Helper.readPossiblyNestedField(aggResult, startFieldPath, "; ", null);
+        }
+
+        if (minMaxresult[1] == null) {
+            BasicDBObject sort = new BasicDBObject("$sort", new BasicDBObject(startFieldPath, -1));
+            MongoCursor<Document> cursor = usedVarColl.aggregate(Arrays.asList(match, sort, limit)).collation(IExportHandler.collationObj).iterator();
+            if (!cursor.hasNext())
+                return false;   // no variant found matching filter
+
+            Document aggResult = (Document) cursor.next();
+            minMaxresult[1] = (Long) Helper.readPossiblyNestedField(aggResult, startFieldPath, "; ", null);
+        }
+        return true;
     }
     
     /**

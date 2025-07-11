@@ -339,7 +339,7 @@ public class MongoTemplateManager implements ApplicationContextAware {
 						MgdbDao.ensurePositionIndexes(mongoTemplate, Arrays.asList(mongoTemplate.getCollection(mongoTemplate.getCollectionName(VariantData.class))), false, false);	// FIXME: move to end of addRunsToVariantCollectionIfNecessary()
 						MgdbDao.createGeneCacheIfNecessary(db, MgdbDao.COLLECTION_NAME_GENE_CACHE);
                     } catch (Exception e) {
-						LOG.error("Error while adding run info to variants colleciton for db " + db, e);
+						LOG.error("Error while adding run info to variants collection for db " + db, e);
 					}
         		}
         	});
@@ -432,11 +432,12 @@ public class MongoTemplateManager implements ApplicationContextAware {
     		}
 	        else if (action.equals(ModuleAction.CREATE))
 	        {
+	        	String dbNamePrefix = Helper.nullToEmptyString(appConfig.get("databaseNamePrefix"));
 	            int nRetries = 0;
 		        while (nRetries < 100)
 		        {
 		            String sIndexForModule = nRetries == 0 ? "" : ("_" + nRetries);
-		            String sDbName = "mgdb2_" + sModule + sIndexForModule + (expiryDate == null ? "" : (EXPIRY_PREFIX + expiryDate));
+		            String sDbName = "mgdb2_" + dbNamePrefix + sModule + sIndexForModule + (expiryDate == null ? "" : (EXPIRY_PREFIX + expiryDate));
 		            MongoTemplate mongoTemplate = createMongoTemplate(sHost, sDbName);
 		            if (mongoTemplate.getCollectionNames().size() > 0)
 		                nRetries++;	// DB already exists, let's try with a different DB name
@@ -822,7 +823,11 @@ public class MongoTemplateManager implements ApplicationContextAware {
 
 	public static ExecutorService getExecutor(String sModule) {
 		GroupedExecutor executor = moduleExecutors.get(sModule);
-		return executor != null ? executor : new ThreadPoolExecutor(INITIAL_NUMBER_OF_SIMULTANEOUS_QUERY_THREADS, MAXIMUM_NUMBER_OF_SIMULTANEOUS_QUERY_THREADS, Long.MAX_VALUE, TimeUnit.DAYS, new LinkedBlockingQueue<>(), new ThreadPoolExecutor.CallerRunsPolicy());
+		if (executor != null) {
+			LOG.debug("Returning executor " + executor.hashCode() + " for module " + sModule + " (" + executor + ")");
+			return executor;
+		}
+		return new ThreadPoolExecutor(INITIAL_NUMBER_OF_SIMULTANEOUS_QUERY_THREADS, MAXIMUM_NUMBER_OF_SIMULTANEOUS_QUERY_THREADS, Long.MAX_VALUE, TimeUnit.DAYS, new LinkedBlockingQueue<>(), new ThreadPoolExecutor.CallerRunsPolicy());
 	}
 	
     @PreDestroy
@@ -833,4 +838,32 @@ public class MongoTemplateManager implements ApplicationContextAware {
     			ge.getValue().shutdownNow();
     		}
     }
+
+	/**
+	     * Gets the temporary variant collection.
+	     *
+	     * @param sModule the module
+	     * @param processID the process id
+	     * @param fEmptyItBeforeHand whether or not to empty it beforehand
+	     * @return the temporary variant collection
+		 * @throws InterruptedException 
+     */
+    public static MongoCollection<Document> getTemporaryVariantCollection(String sModule, String processID, boolean fEmptyItBeforeHand, boolean fIndexPositionFieldsEvenIfCollectionIsEmpty, boolean fWaitForIndexCreationCompletion) throws InterruptedException {
+        MongoTemplate mongoTemplate = get(sModule);
+        MongoCollection<Document> tmpColl = mongoTemplate.getCollection(TEMP_COLL_PREFIX + Helper.convertToMD5(processID));
+        if (fEmptyItBeforeHand) {
+
+//            ArrayList<StackTraceElement> keptStackTraceElements = new ArrayList<>();
+//            Exception e = new Exception("Check stack trace");
+//            for (StackTraceElement ste : e.getStackTrace())
+//                if (ste.toString().startsWith("fr.cirad."))
+//                    keptStackTraceElements.add(ste);
+//            e.setStackTrace(keptStackTraceElements.toArray(new StackTraceElement[keptStackTraceElements.size()]));
+//            LOG.debug("Dropping " + sModule + "." + tmpColl.getName() + " from getTemporaryVariantCollection", e);
+
+            tmpColl.drop();
+            MgdbDao.ensurePositionIndexes(mongoTemplate, Arrays.asList(tmpColl), fIndexPositionFieldsEvenIfCollectionIsEmpty, fWaitForIndexCreationCompletion);    // make sure we have indexes defined as required in v2.4
+        }
+        return tmpColl;
+	}
 }

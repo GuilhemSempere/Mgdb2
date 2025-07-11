@@ -125,6 +125,8 @@ public class MgdbDao {
      * The Constant FIELD_NAME_CACHED_COUNT_VALUE.
      */
     static final public String FIELD_NAME_CACHED_COUNT_VALUE = "val";
+    
+    static final public String MESSAGE_TEMP_RECORDS_NOT_FOUND = "Unable to find temporary records: please SEARCH again!";
 
     @Autowired
     static protected ObjectFactory<HttpSession> httpSessionFactory;
@@ -226,7 +228,6 @@ public class MgdbDao {
             	ArrayList<AbstractVariantData> taggedVariants = tagVariants(mongoTemplate, variantColl.getNamespace().getCollectionName(), mongoTemplate.count(new Query(), Individual.class));
                 if (!taggedVariants.isEmpty()) {	// otherwise there is apparently no variant in the DB
                 	List<Document> docs = taggedVariants.stream().map(var -> new Document("_id", var.getVariantId())).toList();
-                	System.err.println(docs);
                 	taggedVarColl.insertMany(docs);
                 }
             }
@@ -278,6 +279,7 @@ public class MgdbDao {
         	add(VariantData.FIELDNAME_SYNONYMS + "." + VariantData.FIELDNAME_SYNONYM_TYPE_ID_ILLUMINA);
         	add(VariantData.FIELDNAME_SYNONYMS + "." + VariantData.FIELDNAME_SYNONYM_TYPE_ID_INTERNAL);
         	add(VariantData.FIELDNAME_SYNONYMS + "." + VariantData.FIELDNAME_SYNONYM_TYPE_ID_NCBI);
+        	add(VariantData.FIELDNAME_SYNONYMS + "." + VariantData.FIELDNAME_SYNONYM_TYPE_ID_AXIOM);
         }}, foundSynonymIndexes = new ArrayList<>();
         
         MongoCursor<Document> indexCursor = variantColl.listIndexes().cursor();
@@ -296,21 +298,13 @@ public class MgdbDao {
         }
         missingSynonymIndexes.removeAll(foundSynonymIndexes);
 
-        if (missingSynonymIndexes.contains(VariantData.FIELDNAME_SYNONYMS + "." + VariantData.FIELDNAME_SYNONYM_TYPE_ID_ILLUMINA) && (fEvenIfNoSuchSynonyms || variantColl.aggregate(Arrays.asList( new BasicDBObject("$limit", 100000), new BasicDBObject("$match", new BasicDBObject(VariantData.FIELDNAME_SYNONYMS + "." + VariantData.FIELDNAME_SYNONYM_TYPE_ID_ILLUMINA + ".0", new BasicDBObject("$exists", true))) )).iterator().hasNext())) {
-            LOG.debug("Creating index on field " + VariantData.FIELDNAME_SYNONYMS + "." + VariantData.FIELDNAME_SYNONYM_TYPE_ID_ILLUMINA + " of collection " + variantColl.getNamespace());
-            variantColl.createIndex(new BasicDBObject(VariantData.FIELDNAME_SYNONYMS + "." + VariantData.FIELDNAME_SYNONYM_TYPE_ID_ILLUMINA, 1));
-            nResult++;
-        }
-        if (missingSynonymIndexes.contains(VariantData.FIELDNAME_SYNONYMS + "." + VariantData.FIELDNAME_SYNONYM_TYPE_ID_INTERNAL) && (fEvenIfNoSuchSynonyms || variantColl.aggregate(Arrays.asList( new BasicDBObject("$limit", 100000), new BasicDBObject("$match", new BasicDBObject(VariantData.FIELDNAME_SYNONYMS + "." + VariantData.FIELDNAME_SYNONYM_TYPE_ID_INTERNAL + ".0", new BasicDBObject("$exists", true))) )).iterator().hasNext())) {
-        	LOG.debug("Creating index on field " + VariantData.FIELDNAME_SYNONYMS + "." + VariantData.FIELDNAME_SYNONYM_TYPE_ID_INTERNAL + " of collection " + variantColl.getNamespace());
-        	variantColl.createIndex(new BasicDBObject(VariantData.FIELDNAME_SYNONYMS + "." + VariantData.FIELDNAME_SYNONYM_TYPE_ID_INTERNAL, 1));
-        	nResult++;
-        }
-        if (missingSynonymIndexes.contains(VariantData.FIELDNAME_SYNONYMS + "." + VariantData.FIELDNAME_SYNONYM_TYPE_ID_NCBI) && (fEvenIfNoSuchSynonyms || variantColl.aggregate(Arrays.asList( new BasicDBObject("$limit", 100000), new BasicDBObject("$match", new BasicDBObject(VariantData.FIELDNAME_SYNONYMS + "." + VariantData.FIELDNAME_SYNONYM_TYPE_ID_NCBI + ".0", new BasicDBObject("$exists", true))) )).iterator().hasNext())) {
-            LOG.debug("Creating index on field " + VariantData.FIELDNAME_SYNONYMS + "." + VariantData.FIELDNAME_SYNONYM_TYPE_ID_NCBI + " of collection " + variantColl.getNamespace());
-            variantColl.createIndex(new BasicDBObject(VariantData.FIELDNAME_SYNONYMS + "." + VariantData.FIELDNAME_SYNONYM_TYPE_ID_NCBI, 1));
-            nResult++;
-        }
+        for (String idx : missingSynonymIndexes)
+	        if (fEvenIfNoSuchSynonyms || variantColl.aggregate(Arrays.asList( new BasicDBObject("$limit", 100000), new BasicDBObject("$match", new BasicDBObject(idx + ".0", new BasicDBObject("$exists", true))) )).iterator().hasNext()) {
+	            LOG.debug("Creating index on field " + idx + " of collection " + variantColl.getNamespace());
+	            variantColl.createIndex(new BasicDBObject(idx, 1));
+	            nResult++;
+	        }
+
         if (!fFoundTypeIndex)
 	        try {
 	            LOG.debug("Creating index on field " + VariantData.FIELDNAME_TYPE + " of collection " + variantColl.getNamespace());
@@ -631,13 +625,12 @@ public class MgdbDao {
     public static TreeMap<String /*individual*/, ArrayList<GenotypingSample>> getSamplesByIndividualForProject(final String sModule, final int projId, final Collection<String> individuals) throws ObjectNotFoundException {
         TreeMap<String /*individual*/, ArrayList<GenotypingSample>> result = new TreeMap<>();
         MongoTemplate mongoTemplate = MongoTemplateManager.get(sModule);
-        if (mongoTemplate == null) {
+        if (mongoTemplate == null)
             throw new ObjectNotFoundException("Database " + sModule + " does not exist");
-        }
+
         Criteria crit = Criteria.where(GenotypingSample.FIELDNAME_PROJECT_ID).is(projId);
-        if (individuals != null && individuals.size() > 0) {
+        if (individuals != null)
             crit.andOperator(Criteria.where(GenotypingSample.FIELDNAME_INDIVIDUAL).in(individuals));
-        }
         Query q = new Query(crit);
 //		q.with(new Sort(Sort.Direction.ASC, GenotypingSample.SampleId.FIELDNAME_INDIVIDUAL));
         for (GenotypingSample sample : mongoTemplate.find(q, GenotypingSample.class)) {
@@ -971,6 +964,13 @@ public class MgdbDao {
             }
         }.start();
         LOG.info("Launched async VRD cleanup for project " + nProjectId + " of module " + sModule);
+        
+        Update update = new Update();
+        update.pull(VariantData.FIELDNAME_RUNS, new Query(Criteria.where(Run.FIELDNAME_PROJECT_ID).is(nProjectId)));
+        UpdateResult projRefRemovalResult = mongoTemplate.updateMulti(new Query(Criteria.where(VariantData.FIELDNAME_RUNS + "." + Run.FIELDNAME_PROJECT_ID).is(nProjectId)), update, VariantData.class);
+        if (projRefRemovalResult.getModifiedCount() > 0)
+        	LOG.info("Removed " + projRefRemovalResult.getModifiedCount() + " project references in variants collection of module " + sModule);
+
 
         if (httpSessionFactory == null)
         	LOG.info("Skipped removal of BrAPI v2 VariantSet export files (apparently invoked from command line)");

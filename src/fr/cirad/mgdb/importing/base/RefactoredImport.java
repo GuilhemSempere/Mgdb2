@@ -229,8 +229,20 @@ public abstract class RefactoredImport extends AbstractGenotypeImport {
 
                                             if (fInconsistentData)
                                                 LOG.warn("Not adding inconsistent data: " + providedVariantId + " / " + individuals[nIndividualIndex]);
-                                            else 
+                                            else {
+                                            	if (!m_fImportUnknownVariants && m_maxExpectedAlleleCount == 2 && variant.getKnownAlleles().size() == 2 && variant.getType().equals(Type.INDEL.toString()) && (Arrays.stream(genotype).filter(all -> "I".equalsIgnoreCase(all) || "D".equalsIgnoreCase(all))).count() > 0) {
+                                            		// We are considering a biallelic INDEL for which we already know the alleles. We don't want to import unknown alleles in that case
+                                            		if (variant.getKnownAlleles().get(0).length() == variant.getKnownAlleles().get(1).length())
+                                            			LOG.warn("Unable to recognize INDEL alleles for variant " + variant.getVariantId() + " because both have the same length!");
+                                            		String shortAllele = variant.getKnownAlleles().get(0).length() > variant.getKnownAlleles().get(1).length() ? variant.getKnownAlleles().get(1) : variant.getKnownAlleles().get(0);
+                                            		String longAllele = shortAllele.equals(variant.getKnownAlleles().get(0)) ? variant.getKnownAlleles().get(1) : variant.getKnownAlleles().get(0);
+                                            		for (int i=0; i<genotype.length; i++)
+                                           				genotype[i] = "I".equalsIgnoreCase(genotype[i]) ? longAllele : shortAllele;
+                                            	}
+                                            			
+                                            			
 	                                            alleles[nIndividualIndex] = genotype;
+                                            }
 	                                    }
                                         nIndividualIndex++;
                                     }
@@ -255,7 +267,7 @@ public abstract class RefactoredImport extends AbstractGenotypeImport {
                                         project.getAlleleCounts().add(variant.getKnownAlleles().size());	// it's a TreeSet so it will only be added if it's not already present
                                     }
                                     else {
-                                    	ReferencePosition rp = variant.getReferencePosition(nAssemblyId);
+                                    	ReferencePosition rp = nAssemblyId != null ? variant.getReferencePosition(nAssemblyId) : null;
                                     	LOG.info("Skipping variant " + providedVariantId + (rp != null ? " positioned at " + rp.getSequence() + ":" + rp.getStartSite() : "") + " because its alleles are not known (only missing data provided so far)");
                                     }
 
@@ -365,7 +377,7 @@ public abstract class RefactoredImport extends AbstractGenotypeImport {
             }
         }
         
-        if (fImportUnknownVariants && variantToFeed.getReferencePosition(nAssemblyId) == null && sequence != null) // otherwise we leave it as it is (had some trouble with overridden end-sites)
+        if (nAssemblyId != null && fImportUnknownVariants && variantToFeed.getReferencePosition(nAssemblyId) == null && sequence != null) // otherwise we leave it as it is (had some trouble with overridden end-sites)
             variantToFeed.setReferencePosition(nAssemblyId, new ReferencePosition(sequence, bpPos, !variantToFeed.getKnownAlleles().isEmpty() ? bpPos + variantToFeed.getKnownAlleles().iterator().next().length() - 1 : null));
 
         if (!alleleIndexMap.isEmpty()) {
@@ -510,26 +522,34 @@ public abstract class RefactoredImport extends AbstractGenotypeImport {
             if (!fDbAlreadyContainedIndividuals || mongoTemplate.findById(sIndividual, Individual.class) == null)  // we don't have any population data so we don't need to update the Individual if it already exists
                 indsToAdd.add(new Individual(sIndividual));
 
-            if (!indsToAdd.isEmpty() && indsToAdd.size() % 1000 == 0) {
-            	mongoTemplate.insert(indsToAdd, Individual.class);
-                indsToAdd = new HashSet<>();
-            }
-
             int sampleId = AutoIncrementCounter.getNextSequence(mongoTemplate, MongoTemplateManager.getMongoCollectionName(GenotypingSample.class));
             m_providedIdToSampleMap.put(sIndOrSpId, new GenotypingSample(sampleId, projId, sRun, sIndividual, sampleToIndividualMap == null ? null : sIndOrSpId));   // add a sample for this individual to the project
         }
         
         // make sure provided sample names do not conflict with existing ones
         if (mongoTemplate.findOne(new Query(Criteria.where(GenotypingSample.FIELDNAME_NAME).in(m_providedIdToSampleMap.values().stream().map(sp -> sp.getSampleName()).toList())), GenotypingSample.class) != null) {
-	        progress.setError("Some of the sample IDs provided in the mapping file already exist in this database!");
-	        return;
-		}
+            progress.setError("Some of the sample IDs provided in the mapping file already exist in this database!");
+            return;
+        }
 
-        mongoTemplate.insert(m_providedIdToSampleMap.values(), GenotypingSample.class);
-        if (!indsToAdd.isEmpty()) {
-        	mongoTemplate.insert(indsToAdd, Individual.class);
-            indsToAdd = null;
-        }	                    					
+        final int importChunkSize = 1000;
+        Thread sampleImportThread = new Thread() {
+            public void run() {                 
+                List<GenotypingSample> samplesToImport = new ArrayList<>(m_providedIdToSampleMap.values());
+                for (int j=0; j<Math.ceil((float) m_providedIdToSampleMap.size() / importChunkSize); j++)
+                	mongoTemplate.insert(samplesToImport.subList(j * importChunkSize, Math.min(samplesToImport.size(), (j + 1) * importChunkSize)), GenotypingSample.class);
+                samplesToImport = null;
+            }
+        };
+        sampleImportThread.start();
+
+        List<Individual> individualsToImport = new ArrayList<>(indsToAdd);
+        for (int j=0; j<Math.ceil((float) individualsToImport.size() / importChunkSize); j++)
+            mongoTemplate.insert(individualsToImport.subList(j * importChunkSize, Math.min(individualsToImport.size(), (j + 1) * importChunkSize)), Individual.class);
+        individualsToImport = null;
+
+        sampleImportThread.join();
         setSamplesPersisted(true);
+
     }
 }

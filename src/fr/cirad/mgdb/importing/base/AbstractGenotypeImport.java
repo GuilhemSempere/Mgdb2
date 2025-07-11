@@ -215,8 +215,9 @@ public class AbstractGenotypeImport {
         {   // there are already variants in the database: build a list of all existing variants, finding them by ID is by far most efficient
             long beforeReadingAllVariants = System.currentTimeMillis();
             Query query = new Query();
-    		String refPosPath = Assembly.getVariantRefPosPath(assemblyId);
-            query.fields().include("_id").include(refPosPath).include(VariantData.FIELDNAME_TYPE).include(VariantData.FIELDNAME_SYNONYMS);
+    		String refPosPath = assemblyId != null ? Assembly.getVariantRefPosPath(assemblyId) : null;
+    		if (refPosPath != null)
+    			query.fields().include("_id").include(refPosPath).include(VariantData.FIELDNAME_TYPE).include(VariantData.FIELDNAME_SYNONYMS);
             MongoCursor<Document> variantIterator = mongoTemplate.getCollection(mongoTemplate.getCollectionName(VariantData.class)).find(query.getQueryObject()).projection(query.getFieldsObject()).iterator();
             while (variantIterator.hasNext())
             {
@@ -231,7 +232,8 @@ public class AbstractGenotypeImport {
                         for (Object syn : (List) synonymsByType.get(synonymType))
                             idAndSynonyms.add((String) syn.toString());
 
-                for (String variantDescForPos : getIdentificationStrings((String) vd.get(VariantData.FIELDNAME_TYPE), (String) Helper.readPossiblyNestedField(vd, refPosPath + "." + ReferencePosition.FIELDNAME_SEQUENCE, ";", null), /*!fGotChrPos ? null :*/ (Long) Helper.readPossiblyNestedField(vd, refPosPath + "." + ReferencePosition.FIELDNAME_START_SITE, ";", null), idAndSynonyms)) {
+                ArrayList<String> identificationStrings = getIdentificationStrings((String) vd.get(VariantData.FIELDNAME_TYPE), refPosPath == null ? null : (String) Helper.readPossiblyNestedField(vd, refPosPath + "." + ReferencePosition.FIELDNAME_SEQUENCE, ";", null), refPosPath == null ? null : (Long) Helper.readPossiblyNestedField(vd, refPosPath + "." + ReferencePosition.FIELDNAME_START_SITE, ";", null), idAndSynonyms);
+                for (String variantDescForPos : identificationStrings) {
                     if (existingVariantIDs.containsKey(variantDescForPos) && !variantId.startsWith("*"))
                         throw new Exception("This database seems to contain duplicate variants (check " + variantDescForPos.replaceAll("¤", ":") + "). Importing additional data will not be supported until this problem is fixed.");
 

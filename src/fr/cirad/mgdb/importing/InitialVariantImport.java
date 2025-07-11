@@ -81,7 +81,7 @@ public class InitialVariantImport {
     /** The Constant twoDecimalNF. */
     static private final NumberFormat twoDecimalNF = NumberFormat.getInstance();
     
-    static public final List<String> synonymColNames = Arrays.asList(VariantData.FIELDNAME_SYNONYM_TYPE_ID_ILLUMINA, VariantData.FIELDNAME_SYNONYM_TYPE_ID_NCBI, VariantData.FIELDNAME_SYNONYM_TYPE_ID_INTERNAL);
+    static public final List<String> synonymColNames = Arrays.asList(VariantData.FIELDNAME_SYNONYM_TYPE_ID_ILLUMINA, VariantData.FIELDNAME_SYNONYM_TYPE_ID_AXIOM, VariantData.FIELDNAME_SYNONYM_TYPE_ID_NCBI, VariantData.FIELDNAME_SYNONYM_TYPE_ID_INTERNAL);
     
     static private final String ASSEMBLY_POSITION_PREFIX = "pos-";
     
@@ -135,12 +135,12 @@ public class InitialVariantImport {
 //      fw.close();
      
         if (args.length < 2)
-            throw new Exception("You must pass 2 parameters as arguments: DATASOURCE name, exhaustive variant list TSV file.");
+            throw new Exception("You must pass 2 parameters as arguments: DATASOURCE name, exhaustive variant list TSV file. An optional 3rd parameter is accepted as a String prefix for generating variant IDs at import");
 
-        new InitialVariantImport(null).insertVariantsAndSynonyms(args[0], args[1]);
+        new InitialVariantImport(null).insertVariantsAndSynonyms(args[0], args[1], args.length > 2 ? args[2] : null);
     }
     
-    public void insertVariantsAndSynonyms(String sModule, String sImportFilePath) throws Exception
+    public void insertVariantsAndSynonyms(String sModule, String sImportFilePath, String idPrefix) throws Exception
     {
         File chipInfoFile = new File(sImportFilePath);
         if (!chipInfoFile.exists() || chipInfoFile.isDirectory())
@@ -233,7 +233,9 @@ public class InitialVariantImport {
                     }
                 });
 
+                int nVariantIndex = 1;
                 final MongoTemplate finalMongoTemplate = mongoTemplate;
+                boolean fGenerateIDs = idPrefix != null && !idPrefix.trim().isEmpty();
                 do
                 {
                     if (sLine.length() > 0)
@@ -241,7 +243,9 @@ public class InitialVariantImport {
                         List<String> cells = Helper.split(sLine, "\t");
                         if (cells.size() < 7)
                         	LOG.warn("Skipping incomplete line: " + sLine);
-                        VariantData variant = new VariantData(cells.get(idColIndex));
+                        String providedId = cells.get(idColIndex);
+                        boolean fDeprecatedVariant = providedId.startsWith("*");
+                        VariantData variant = new VariantData(!fGenerateIDs ? providedId : ((fDeprecatedVariant ? "*" : "") + idPrefix + String.format("%09d", nVariantIndex++)));
                         variant.setType(cells.get(typeColIndex));
                         if (alleleColIndex != -1) {
 	                        String alleles = cells.get(alleleColIndex);
@@ -258,7 +262,7 @@ public class InitialVariantImport {
                                 variant.setReferencePosition(assembly == null ? 0 : assembly.getId(), new ReferencePosition(seqAndPos[0], Long.parseLong(seqAndPos[1])));
                         }
                         
-                        if (!variant.getId().toString().startsWith("*"))    // otherwise it's a deprecated variant that we don't want to appear
+                        if (!fDeprecatedVariant)    // otherwise we don't want this variant to appear when selecting them by chip
                         {
                             String chipList = cells.get(chipColIndex);
                             if (chipList.length() > 0)
@@ -270,14 +274,12 @@ public class InitialVariantImport {
                             }
                         }
 
-                        for (int i=0; i<header.size(); i++)
-                        {
+                        for (int i=0; i<header.size(); i++) {
                             if (fieldsExceptSynonyms.contains(header.get(i)))
                                 continue;
 
                             String syns = cells.get(i);
-                            if (syns.length() > 0)
-                            {
+                            if (syns.length() > 0) {
                                 TreeSet<String> synSet = new TreeSet<>();
                                 for (String syn : syns.split(";"))
                                     if (!syn.equals("."))
