@@ -165,4 +165,15 @@ public abstract class AbstractMarkerOrientedExportHandler implements IExportHand
 	public void setTmpFolder(String tmpFolderPath) {
 		this.tmpFolderPath = tmpFolderPath;	
 	}
+	
+	@Override
+	public String getMetadataContentsPrefix() {
+		return "individual";
+	}
+
+	@Override
+	public String getMetadataFileExtension() {
+		return "tsv";
+	}
+
 }

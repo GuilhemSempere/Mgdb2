@@ -29,6 +29,7 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
@@ -40,9 +41,13 @@ import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoCursor;
 import com.mongodb.client.model.Collation;
 
+import fr.cirad.mgdb.exporting.tools.ExportManager.ExportOutputs;
+import fr.cirad.mgdb.model.mongo.maintypes.Assembly;
+import fr.cirad.mgdb.model.mongo.maintypes.GenotypingSample;
 import fr.cirad.mgdb.model.mongo.maintypes.Individual;
 import fr.cirad.mgdb.model.mongo.maintypes.VariantRunData;
 import fr.cirad.mgdb.model.mongodao.MgdbDao;
+import fr.cirad.tools.AlphaNumericComparator;
 import fr.cirad.tools.Helper;
 
 /**
@@ -121,9 +126,13 @@ public interface IExportHandler
 	
 	public void setTmpFolder(String tmpFolderPath);
 	
-	public static boolean addMetadataEntryIfAny(String fileName, String sModule, String sExportingUser, Collection<String> exportedIndividuals, Collection<String> individualMetadataFieldsToExport, ZipOutputStream zos, String initialContents) throws IOException {
+	public String getMetadataContentsPrefix();
+	
+	public String getMetadataFileExtension();
+	
+	public static boolean addMetadataEntryIfAny(String fileName, String sModule, String sExportingUser, Collection<String> exportedIndividuals, Collection<String> metadataFieldsToExport, ZipOutputStream zos, String initialContents, boolean workWithSamples) throws IOException {
 		ByteArrayOutputStream baos = new ByteArrayOutputStream();
-        if (!writeMetadataFile(sModule, sExportingUser, exportedIndividuals, individualMetadataFieldsToExport, baos))
+        if (!writeMetadataFile(sModule, sExportingUser, exportedIndividuals, metadataFieldsToExport, baos, workWithSamples, initialContents))
         	return false;
 
     	zos.putNextEntry(new ZipEntry(fileName));
@@ -139,7 +148,7 @@ public interface IExportHandler
 		return varColl.find(varQuery).projection(projectionAndSortDoc).sort(projectionAndSortDoc).noCursorTimeout(true).collation(collationObj).batchSize(nQueryChunkSize).iterator();
 	}
 
-	public static ZipOutputStream createArchiveOutputStream(OutputStream outputStream, Map<String, InputStream> readyToExportFiles) throws IOException {
+	public static ZipOutputStream createArchiveOutputStream(OutputStream outputStream, Map<String, InputStream> readyToExportFiles, ExportOutputs exportOutputs) throws IOException {
         ZipOutputStream zos = new ZipOutputStream(outputStream);
 
         if (readyToExportFiles != null) {
@@ -155,6 +164,13 @@ public interface IExportHandler
                 zos.closeEntry();
             }
         }
+        
+        if (exportOutputs != null && exportOutputs.getMetadataFileContents() != null && !exportOutputs.getMetadataFileContents().isEmpty()) {
+        	zos.putNextEntry(new ZipEntry(exportOutputs.getMetadataFileName()));
+        	zos.write(exportOutputs.getMetadataFileContents().getBytes());
+        	zos.closeEntry();
+        }
+
         return zos;
 	}
 	
@@ -163,11 +179,21 @@ public interface IExportHandler
 		return (int) Math.max(1, Math.min(nExportedVariantCount / 20 /* no more than 5% at a time */, (nMaxChunkSizeInMb*1024*1024 / avgObjSize.doubleValue())));
 	}
 	
-	public static boolean writeMetadataFile(String sModule, String sExportingUser, Collection<String> exportedIndividuals, Collection<String> individualMetadataFieldsToExport, OutputStream os) throws IOException {
-		Collection<Individual> listInd = MgdbDao.getInstance().loadIndividualsWithAllMetadata(sModule, sExportingUser, null, exportedIndividuals, null).values();
+	public static boolean writeMetadataFile(String sModule, String sExportingUser, Collection<String> exportedIndividuals, Collection<String> individualMetadataFieldsToExport, OutputStream os, boolean workWithSamples, String initialContents) throws IOException {
+        String contents = buildMetadataFile(sModule, sExportingUser, exportedIndividuals, individualMetadataFieldsToExport, workWithSamples, initialContents);
+        if (contents.length() == initialContents.length())
+        	return false;
+
+        os.write(contents.getBytes());
+        return true;
+	}
+	
+	public static String buildMetadataFile(String sModule, String sExportingUser, Collection<String> exportedIndividuals, Collection<String> individualMetadataFieldsToExport, boolean workWithSamples, String initialContents) throws IOException {
+		StringBuffer sb = new StringBuffer(initialContents);
+		Collection material = workWithSamples ? MgdbDao.getInstance().loadSamplesWithAllMetadata(sModule, sExportingUser, null, exportedIndividuals.stream().map(id -> Integer.parseInt(id)).toList(), null).values() : MgdbDao.getInstance().loadIndividualsWithAllMetadata(sModule, sExportingUser, null, exportedIndividuals, null).values();
         LinkedHashSet<String> mdHeaders = new LinkedHashSet<>();	// definite header collection (avoids empty columns)
-        for (Individual ind : listInd) {
-        	LinkedHashMap<String, Object> ai = ind.getAdditionalInfo();
+        for (Object indOrSp : material) {
+        	LinkedHashMap<String, Object> ai = indOrSp instanceof Individual ? ((Individual) indOrSp).getAdditionalInfo() : ((GenotypingSample) indOrSp).getAdditionalInfo();
         	Collection<String> fieldsToAccountFor = individualMetadataFieldsToExport == null ? ai.keySet() : individualMetadataFieldsToExport;
         	for (String key : fieldsToAccountFor)
         		if (!Helper.isNullOrEmptyString(ai.get(key)))
@@ -175,16 +201,17 @@ public interface IExportHandler
         }
 
         for (String headerKey : mdHeaders)
-        	os.write(("\t" + headerKey).getBytes());
-        os.write("\n".getBytes());
+        	sb.append(("\t" + headerKey));
+        sb.append("\n");
         
-        for (Individual ind : listInd) {
-        	 os.write(ind.getId().getBytes());
+        for (Object indOrSp : material) {
+        	sb.append((indOrSp instanceof Individual ? ((Individual) indOrSp).getId() : ((GenotypingSample) indOrSp).getId().toString()));
+        	LinkedHashMap<String, Object> ai = indOrSp instanceof Individual ? ((Individual) indOrSp).getAdditionalInfo() : ((GenotypingSample) indOrSp).getAdditionalInfo();
             for (String headerKey : mdHeaders)
-            	os.write(("\t" + Helper.nullToEmptyString(ind.getAdditionalInfo().get(headerKey))).getBytes());
-            os.write("\n".getBytes());
+            	sb.append(("\t" + Helper.nullToEmptyString(ai.get(headerKey))));
+            sb.append("\n");
         }
-        return !mdHeaders.isEmpty();
+        return sb.toString();
 	}
 	
     public static Map<String, String> getIndividualPopulations(final Map<String, Collection<String>> individualsByPopulation, boolean fAllowIndividualsInMultipleGroups) throws Exception {
@@ -237,5 +264,16 @@ public interface IExportHandler
     			if (f != null)
     				f.delete();
     	}
+	}
+    
+    public static Map<String, Integer> buildIndividualPositions(Collection<GenotypingSample> samplesToExport) {
+		Map<String, Integer> individualPositions = new LinkedHashMap<>();
+		for (String ind : samplesToExport.stream().map(gs -> gs.getIndividual()).distinct().sorted(new AlphaNumericComparator<String>()).collect(Collectors.toList()))
+			individualPositions.put(ind, individualPositions.size());
+		return individualPositions;
+    }
+
+	public static String buildExportName(String sModule, Assembly assembly, long markerCount, int indOrSampleCount, boolean workWithSamples) {
+		return sModule + (assembly != null && assembly.getName() != null ? "__" + assembly.getName() : "") + "__" + markerCount + "variants__" + indOrSampleCount + (workWithSamples ? "sample" : "individual" ) + "s";
 	}
 }

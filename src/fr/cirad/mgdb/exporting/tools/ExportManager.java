@@ -521,6 +521,9 @@ public class ExportManager
 		private File[] chunkGenotypeFiles;
         private File[] chunkVariantFiles;
         private File[] chunkWarningFiles;
+        private String metadataFileName;
+        private String metadataFileContents;
+        boolean workWithSamples = false;
 
         // may be used to replace variant-oriented files with individual-oriented files
     	public void setGenotypeFiles(File[] chunkGenotypeFiles) {
@@ -538,6 +541,27 @@ public class ExportManager
     	public File[] getWarningFiles() {
     		return chunkWarningFiles;
     	}
+    	
+    	public void setMetadata(String name, String contents) {
+    		metadataFileName = name;
+    		metadataFileContents = contents;
+    	}
+
+		public String getMetadataFileName() {
+			return metadataFileName;
+		}
+		
+		public String getMetadataFileContents() {
+			return metadataFileContents;
+		}
+
+		public void setWorkWithSamples(boolean workWithSamples) {
+			this.workWithSamples = workWithSamples;
+		}
+		
+		public boolean isWorkWithSamples() {
+			return workWithSamples;
+		}
     }
     
     public static abstract class AbstractExportWriter

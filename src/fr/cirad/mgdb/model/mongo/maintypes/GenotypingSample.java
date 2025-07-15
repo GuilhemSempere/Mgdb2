@@ -55,8 +55,10 @@ public class GenotypingSample {
 	/** The run. */
 	@Field(FIELDNAME_RUN)
 	private String run;
-        
-    /**
+	
+	private boolean detached = false;
+
+	/**
      * The additional info.
      */
     @Field(SECTION_ADDITIONAL_INFO)
@@ -108,12 +110,20 @@ public class GenotypingSample {
 //	}
 
 	public String getIndividual() {
-		return individual;
+		return detached ? getId().toString() : individual;
 	}
 
 //	public void setIndividual(String individual) {
 //		this.individual = individual;
 //	}
+
+    public boolean isDetached() {
+		return detached;
+	}
+
+	public void setDetached(boolean detached) {
+		this.detached = detached;
+	}
 
     public LinkedHashMap<String, Object> getAdditionalInfo() {
         if (additionalInfo == null) {
@@ -125,6 +135,10 @@ public class GenotypingSample {
     public void setAdditionalInfo(LinkedHashMap<String, Object> additionalInfo) {
         this.additionalInfo = additionalInfo;
     }
+    
+    public void detachFromIndividual() {
+    	detached = true;
+    }
 	
 	@Override
 	public boolean equals(Object o)
@@ -135,9 +149,9 @@ public class GenotypingSample {
 		if (o == null || !(o instanceof GenotypingSample))
 			return false;
 		
-		boolean f1 = getIndividual() == getIndividual() || (getIndividual() != null && getIndividual().equals(getIndividual()));
-		boolean f2 = getProjectId() == getProjectId() || (getProjectId() != null && getProjectId().equals(getProjectId()));
-		boolean f3 = getRun() == getRun() || (getRun() != null && getRun().equals(getRun()));
+		boolean f1 = getIndividual() == ((GenotypingSample) o).getIndividual() || (getIndividual() != null && getIndividual().equals(((GenotypingSample) o).getIndividual()));
+		boolean f2 = getProjectId() == ((GenotypingSample) o).getProjectId() || (getProjectId() != null && getProjectId().equals(((GenotypingSample) o).getProjectId()));
+		boolean f3 = getRun() == ((GenotypingSample) o).getRun() || (getRun() != null && getRun().equals(((GenotypingSample) o).getRun()));
 		return f1 && f2 && f3;
 	}
 

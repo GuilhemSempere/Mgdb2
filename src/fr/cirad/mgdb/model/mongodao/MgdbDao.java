@@ -652,13 +652,13 @@ public class MgdbDao {
         return result;
     }
     
-    public static Map<String /*sample name*/, Integer /*sample id*/> getSamplesByNames(final String sModule, final Collection<String> sampleNames) {
-        Map<String, Integer> map = new HashMap<>();
+    public static Map<String /*sample name*/, GenotypingSample> getSamplesByNames(final String sModule, final Collection<String> sampleNames) {
+        Map<String, GenotypingSample> map = new HashMap<>();
         MongoTemplate mongoTemplate = MongoTemplateManager.get(sModule);
         if (sampleNames != null && sampleNames.size() > 0) {
             Criteria crit = Criteria.where(GenotypingSample.FIELDNAME_NAME).in(sampleNames);
             List<GenotypingSample> samples = mongoTemplate.find(new Query(crit), GenotypingSample.class);        
-            map = samples.stream().collect(Collectors.toMap(GenotypingSample::getSampleName, GenotypingSample::getId));        
+            map = samples.stream().collect(Collectors.toMap(GenotypingSample::getSampleName, sample -> sample));   
         }
         return map;
     }
