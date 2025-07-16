@@ -18,6 +18,7 @@ package fr.cirad.mgdb.model.mongo.maintypes;
 
 import java.util.LinkedHashMap;
 import org.springframework.data.annotation.Id;
+import org.springframework.data.annotation.Transient;
 import org.springframework.data.annotation.TypeAlias;
 import org.springframework.data.mongodb.core.mapping.Document;
 import org.springframework.data.mongodb.core.mapping.Field;
@@ -56,6 +57,7 @@ public class GenotypingSample {
 	@Field(FIELDNAME_RUN)
 	private String run;
 	
+	@Transient
 	private boolean detached = false;
 
 	/**
