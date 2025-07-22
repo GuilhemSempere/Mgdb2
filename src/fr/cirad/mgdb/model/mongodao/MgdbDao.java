@@ -652,12 +652,15 @@ public class MgdbDao {
         return result;
     }
     
-    public static Map<String /*sample name*/, GenotypingSample> getSamplesByNames(final String sModule, final Collection<String> sampleNames) {
+    public static Map<String /*sample name*/, GenotypingSample> getSamplesByIDs(final String sModule, final Collection<Integer> sampleIDs, boolean detachSamplesFromIndividuals) {
         Map<String, GenotypingSample> map = new HashMap<>();
         MongoTemplate mongoTemplate = MongoTemplateManager.get(sModule);
-        if (sampleNames != null && sampleNames.size() > 0) {
-            Criteria crit = Criteria.where(GenotypingSample.FIELDNAME_NAME).in(sampleNames);
-            List<GenotypingSample> samples = mongoTemplate.find(new Query(crit), GenotypingSample.class);        
+        if (sampleIDs != null && sampleIDs.size() > 0) {
+            Criteria crit = Criteria.where("_id").in(sampleIDs);
+            List<GenotypingSample> samples = mongoTemplate.find(new Query(crit), GenotypingSample.class);
+            if (detachSamplesFromIndividuals)
+            	for (GenotypingSample sp : samples)	// hack them so each sample is considered separately
+            		sp.setDetached(true);  
             map = samples.stream().collect(Collectors.toMap(GenotypingSample::getSampleName, sample -> sample));   
         }
         return map;
