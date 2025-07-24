@@ -142,32 +142,43 @@ public class GroupedBlockingQueue<E> implements BlockingQueue<E> {
     @Override
     public E take() throws InterruptedException {
         synchronized (this) {
-	        while (true) {
-	            for (int i = 0; i < taskGroups.size(); i++) {
-	        		int currentIndex = (previousGroupIndex + 1) % taskGroups.size(); // Calculate the index of the next group
-	        		String group = new ArrayList<>(taskGroups.keySet()).get(currentIndex);
-	                Queue<E> groupQueue = taskGroups.get(group);
-	                if (groupQueue == null) {	// it may have been removed because it ran empty
-	                	currentIndex = 0;
-		                group = taskGroups.keySet().iterator().next();
-		                groupQueue = taskGroups.get(group);
-	                }
-	                else {
-		                E element = groupQueue.poll();
-		                if (element != null) {
-		                    previousGroupIndex = currentIndex; // Update the previousGroupIndex variable
-//		                    LOG.debug("Took task from group: " + currentIndex + " / " + groupQueue.size());
-		                    return element;
-		                }
-		                else if (groupQueue.isEmpty() && shutdownGroups.contains(group)) {
-	                		shutdownGroups.remove(group);
-	                		taskGroups.remove(group);
-//		                	LOG.debug("Removed group: " + group + " / " + taskGroups.size());
-		                }
-	                }
-	            }
-//	            LOG.info("wait(): "  + taskGroups.values().stream().map(list -> list.size()).toList());
-                wait();
+            while (true) {
+                List<String> groups = new ArrayList<>(taskGroups.keySet());	// Make a copy of the group keys to avoid concurrent modification issues
+                if (groups.isEmpty()) {
+                    wait();
+                    continue;
+                }
+
+                // Start from next group after the last one we took from
+                int startIndex = (previousGroupIndex + 1) % groups.size();
+                int currentIndex = startIndex;
+                
+                do {
+                    String group = groups.get(currentIndex);
+                    LinkedBlockingQueue<E> groupQueue = taskGroups.get(group);
+                    
+                    if (groupQueue != null) {
+                        E element = groupQueue.poll();
+                        if (element != null) {
+                            previousGroupIndex = currentIndex;
+                            //LOG.debug("Took task from group: " + currentIndex + " / " + groupQueue.size());
+                            return element;
+                        }
+                        else if (groupQueue.isEmpty() && shutdownGroups.contains(group)) {
+                            synchronized (taskGroups) {
+                                shutdownGroups.remove(group);
+                                taskGroups.remove(group);
+                                //LOG.debug("Removed group: " + group + " / " + taskGroups.size());
+                            }
+                            break;	// We removed a group, need to restart iteration
+                        }
+                    }
+                    
+                    currentIndex = (currentIndex + 1) % groups.size();
+                } while (currentIndex != startIndex);
+
+              //LOG.info("wait(): "  + taskGroups.values().stream().map(list -> list.size()).toList());
+                wait();	// If we get here, we've checked all groups and found nothing
             }
         }
     }
