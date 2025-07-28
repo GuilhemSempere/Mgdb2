@@ -485,14 +485,14 @@ public class Helper {
         return result;
     }
     
-    static public boolean findDefaultRangeMinMax(String sModule, int nProjectId, String tmpCollName /* if null, main variant coll is used*/, String variantType, Collection<String> sequences, Long start, Long end, Long minMaxresult[])
+    static public boolean findDefaultRangeMinMax(String sModule, Integer[] nProjectIDs, String tmpCollName /* if null, main variant coll is used*/, String variantType, Collection<String> sequences, Long start, Long end, Long minMaxresult[])
     {
         final MongoTemplate mongoTemplate = MongoTemplateManager.get(sModule);
         String refPosPathWithTrailingDot = Assembly.getThreadBoundVariantRefPosPath() + ".";
         
         BasicDBList matchAndList = new BasicDBList();
-        if (tmpCollName == null)
-            matchAndList.add(new BasicDBObject(VariantData.FIELDNAME_RUNS + "." + Run.FIELDNAME_PROJECT_ID, nProjectId));
+        if (tmpCollName == null && nProjectIDs != null && nProjectIDs.length > 0)
+            matchAndList.add(new BasicDBObject(VariantData.FIELDNAME_RUNS + "." + Run.FIELDNAME_PROJECT_ID, new BasicDBObject("$in", nProjectIDs)));
         if (sequences != null && !sequences.isEmpty())
             matchAndList.add(new BasicDBObject(refPosPathWithTrailingDot + ReferencePosition.FIELDNAME_SEQUENCE, new BasicDBObject("$in", sequences)));
         if ((start != null && start != -1) || (end != null && end != -1)) {
@@ -531,6 +531,38 @@ public class Helper {
             minMaxresult[1] = (Long) Helper.readPossiblyNestedField(aggResult, startFieldPath, "; ", null);
         }
         return true;
+    }
+    
+    /**
+     * 
+     * @param semiColonSeparatedVariantSetIDs (GA4GH IDs)
+     * @return
+     * @throws Exception
+     */
+    public static String[] extractModuleAndProjectIDsFromVariantSetIds(String semiColonSeparatedVariantSetIDs) throws Exception {
+    	String[] result = new String[2];
+    	for (String variantSetId : semiColonSeparatedVariantSetIDs.split(",")) {
+    		String info[] = Helper.getInfoFromId(variantSetId, 2);
+    		if (result[0] == null)
+    			result[0] = info[0];
+    		else if (!result[0].equals(info[0]))
+    			throw new Exception("Multiple projects are only supported within a single database!");
+    		if (result[1] == null)
+    			result[1] = info[1];
+    		else
+    			result[1] += "," + info[1];
+    	}
+    	return result;
+    }
+    
+    /**
+     * 
+     * @param semiColonSeparatedVariantSetIDs (GA4GH IDs)
+     * @return
+     * @throws Exception
+     */
+    public static String[] extractModuleAndProjectIDsFromCallSetIds(String semiColonSeparatedCallSetIDs) throws Exception {
+    	return extractModuleAndProjectIDsFromVariantSetIds(semiColonSeparatedCallSetIDs);	// we cheat because they have the same form
     }
     
     /**

@@ -253,9 +253,13 @@ public class MgdbDao {
     }
     
     static public List<String> getVariantTypes(MongoTemplate mongoTemplate, Integer projId) {
+    	return getVariantTypes(mongoTemplate, new Integer[] {projId});
+    }
+
+    static public List<String> getVariantTypes(MongoTemplate mongoTemplate, Integer[] projIDs) {
         Query q = new Query();
-        if (projId != null)
-        	q.addCriteria(Criteria.where("_id").is(projId));
+        if (projIDs != null)
+        	q.addCriteria(Criteria.where("_id").in(projIDs));
         List<String> res = mongoTemplate.findDistinct(q, GenotypingProject.FIELDNAME_VARIANT_TYPES, GenotypingProject.class, String.class);
         return res;
     }
@@ -332,10 +336,10 @@ public class MgdbDao {
      */
     public static int ensurePositionIndexes(MongoTemplate mongoTemplate, Collection<MongoCollection<Document>> varColls, boolean fEvenIfCollectionIsEmpty, boolean fWaitForCompletion) throws InterruptedException {
         int nResult = 0;
-        
-        List<String> variantTypes = getVariantTypes(mongoTemplate, null);
+
+        List<String> variantTypes = getVariantTypes(mongoTemplate, (Integer[]) null);
         boolean fOnlySNPsInDB = variantTypes.size() == 1 && Type.SNP.toString().equals(variantTypes.iterator().next());
-        	
+
         List<Assembly> assemblies = mongoTemplate.findAll(Assembly.class);
         List<Integer> asmIDs = !assemblies.isEmpty() ? assemblies.stream().map(asm -> asm.getId()).collect(Collectors.toList()) : new ArrayList() {{ add(null); }};
         for (Integer assemblyId : asmIDs) {
@@ -602,8 +606,8 @@ public class MgdbDao {
         return result;
     }
 
-    public static Set<String> getProjectIndividuals(String sModule, int projId) throws ObjectNotFoundException {
-        return getSamplesByIndividualForProject(sModule, projId, null).keySet();
+    public static Set<String> getProjectIndividuals(String sModule, Integer[] projIDs) throws ObjectNotFoundException {
+        return getSamplesByIndividualForProjects(sModule, projIDs, null).keySet();
     }
 
     /**
@@ -623,12 +627,16 @@ public class MgdbDao {
     }
 
     public static TreeMap<String /*individual*/, ArrayList<GenotypingSample>> getSamplesByIndividualForProject(final String sModule, final int projId, final Collection<String> individuals) throws ObjectNotFoundException {
+    	return getSamplesByIndividualForProjects(sModule, new Integer[] { projId }, individuals);
+    }
+    
+    public static TreeMap<String /*individual*/, ArrayList<GenotypingSample>> getSamplesByIndividualForProjects(final String sModule, final Integer[] projIDs, final Collection<String> individuals) throws ObjectNotFoundException {
         TreeMap<String /*individual*/, ArrayList<GenotypingSample>> result = new TreeMap<>();
         MongoTemplate mongoTemplate = MongoTemplateManager.get(sModule);
         if (mongoTemplate == null)
             throw new ObjectNotFoundException("Database " + sModule + " does not exist");
 
-        Criteria crit = Criteria.where(GenotypingSample.FIELDNAME_PROJECT_ID).is(projId);
+        Criteria crit = Criteria.where(GenotypingSample.FIELDNAME_PROJECT_ID).in(projIDs);
         if (individuals != null)
             crit.andOperator(Criteria.where(GenotypingSample.FIELDNAME_INDIVIDUAL).in(individuals));
         Query q = new Query(crit);
@@ -645,8 +653,12 @@ public class MgdbDao {
     }
 
     public static ArrayList<GenotypingSample> getSamplesForProject(final String sModule, final int projId, final Collection<String> individuals) throws ObjectNotFoundException {
+    	return getSamplesForProjects(sModule, new Integer[] { projId }, individuals);
+    }
+    
+    public static ArrayList<GenotypingSample> getSamplesForProjects(final String sModule, final Integer[] projIDs, final Collection<String> individuals) throws ObjectNotFoundException {
         ArrayList<GenotypingSample> result = new ArrayList<>();
-        for (ArrayList<GenotypingSample> sampleList : getSamplesByIndividualForProject(sModule, projId, individuals).values()) {
+        for (ArrayList<GenotypingSample> sampleList : getSamplesByIndividualForProjects(sModule, projIDs, individuals).values()) {
             result.addAll(sampleList);
         }
         return result;
@@ -903,9 +915,9 @@ public class MgdbDao {
         for (GenotypingProject proj : mongoTemplate.find(query, GenotypingProject.class)) {
             nProjCount++;
             if (proj.getId() == nProjectId)
-                individualsInThisProject = MgdbDao.getProjectIndividuals(sModule, proj.getId());
+                individualsInThisProject = MgdbDao.getProjectIndividuals(sModule, new Integer[] {proj.getId()});
             else
-                individualsInOtherProjects.addAll(MgdbDao.getProjectIndividuals(sModule, proj.getId()));
+                individualsInOtherProjects.addAll(MgdbDao.getProjectIndividuals(sModule, new Integer[] {proj.getId()}));
         }
         if (nProjCount == 1 && !individualsInThisProject.isEmpty()) {
             mongoTemplate.getDb().drop();
