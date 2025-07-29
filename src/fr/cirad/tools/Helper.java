@@ -554,17 +554,7 @@ public class Helper {
     	}
     	return result;
     }
-    
-    /**
-     * 
-     * @param semiColonSeparatedVariantSetIDs (GA4GH IDs)
-     * @return
-     * @throws Exception
-     */
-    public static String[] extractModuleAndProjectIDsFromCallSetIds(String semiColonSeparatedCallSetIDs) throws Exception {
-    	return extractModuleAndProjectIDsFromVariantSetIds(semiColonSeparatedCallSetIDs);	// we cheat because they have the same form
-    }
-    
+
     /**
      * retrieve info from an ID
      *
