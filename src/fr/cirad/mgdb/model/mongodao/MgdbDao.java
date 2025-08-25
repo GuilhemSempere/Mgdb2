@@ -43,6 +43,7 @@ import javax.ejb.ObjectNotFoundException;
 import javax.servlet.ServletContext;
 import javax.servlet.http.HttpSession;
 
+import fr.cirad.mgdb.model.mongo.maintypes.*;
 import org.apache.commons.collections.CollectionUtils;
 import org.apache.log4j.Level;
 import org.apache.log4j.Logger;
@@ -76,19 +77,9 @@ import com.mongodb.client.result.DeleteResult;
 import com.mongodb.client.result.UpdateResult;
 
 import fr.cirad.mgdb.exporting.IExportHandler;
-import fr.cirad.mgdb.model.mongo.maintypes.Assembly;
-import fr.cirad.mgdb.model.mongo.maintypes.CachedCount;
-import fr.cirad.mgdb.model.mongo.maintypes.CustomIndividualMetadata;
 import fr.cirad.mgdb.model.mongo.maintypes.CustomIndividualMetadata.CustomIndividualMetadataId;
-import fr.cirad.mgdb.model.mongo.maintypes.CustomSampleMetadata;
 import fr.cirad.mgdb.model.mongo.maintypes.CustomSampleMetadata.CustomSampleMetadataId;
-import fr.cirad.mgdb.model.mongo.maintypes.DBVCFHeader;
 import fr.cirad.mgdb.model.mongo.maintypes.DBVCFHeader.VcfHeaderId;
-import fr.cirad.mgdb.model.mongo.maintypes.GenotypingProject;
-import fr.cirad.mgdb.model.mongo.maintypes.GenotypingSample;
-import fr.cirad.mgdb.model.mongo.maintypes.Individual;
-import fr.cirad.mgdb.model.mongo.maintypes.VariantData;
-import fr.cirad.mgdb.model.mongo.maintypes.VariantRunData;
 import fr.cirad.mgdb.model.mongo.subtypes.AbstractVariantData;
 import fr.cirad.mgdb.model.mongo.subtypes.ReferencePosition;
 import fr.cirad.mgdb.model.mongo.subtypes.Run;
@@ -651,6 +642,36 @@ public class MgdbDao {
         }
         return result;
     }
+
+    public static TreeMap<String /*individual*/, ArrayList<CallSet>> getCallsetsByIndividualForProject(final String sModule, final int projId, final Collection<String> individuals) throws ObjectNotFoundException {
+        TreeMap<String /*individual*/, ArrayList<CallSet>> result = new TreeMap<>();
+        MongoTemplate mongoTemplate = MongoTemplateManager.get(sModule);
+        if (mongoTemplate == null)
+            throw new ObjectNotFoundException("Database " + sModule + " does not exist");
+
+        Criteria crit = Criteria.where(CallSet.FIELDNAME_PROJECT_ID).is(projId);
+        if (individuals != null)
+            crit.andOperator(Criteria.where(CallSet.FIELDNAME_INDIVIDUAL).in(individuals));
+        Query q = new Query(crit);
+//		q.with(new Sort(Sort.Direction.ASC, GenotypingSample.SampleId.FIELDNAME_INDIVIDUAL));
+        for (CallSet cs : mongoTemplate.find(q, CallSet.class)) {
+            ArrayList<CallSet> individualCallsets = result.get(cs.getIndividual());
+            if (individualCallsets == null) {
+                individualCallsets = new ArrayList<>();
+                result.put(cs.getIndividual(), individualCallsets);
+            }
+            individualCallsets.add(cs);
+        }
+        return result;
+    }
+
+    public static ArrayList<CallSet> getCallsetsForProject(final String sModule, final int projId, final Collection<String> individuals) throws ObjectNotFoundException {
+        ArrayList<CallSet> result = new ArrayList<>();
+        for (ArrayList<CallSet> sampleList : getCallsetsByIndividualForProject(sModule, projId, individuals).values()) {
+            result.addAll(sampleList);
+        }
+        return result;
+    }
     
     public static Map<String /*sample name*/, GenotypingSample> getSamplesByIDs(final String sModule, final Collection<Integer> sampleIDs, boolean detachSamplesFromIndividuals) {
         Map<String, GenotypingSample> map = new HashMap<>();
@@ -661,7 +682,7 @@ public class MgdbDao {
             if (detachSamplesFromIndividuals)
             	for (GenotypingSample sp : samples)	// hack them so each sample is considered separately
             		sp.setDetached(true);  
-            map = samples.stream().collect(Collectors.toMap(GenotypingSample::getSampleName, sample -> sample));   
+            map = samples.stream().collect(Collectors.toMap(GenotypingSample::getId, sample -> sample));
         }
         return map;
     }
@@ -808,12 +829,12 @@ public class MgdbDao {
      * restricted by it, otherwise if projIDs is specified the list is
      * restricted by it, otherwise all database samples are returned
      */
-    public LinkedHashMap<Integer, GenotypingSample> loadSamplesWithAllMetadata(String module, String sCurrentUser, Collection<Integer> projIDs, Collection<Integer> spIDs, LinkedHashMap<String, Set<String>> filters) {
+    public LinkedHashMap<String, GenotypingSample> loadSamplesWithAllMetadata(String module, String sCurrentUser, Collection<Integer> projIDs, Collection<String> spIDs, LinkedHashMap<String, Set<String>> filters) {
         MongoTemplate mongoTemplate = MongoTemplateManager.get(module);
 
         // build the initial list of Sample objects
         if (spIDs == null)
-            spIDs = mongoTemplate.findDistinct(projIDs == null || projIDs.isEmpty() ? new Query() : new Query(Criteria.where(GenotypingSample.FIELDNAME_PROJECT_ID).in(projIDs)), "_id", GenotypingSample.class, Integer.class);
+            spIDs = mongoTemplate.findDistinct(projIDs == null || projIDs.isEmpty() ? new Query() : new Query(Criteria.where(GenotypingSample.FIELDNAME_PROJECT_ID).in(projIDs)), "_id", GenotypingSample.class, String.class);
 
         List<Criteria> crits = new ArrayList<>();
        	crits.add(Criteria.where("_id").in(spIDs));
@@ -825,12 +846,12 @@ public class MgdbDao {
 	            	crits.add(Criteria.where(Individual.SECTION_ADDITIONAL_INFO + "." + filterEntry.getKey()).in(filterValues));
 	        }
         
-        LinkedHashMap<Integer, GenotypingSample> result = new LinkedHashMap<>();	// this one will be sorted according to the provided list
+        LinkedHashMap<String, GenotypingSample> result = new LinkedHashMap<>();	// this one will be sorted according to the provided list
 
         Query q = new Query(new Criteria().andOperator(crits.toArray(new Criteria[crits.size()])));
         q.with(Sort.by(Sort.Direction.ASC, "_id"));
-        Map<Integer, GenotypingSample> spMap = mongoTemplate.find(q, GenotypingSample.class).stream().collect(Collectors.toMap(GenotypingSample::getId, sp -> sp));
-        for (Integer spId : spIDs)
+        Map<String, GenotypingSample> spMap = mongoTemplate.find(q, GenotypingSample.class).stream().collect(Collectors.toMap(GenotypingSample::getId, sp -> sp));
+        for (String spId : spIDs)
             result.put(spId, spMap.get(spId));
 
         boolean fGrabSessionAttributesFromThread = SessionAttributeAwareThread.class.isAssignableFrom(Thread.currentThread().getClass());
@@ -838,7 +859,7 @@ public class MgdbDao {
         if (sCurrentUser != null) {	// merge with custom metadata if available
             if ("anonymousUser".equals(sCurrentUser)) {
             	if (sessionMetaData != null)
-	                for (Integer spID : spIDs) {
+	                for (String spID : spIDs) {
 	                    LinkedHashMap<String, Object> spSessionMetadata = sessionMetaData.get(spID);
 	                    if (spSessionMetadata != null && !spSessionMetadata.isEmpty())
 	                        result.get(spID).getAdditionalInfo().putAll(spSessionMetadata);
@@ -1135,7 +1156,7 @@ public class MgdbDao {
      * @param spIDs a list of sample IDs (optional)
      * @return LinkedHashMap which contains all different metadata of the project
      */
-	public LinkedHashMap<String, Set<String>> distinctSampleMetadata(String module, String sCurrentUser, Integer projID, Collection<Integer> spIDs) {
+	public LinkedHashMap<String, Set<String>> distinctSampleMetadata(String module, String sCurrentUser, Integer projID, Collection<String> spIDs) {
         LinkedHashMap<String, Set<String>> result = new LinkedHashMap<>();	// this one will be sorted according to the provided list
         HashSet<String> wrongFormatFields = new HashSet<>();
         MgdbDao.getInstance().loadSamplesWithAllMetadata(module, sCurrentUser, Arrays.asList(projID), spIDs, null).values().stream().filter(ind -> ind.getAdditionalInfo() != null).map(sp -> {

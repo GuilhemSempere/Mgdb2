@@ -16,10 +16,7 @@
  *******************************************************************************/
 package fr.cirad.mgdb.importing;
 
-import java.io.BufferedReader;
-import java.io.File;
-import java.io.FileReader;
-import java.io.FileWriter;
+import java.io.*;
 import java.nio.charset.Charset;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -30,6 +27,7 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.Scanner;
 
+import fr.cirad.mgdb.importing.parameters.ImportParameters;
 import org.apache.log4j.Logger;
 import org.springframework.context.support.GenericXmlApplicationContext;
 import org.springframework.data.mongodb.core.MongoTemplate;
@@ -47,7 +45,7 @@ import fr.cirad.tools.ProgressIndicator;
 import fr.cirad.tools.mongo.AutoIncrementCounter;
 import fr.cirad.tools.mongo.MongoTemplateManager;
 
-public class STDVariantImport extends RefactoredImport {
+public class STDVariantImport extends RefactoredImport<ImportParameters> {
 	
 	private static final Logger LOG = Logger.getLogger(STDVariantImport.class);
 	
@@ -256,7 +254,10 @@ public class STDVariantImport extends RefactoredImport {
 			
 
             // Create the necessary samples
-            createSamples(mongoTemplate, project.getId(), sRun, sampleToIndividualMap, orderedIndividualToPopulationMap, progress);
+            //ImportParameters only used here in the createCallSetsSamplesIndividuals, only giving useful arguments)
+            ImportParameters params = new ImportParameters(sModule, sProject, sRun, null, null, null, sampleToIndividualMap, false, 0);
+            createCallSetsSamplesIndividuals(new ArrayList(orderedIndividualToPopulationMap.keySet()), mongoTemplate, project.getId(), sRun, sampleToIndividualMap, progress);
+
             if (progress.getError() != null || progress.isAborted())
                 return createdProject;
             
@@ -311,4 +312,19 @@ public class STDVariantImport extends RefactoredImport {
 				ctx.close();
 		}
 	}
+
+    @Override
+    protected long doImport(ImportParameters params, MongoTemplate mongoTemplate, GenotypingProject project, ProgressIndicator progress, Integer createdProject) throws Exception {
+        return 0;
+    }
+
+    @Override
+    protected void initReader(ImportParameters params) throws Exception {
+
+    }
+
+    @Override
+    protected void closeResource() throws IOException {
+
+    }
 }

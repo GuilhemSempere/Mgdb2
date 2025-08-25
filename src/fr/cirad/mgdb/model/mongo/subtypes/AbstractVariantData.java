@@ -654,16 +654,16 @@ abstract public class AbstractVariantData
 	 * @return the variant context
 	 * @throws Exception the exception
 	 */
-	public VariantContext toVariantContext(MongoTemplate mongoTemplate, Collection<VariantRunData> runs, Integer nAssemblyId, boolean exportVariantIDs, Collection<GenotypingSample> samplesToExport, Map<String, Integer> individualPositions, Map<String /*population*/, Collection<String>> individuals, Map<String /*population*/, HashMap<String, Float>> annotationFieldThresholds, HashMap<Integer, Object> previousPhasingIds, OutputStream warningOS, String synonym) throws Exception
+	public VariantContext toVariantContext(MongoTemplate mongoTemplate, Collection<VariantRunData> runs, Integer nAssemblyId, boolean exportVariantIDs, Collection<GenotypingSample> samplesToExport, Map<String, Integer> individualPositions, Map<String /*population*/, Collection<String>> individuals, Map<String /*population*/, HashMap<String, Float>> annotationFieldThresholds, HashMap<String, Object> previousPhasingIds, OutputStream warningOS, String synonym) throws Exception
 	{
 		ArrayList<Genotype> genotypes = new ArrayList<Genotype>();
 		String sRefAllele = knownAlleles.isEmpty() ? null : knownAlleles.iterator().next();
 
-        HashMap<Integer, SampleGenotype> sampleGenotypes = new HashMap<>();
+        HashMap<String, SampleGenotype> sampleGenotypes = new HashMap<>();
         HashSet<VariantRunData> runsWhereDataWasFound = new HashSet<>();
 
         // collect all genotypes from various runs for all individuals
-        HashMap<String/*genotype code*/, LinkedHashSet<Integer/*sample*/>>[] individualGenotypes = new HashMap[individualPositions.size()];
+        HashMap<String/*genotype code*/, LinkedHashSet<String/*sample*/>>[] individualGenotypes = new HashMap[individualPositions.size()];
         Integer knownAlleleCount = null;
         if (runs != null && !runs.isEmpty())
             for (VariantRunData run : runs) {
@@ -685,7 +685,7 @@ abstract public class AbstractVariantData
                     int nIndividualIndex = individualPositions.get(sample.getIndividual());
                     if (individualGenotypes[nIndividualIndex] == null)
                         individualGenotypes[nIndividualIndex] = new HashMap<>(1);
-                    LinkedHashSet<Integer> samplesWithGivenGenotype = individualGenotypes[nIndividualIndex].get(sampleGenotype.getCode());
+                    LinkedHashSet<String> samplesWithGivenGenotype = individualGenotypes[nIndividualIndex].get(sampleGenotype.getCode());
                     if (samplesWithGivenGenotype == null) {
                         samplesWithGivenGenotype = new LinkedHashSet<>(2);
                         individualGenotypes[nIndividualIndex].put(sampleGenotype.getCode(), samplesWithGivenGenotype);
@@ -736,7 +736,7 @@ abstract public class AbstractVariantData
                 continue;    // no genotype for this individual
             }
 
-            Integer spId = individualGenotypes[nIndividualIndex].get(mostFrequentGenotype).iterator().next();    // any will do (although ideally we should make sure we export the best annotation values found)
+            String spId = individualGenotypes[nIndividualIndex].get(mostFrequentGenotype).iterator().next();    // any will do (although ideally we should make sure we export the best annotation values found)
             SampleGenotype sampleGenotype = sampleGenotypes.get(spId);
 
             Object currentPhId = sampleGenotype.getAdditionalInfo().get(GT_FIELD_PHASED_ID);

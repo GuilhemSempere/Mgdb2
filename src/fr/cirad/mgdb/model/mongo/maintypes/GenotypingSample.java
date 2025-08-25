@@ -26,37 +26,31 @@ import org.springframework.data.mongodb.core.mapping.Field;
 /**
  * The Class Sample.
  */
-@Document(collection = "samples")
-@TypeAlias("GS")
+@Document(collection = "indSamples")
+@TypeAlias("IS")
 public class GenotypingSample {
 
-	public final static String FIELDNAME_INDEX = "ix";
-	public final static String FIELDNAME_NAME = "nm";
 	public final static String FIELDNAME_INDIVIDUAL = "in";
 	public final static String FIELDNAME_PROJECT_ID = "pj";
 	public final static String FIELDNAME_RUN = "rn";
     public final static String SECTION_ADDITIONAL_INFO = "ai";
-    
+
 	/** The sample id. */
 	@Id
-	private int id;
+	private String id;
 
-	/** The sample name. */
-	@Field(FIELDNAME_NAME)
-	private String sampleName;
-		
 	/** The individual. */
 	@Field(FIELDNAME_INDIVIDUAL)
 	private String individual;
-	
+
 	/** The projectId. */
 	@Field(FIELDNAME_PROJECT_ID)
 	private int projectId;
-	
+
 	/** The run. */
 	@Field(FIELDNAME_RUN)
 	private String run;
-	
+
 	@Transient
 	private boolean detached = false;
 
@@ -73,26 +67,12 @@ public class GenotypingSample {
 	 * @param projectId the project id
 	 * @param run the run name
 	 * @param individual the individual
-	 * @param sampleName the sampleName
 	 */
-	public GenotypingSample(int sampleId, int projectId, String run, String individual, String sampleName) {
+	public GenotypingSample(String sampleId, int projectId, String run, String individual) {
 		this.id = sampleId;
 		this.projectId = projectId;
 		this.run = run;
 		this.individual = individual;
-		this.sampleName = sampleName != null ? sampleName : getIndividual() + "-" + getProjectId() + "-" + getRun();
-	}
-	
-	/**
-	 * Instantiates a new GenotypingSample.
-	 *
-	 * @param sampleId the sample id
-	 * @param projectId the project id
-	 * @param run the run name
-	 * @param individual the individual
-	 */
-	public GenotypingSample(int sampleId, int projectId, String run, String individual) {
-		this(sampleId, projectId, run, individual, null);
 	}
 
 	public Integer getProjectId() {
@@ -137,11 +117,11 @@ public class GenotypingSample {
     public void setAdditionalInfo(LinkedHashMap<String, Object> additionalInfo) {
         this.additionalInfo = additionalInfo;
     }
-    
+
     public void detachFromIndividual() {
     	detached = true;
     }
-	
+
 	@Override
 	public boolean equals(Object o)
 	{
@@ -160,25 +140,12 @@ public class GenotypingSample {
     public GenotypingSample() {
     }
 
-	public String getSampleName() {
-		return sampleName;
-	}
-
-	public void setSampleName(String sampleName) {
-		this.sampleName = sampleName;
-	}
-
     @Override
     public int hashCode() {
         return toString().hashCode();
     }
-	
-	public String toString()
-	{
-		return getSampleName() + "(" + individual + "&curren;" + projectId + "&curren;" + run + ")";
-	}
 
-	public Integer getId() {
+	public String getId() {
 		return id;
 	}
 }

@@ -190,7 +190,7 @@ public interface IExportHandler
 	
 	public static String buildMetadataFile(String sModule, String sExportingUser, Collection<String> exportedIndividuals, Collection<String> individualMetadataFieldsToExport, boolean workWithSamples, String initialContents) throws IOException {
 		StringBuffer sb = new StringBuffer(initialContents);
-		Collection material = workWithSamples ? MgdbDao.getInstance().loadSamplesWithAllMetadata(sModule, sExportingUser, null, exportedIndividuals.stream().map(id -> Integer.parseInt(id)).toList(), null).values() : MgdbDao.getInstance().loadIndividualsWithAllMetadata(sModule, sExportingUser, null, exportedIndividuals, null).values();
+		Collection material = workWithSamples ? MgdbDao.getInstance().loadSamplesWithAllMetadata(sModule, sExportingUser, null, exportedIndividuals, null).values() : MgdbDao.getInstance().loadIndividualsWithAllMetadata(sModule, sExportingUser, null, exportedIndividuals, null).values();
         LinkedHashSet<String> mdHeaders = new LinkedHashSet<>();	// definite header collection (avoids empty columns)
         for (Object indOrSp : material) {
         	LinkedHashMap<String, Object> ai = indOrSp instanceof Individual ? ((Individual) indOrSp).getAdditionalInfo() : ((GenotypingSample) indOrSp).getAdditionalInfo();

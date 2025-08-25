@@ -41,6 +41,7 @@ import java.util.stream.Collectors;
 
 import javax.servlet.http.HttpServletResponse;
 
+import fr.cirad.mgdb.model.mongo.maintypes.*;
 import org.apache.commons.io.FileUtils;
 import org.apache.commons.lang.StringUtils;
 import org.apache.log4j.Logger;
@@ -60,12 +61,6 @@ import fr.cirad.io.brapi.BrapiClient;
 import fr.cirad.io.brapi.BrapiClient.Pager;
 import fr.cirad.io.brapi.BrapiService;
 import fr.cirad.io.brapi.CallsUtils;
-import fr.cirad.mgdb.model.mongo.maintypes.Assembly;
-import fr.cirad.mgdb.model.mongo.maintypes.GenotypingProject;
-import fr.cirad.mgdb.model.mongo.maintypes.GenotypingSample;
-import fr.cirad.mgdb.model.mongo.maintypes.Individual;
-import fr.cirad.mgdb.model.mongo.maintypes.VariantData;
-import fr.cirad.mgdb.model.mongo.maintypes.VariantRunData;
 import fr.cirad.mgdb.model.mongo.subtypes.ReferencePosition;
 import fr.cirad.mgdb.model.mongo.subtypes.SampleGenotype;
 import fr.cirad.mgdb.model.mongo.subtypes.VariantRunDataId;
@@ -158,7 +153,7 @@ public class BrapiImport extends STDVariantImport {
 	 * @param sProject the project
 	 * @param sRun the run
 	 * @param sTechnology the technology
-	 * @param endpoint URL
+	 * @param endpointUrl URL
 	 * @param studyDbId BrAPI study id
 	 * @param mapDbId BrAPI map id
      * @param assemblyName the assembly name
@@ -364,7 +359,7 @@ public class BrapiImport extends STDVariantImport {
 				profileToGermplasmMap.put(profiles.get(0), gp);
 			}
 			
-			if (mongoTemplate.findOne(new Query(Criteria.where(GenotypingSample.FIELDNAME_NAME).in(profileToGermplasmMap.keySet())), GenotypingSample.class) != null)
+			if (mongoTemplate.findOne(new Query(Criteria.where("_id").in(profileToGermplasmMap.keySet())), GenotypingSample.class) != null)
 				throw new Exception("The dataset you are trying to import contains markerProfile IDs that already exist in the target database!");
 			
 			LOG.debug("Importing " + markerprofiles.size() + " individuals");
@@ -398,10 +393,13 @@ public class BrapiImport extends STDVariantImport {
 		                    mongoTemplate.save(ind);
 		                }
 
-		                int sampleId = AutoIncrementCounter.getNextSequence(mongoTemplate, MongoTemplateManager.getMongoCollectionName(GenotypingSample.class));
-		                m_providedIdToSampleMap.put(sIndividual, new GenotypingSample(sampleId, project.getId(), sRun, sIndividual, markerProfile));	// add a sample for this individual to the project
+                        m_providedIdToSampleMap.put(sIndividual, new GenotypingSample(markerProfile, project.getId(), sRun, sIndividual));  // add a sample for this individual to the project
+
+                        int callsetId = AutoIncrementCounter.getNextSequence(mongoTemplate, MongoTemplateManager.getMongoCollectionName(CallSet.class));
+                        m_providedIdToCallsetMap.put(sIndividual, new CallSet(callsetId, markerProfile, sIndividual, project.getId(), sRun));
 		            }
 				}
+                mongoTemplate.insert(m_providedIdToCallsetMap.values(), CallSet.class);
 				mongoTemplate.insert(m_providedIdToSampleMap.values(), GenotypingSample.class);
 				setSamplesPersisted(true);
 				
@@ -829,7 +827,7 @@ public class BrapiImport extends STDVariantImport {
 						continue;
 
 					SampleGenotype genotype = new SampleGenotype(gtString);
-					vrd.getSampleGenotypes().put(m_providedIdToSampleMap.get(sIndividual).getId(), genotype);
+					vrd.getSampleGenotypes().put(m_providedIdToCallsetMap.get(sIndividual).getId(), genotype);
 		            if (phasedGT != null) {
 		            	genotype.getAdditionalInfo().put(VariantData.GT_FIELD_PHASED_GT, StringUtils.join(alleleIndexList, "|"));
 		            	genotype.getAdditionalInfo().put(VariantData.GT_FIELD_PHASED_ID, phasingGroup.get(sIndividual));

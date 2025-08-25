@@ -203,10 +203,10 @@ public class IndividualMetadataImport {
                 String targetEntity = cells.get(idColumn);
                 targetEntityList.add(targetEntity);
                 
-                Integer spId = null;	// will remain null if working on individuals
+                String spId = null;	// will remain null if working on individuals
                 if (targetTypeColName.equals("sample"))
                 	try {
-                		spId = mongoTemplate.findDistinct(new Query(Criteria.where(GenotypingSample.FIELDNAME_NAME).is(targetEntity)), "_id", GenotypingSample.class, Integer.class).get(0);
+                		spId = mongoTemplate.findDistinct(new Query(Criteria.where("_id").is(targetEntity)), "_id", GenotypingSample.class, String.class).get(0);
                 	}
                 	catch (IndexOutOfBoundsException ioobe) {
                 		throw new Exception("Unexisting sample: " + targetEntity);
@@ -215,7 +215,7 @@ public class IndividualMetadataImport {
                 Update update = new Update();
                 if (username == null) { // global metadata                    
                 	additionalInfo.forEach((k, v) -> update.set(Individual.SECTION_ADDITIONAL_INFO + "." + k, v));
-                    bulkOperations.updateMulti(new Query(Criteria.where(spId != null ? GenotypingSample.FIELDNAME_NAME : "_id").is(targetEntity)), update);
+                    bulkOperations.updateMulti(new Query(Criteria.where("_id").is(targetEntity)), update);
                 } else if (!fIsAnonymous) { // persistent user-level metadata
                    	additionalInfo.forEach((k, v) -> update.set(CustomIndividualMetadata.SECTION_ADDITIONAL_INFO + "." + k, v));
                    	if (spId != null)
@@ -248,9 +248,9 @@ public class IndividualMetadataImport {
                 	sessionObject.clear();
             } else {	// first check if all referred objects actually exist in the DB
                 if (targetTypeColName.equals("sample")) {
-                    Query verificationQuery = new Query(Criteria.where(GenotypingSample.FIELDNAME_NAME).in(targetEntityList));
-                    verificationQuery.fields().include(GenotypingSample.FIELDNAME_NAME);
-                    List<String> foundSamples = mongoTemplate.find(verificationQuery, GenotypingSample.class).stream().map(s -> s.getSampleName()).collect(Collectors.toList());
+                    Query verificationQuery = new Query(Criteria.where("_id").in(targetEntityList));
+                    verificationQuery.fields().include("_id");
+                    List<String> foundSamples = mongoTemplate.find(verificationQuery, GenotypingSample.class).stream().map(s -> s.getId()).collect(Collectors.toList());
                     if (foundSamples.size() < targetEntityList.size())
                         throw new Exception("The following samples do not exist in the selected database: " + StringUtils.join(CollectionUtils.disjunction(targetEntityList, foundSamples), ", "));
                 } else {
@@ -642,7 +642,7 @@ public class IndividualMetadataImport {
             ProgressIndicator progress) throws Exception {
 
     	MongoTemplate mongoTemplate = MongoTemplateManager.get(sModule);
-    	Collection<String> idList = sampleDbIdToIndividualMap == null ? mongoTemplate.findDistinct(new Query(), GenotypingSample.FIELDNAME_NAME, GenotypingSample.class, String.class) : sampleDbIdToIndividualMap.keySet();
+    	Collection<String> idList = sampleDbIdToIndividualMap == null ? mongoTemplate.findDistinct(new Query(), "_id", GenotypingSample.class, String.class) : sampleDbIdToIndividualMap.keySet();
     	List<BrapiSample> sampleList = readBrapiV1Samples(endpointUrl, authToken, idList, progress);
     	
         if (sampleList.isEmpty())
@@ -683,9 +683,9 @@ public class IndividualMetadataImport {
                     extRef.setReferenceId(sample.getSampleDbId());
                     extRef.setReferenceSource(endpointUrl);
                     
-	            Integer spId = null;
+	            String spId = null;
 	        	try {
-	        		spId = mongoTemplate.findDistinct(new Query(Criteria.where(GenotypingSample.FIELDNAME_NAME).is(internalId)), "_id",  GenotypingSample.class, Integer.class).get(0);
+	        		spId = mongoTemplate.findDistinct(new Query(Criteria.where("_id").is(internalId)), "_id",  GenotypingSample.class, String.class).get(0);
 	        	}
 	        	catch (IndexOutOfBoundsException ioobe) {
 	        		throw new Exception("Unexisting sample: " + internalId);
@@ -695,7 +695,7 @@ public class IndividualMetadataImport {
 	            if (username == null) { // global metadata
 	                aiMap.forEach((k, v) -> update.set(GenotypingSample.SECTION_ADDITIONAL_INFO + "." + k, v));
                         update.addToSet(GenotypingSample.SECTION_ADDITIONAL_INFO + "." + BrapiService.BRAPI_FIELD_externalReferences, extRef);
-	                bulkOperations.updateMulti(new Query(Criteria.where(GenotypingSample.FIELDNAME_NAME).is(internalId)), update);
+	                bulkOperations.updateMulti(new Query(Criteria.where("_id").is(internalId)), update);
 	                update.unset(GenotypingSample.SECTION_ADDITIONAL_INFO + "." + BrapiService.BRAPI_FIELD_externalReferenceId);
 	                update.unset(GenotypingSample.SECTION_ADDITIONAL_INFO + "." + BrapiService.BRAPI_FIELD_externalReferenceSource);
 	            } else if (!fIsAnonymous) { // persistent user-level metadata
@@ -815,7 +815,7 @@ public class IndividualMetadataImport {
             ProgressIndicator progress) throws Exception {
     	
     	MongoTemplate mongoTemplate = MongoTemplateManager.get(sModule);
-    	Collection<String> idList = sampleDbIdToIndividualMap == null ? mongoTemplate.findDistinct(new Query(), GenotypingSample.FIELDNAME_NAME, GenotypingSample.class, String.class) : sampleDbIdToIndividualMap.keySet();
+    	Collection<String> idList = sampleDbIdToIndividualMap == null ? mongoTemplate.findDistinct(new Query(), "_id", GenotypingSample.class, String.class) : sampleDbIdToIndividualMap.keySet();
     	List<Sample> sampleList = readBrapiV2Samples(endpointUrl, authToken, idList, progress);
     	
         if (sampleList.isEmpty())
@@ -854,7 +854,7 @@ public class IndividualMetadataImport {
 	            
 	            Integer spId = null;
 	        	try {
-	        		spId = mongoTemplate.findDistinct(new Query(Criteria.where(GenotypingSample.FIELDNAME_NAME).is(internalId)), "_id",  GenotypingSample.class, Integer.class).get(0);
+	        		spId = mongoTemplate.findDistinct(new Query(Criteria.where("_id").is(internalId)), "_id",  GenotypingSample.class, Integer.class).get(0);
 	        	}
 	        	catch (IndexOutOfBoundsException ioobe) {
 	        		throw new Exception("Unexisting sample: " + internalId);
@@ -870,7 +870,7 @@ public class IndividualMetadataImport {
                         update.addToSet(Individual.SECTION_ADDITIONAL_INFO + "." + BrapiService.BRAPI_FIELD_externalReferences, extRef);
 	                update.unset(GenotypingSample.SECTION_ADDITIONAL_INFO + "." + BrapiService.BRAPI_FIELD_externalReferenceId);
 	                update.unset(GenotypingSample.SECTION_ADDITIONAL_INFO + "." + BrapiService.BRAPI_FIELD_externalReferenceSource);
-	                bulkOperations.updateMulti(new Query(Criteria.where(GenotypingSample.FIELDNAME_NAME).is(internalId)), update);
+	                bulkOperations.updateMulti(new Query(Criteria.where("_id").is(internalId)), update);
 	            } else if (!fIsAnonymous) { // persistent user-level metadata
 	                aiMap.forEach((k, v) -> update.set(CustomSampleMetadata.SECTION_ADDITIONAL_INFO + "." + k, v));
                         update.addToSet(CustomSampleMetadata.SECTION_ADDITIONAL_INFO + "." + BrapiService.BRAPI_FIELD_externalReferences, extRef);

@@ -1,7 +1,7 @@
 package fr.cirad.mgdb.importing;
 
 import java.io.File;
-import java.net.URL;
+import java.io.IOException;
 import java.net.URLDecoder;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -22,16 +22,14 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
+import fr.cirad.mgdb.importing.parameters.FileImportParameters;
 import fr.cirad.mgdb.model.mongo.maintypes.*;
 import htsjdk.variant.vcf.VCFHeader;
 import htsjdk.variant.vcf.VCFHeaderLineType;
 import htsjdk.variant.vcf.VCFInfoHeaderLine;
 import org.apache.log4j.Logger;
 import org.bson.types.ObjectId;
-import org.springframework.beans.factory.BeanDefinitionStoreException;
-import org.springframework.context.support.GenericXmlApplicationContext;
 import org.springframework.data.mongodb.core.MongoTemplate;
-import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
 
 import fr.cirad.mgdb.importing.base.AbstractGenotypeImport;
@@ -39,21 +37,20 @@ import fr.cirad.mgdb.model.mongo.subtypes.ReferencePosition;
 import fr.cirad.mgdb.model.mongo.subtypes.Run;
 import fr.cirad.mgdb.model.mongo.subtypes.SampleGenotype;
 import fr.cirad.mgdb.model.mongo.subtypes.VariantRunDataId;
-import fr.cirad.mgdb.model.mongodao.MgdbDao;
 import fr.cirad.tools.Helper;
 import fr.cirad.tools.ProgressIndicator;
-import fr.cirad.tools.mongo.AutoIncrementCounter;
-import fr.cirad.tools.mongo.MongoTemplateManager;
 import htsjdk.variant.variantcontext.Allele;
 import htsjdk.variant.variantcontext.VariantContext.Type;
 
-public class DartImport extends AbstractGenotypeImport {
+public class DartImport extends AbstractGenotypeImport<FileImportParameters> {
 
     /** The Constant LOG. */
 	private static final Logger LOG = Logger.getLogger(VariantData.class);
 
 	/** The m_process id. */
-	private String m_processID;
+	//private String m_processID;
+
+    private DartIterator dartIterator;
 
 	private int nNumProc = Runtime.getRuntime().availableProcessors();
 
@@ -68,7 +65,9 @@ public class DartImport extends AbstractGenotypeImport {
     {
         m_processID = processID;
     }
-    
+
+
+
     static final class DartIterator implements Iterator<List<DartInfo>> {
         
     	Boolean twoRow = null;
@@ -266,131 +265,62 @@ public class DartImport extends AbstractGenotypeImport {
     }
 
 
-    public Integer importToMongo(String sModule, String sProject, String sRun, String sTechnology, Integer nPloidy, URL mainFileUrl, String assemblyName, HashMap<String, String> sampleToIndividualMap, boolean fSkipMonomorphic, int importMode) throws Exception
-    {
-        long before = System.currentTimeMillis();
-        ProgressIndicator progress = ProgressIndicator.get(m_processID) != null ? ProgressIndicator.get(m_processID) : new ProgressIndicator(m_processID, new String[]{"Initializing import"});	// better to add it straight-away so the JSP doesn't get null in return when it checks for it (otherwise it will assume the process has ended)
-        progress.setPercentageEnabled(false);
+    @Override
+    protected long doImport(FileImportParameters params, MongoTemplate mongoTemplate, GenotypingProject project, ProgressIndicator progress, Integer createdProject) throws Exception {
+        String sModule = params.getsModule();
+        String sProject = params.getsRun();
+        String sRun = params.getsRun();
+        String assemblyName = params.getAssemblyName();
+        Map<String, String> sampleToIndividualMap = params.getSampleToIndividualMap();
+        boolean fSkipMonomorphic = params.isfSkipMonomorphic();
 
-        Integer createdProject = null;
+        progress.addStep("Scanning existing marker IDs");
+        progress.moveToNextStep();
+        Assembly assembly = createAssemblyIfNeeded(mongoTemplate, assemblyName);
+        HashMap<String, String> existingVariantIDs = buildSynonymToIdMapForExistingVariants(mongoTemplate, true, assembly == null ? null : assembly.getId());
 
-        //FeatureReader<RawHapMapFeature> reader = AbstractFeatureReader.getFeatureReader(mainFileUrl.toString(), new RawHapMapCodec(), false);
-        DartIterator dartIterator = getDartInfo(URLDecoder.decode(mainFileUrl.getPath(), "UTF-8"));
+        String generatedIdBaseString = Long.toHexString(System.currentTimeMillis());
+        AtomicInteger nNumberOfVariantsToSaveAtOnce = new AtomicInteger(1), totalProcessedVariantCount = new AtomicInteger(0);
+        final ArrayList<String> sampleIds = new ArrayList<>();
+        progress.addStep("Processing variant lines");
+        progress.moveToNextStep();
 
-//        BufferedReader bufferedReader = new BufferedReader(new FileReader(URLDecoder.decode(mainFileUrl.getPath(), "UTF-8")));
-        
-        
-        GenericXmlApplicationContext ctx = null;
-        try
-        {
-            MongoTemplate mongoTemplate = MongoTemplateManager.get(sModule);
-            if (mongoTemplate == null)
-            {	// we are probably being invoked offline
-                try
-                {
-                    ctx = new GenericXmlApplicationContext("applicationContext-data.xml");
-                }
-                catch (BeanDefinitionStoreException fnfe)
-                {
-                    LOG.warn("Unable to find applicationContext-data.xml. Now looking for applicationContext.xml", fnfe);
-                    ctx = new GenericXmlApplicationContext("applicationContext.xml");
-                }
-
-                MongoTemplateManager.initialize(ctx);
-                mongoTemplate = MongoTemplateManager.get(sModule);
-                if (mongoTemplate == null)
-                    throw new Exception("DATASOURCE '" + sModule + "' is not supported!");
-            }
-
-            if (m_processID == null)
-                m_processID = "IMPORT__" + sModule + "__" + sProject + "__" + sRun + "__" + System.currentTimeMillis();
-
-            GenotypingProject project = mongoTemplate.findOne(new Query(Criteria.where(GenotypingProject.FIELDNAME_NAME).is(sProject)), GenotypingProject.class);
-            if (importMode == 0 && project != null && nPloidy != null && project.getPloidyLevel() != nPloidy)
-                throw new Exception("Ploidy levels differ between existing (" + project.getPloidyLevel() + ") and provided (" + nPloidy + ") data!");
-
-            MongoTemplateManager.lockProjectForWriting(sModule, sProject);
-
-            cleanupBeforeImport(mongoTemplate, sModule, project, importMode, sRun);
-
-            if (project == null || importMode > 0) {	// create it
-                project = new GenotypingProject(AutoIncrementCounter.getNextSequence(mongoTemplate, MongoTemplateManager.getMongoCollectionName(GenotypingProject.class)));
-                project.setName(sProject);
-//				project.setOrigin(2 /* Sequencing */);
-                project.setTechnology(sTechnology);
-                if (nPloidy != null)
-                    project.setPloidyLevel(nPloidy);
-                else {
-                    progress.addStep("Attempting to guess ploidy level");
-                    progress.moveToNextStep();
-
-                    int nTestedVariantCount = 0;
-//                    Iterator<DartInfo> it = reader.iterator();
-//                    dartFeatures;
-                    variantLoop: while (nTestedVariantCount < 1000 && dartIterator.hasNext()) {
-                    	List<DartInfo> dartFeatures = dartIterator.next();
-                    	for (DartInfo dartFeature : dartFeatures)
-	                        if (dartFeature.getAlleles().length > 1) {
-	                            project.setPloidyLevel(dartFeature.getAlleles().length);
-	                            LOG.info("Guessed ploidy level for dataset to import: " + project.getPloidyLevel());
-	                            break variantLoop;
-	                        }
-                        nTestedVariantCount++;
-                    }
-                    if (project.getPloidyLevel() == 0)
-                        LOG.warn("Unable to guess ploidy level for dataset to import: " + project.getPloidyLevel());
-                }
-                if (importMode != 1)
-                    createdProject = project.getId();
-            }
-
-            progress.addStep("Scanning existing marker IDs");
-            progress.moveToNextStep();
-            Assembly assembly = createAssemblyIfNeeded(mongoTemplate, assemblyName);
-            HashMap<String, String> existingVariantIDs = buildSynonymToIdMapForExistingVariants(mongoTemplate, true, assembly == null ? null : assembly.getId());
-
-            String generatedIdBaseString = Long.toHexString(System.currentTimeMillis());
-            AtomicInteger nNumberOfVariantsToSaveAtOnce = new AtomicInteger(1), totalProcessedVariantCount = new AtomicInteger(0);
-            final ArrayList<String> sampleIds = new ArrayList<>();
-            progress.addStep("Processing variant lines");
-            progress.moveToNextStep();
-
-            int nNConcurrentThreads = Math.max(1, nNumProc);
-            LOG.debug("Importing project '" + sProject + "' into " + sModule + " using " + nNConcurrentThreads + " threads");
+        int nNConcurrentThreads = Math.max(1, nNumProc);
+        LOG.debug("Importing project '" + sProject + "' into " + sModule + " using " + nNConcurrentThreads + " threads");
 
 //            Iterator<DartInfo> it = reader.iterator();
-            DartIterator dataReader = getDartInfo(URLDecoder.decode(mainFileUrl.getPath(), "UTF-8"));
-            BlockingQueue<Runnable> saveServiceQueue = new LinkedBlockingQueue<Runnable>(saveServiceQueueLength(nNConcurrentThreads));
-            ExecutorService saveService = new ThreadPoolExecutor(1, saveServiceThreads(nNConcurrentThreads), 30, TimeUnit.SECONDS, saveServiceQueue, new ThreadPoolExecutor.CallerRunsPolicy());
-            final Collection<Integer> assemblyIDs = mongoTemplate.findDistinct(new Query(), "_id", Assembly.class, Integer.class);
-            if (assemblyIDs.isEmpty())
-                assemblyIDs.add(null);	// old-style, assembly-less DB
+        DartIterator dataReader = getDartInfo(URLDecoder.decode(params.getMainFileUrl().getPath(), "UTF-8"));
+        BlockingQueue<Runnable> saveServiceQueue = new LinkedBlockingQueue<Runnable>(saveServiceQueueLength(nNConcurrentThreads));
+        ExecutorService saveService = new ThreadPoolExecutor(1, saveServiceThreads(nNConcurrentThreads), 30, TimeUnit.SECONDS, saveServiceQueue, new ThreadPoolExecutor.CallerRunsPolicy());
+        final Collection<Integer> assemblyIDs = mongoTemplate.findDistinct(new Query(), "_id", Assembly.class, Integer.class);
+        if (assemblyIDs.isEmpty())
+            assemblyIDs.add(null);	// old-style, assembly-less DB
 
-            int nImportThreads = Math.max(1, nNConcurrentThreads - 1);
-            Thread[] importThreads = new Thread[nImportThreads];
-            boolean fDbAlreadyContainedVariants = mongoTemplate.findOne(new Query() {{ fields().include("_id"); }}, VariantData.class) != null;
+        int nImportThreads = Math.max(1, nNConcurrentThreads - 1);
+        Thread[] importThreads = new Thread[nImportThreads];
+        boolean fDbAlreadyContainedVariants = mongoTemplate.findOne(new Query() {{ fields().include("_id"); }}, VariantData.class) != null;
 
-            final GenotypingProject finalProject = project;
+        final GenotypingProject finalProject = project;
 
-            final MongoTemplate finalMongoTemplate = mongoTemplate;
-            final Assembly finalAssembly = assembly;
-            m_providedIdToSampleMap = new HashMap<String /*individual*/, GenotypingSample>();
+        final MongoTemplate finalMongoTemplate = mongoTemplate;
+        final Assembly finalAssembly = assembly;
+        m_providedIdToSampleMap = new HashMap<String /*individual*/, GenotypingSample>();
 
-            VCFInfoHeaderLine headerLineGT = new VCFInfoHeaderLine("GT", 1, VCFHeaderLineType.String, "Genotype");
-            VCFInfoHeaderLine headerLineAS = new VCFInfoHeaderLine("AS", 2, VCFHeaderLineType.String, "AlleleSequence - In 1 row format: the sequence of the Reference allele. In 2 rows format: the sequence of the Reference allele is in the Ref row, the sequence of the SNP allele in the SNP row");
-            VCFInfoHeaderLine headerLineSP = new VCFInfoHeaderLine("SP", 3, VCFHeaderLineType.Integer, "SnpPosition - The position (zero indexed) in the sequence tag at which the defined SNP variant base occurs");
-            VCFInfoHeaderLine headerLineCR = new VCFInfoHeaderLine("CR", 4, VCFHeaderLineType.Float, "CallRate - The proportion of samples for which the genotype call is either '1' or '0', rather than '-'");
-            VCFInfoHeaderLine headerLineFHR = new VCFInfoHeaderLine("FHR", 5, VCFHeaderLineType.Float, "FreqHomRef - The proportion of samples which score as homozygous for the Reference allele");
-            VCFInfoHeaderLine headerLineFHS = new VCFInfoHeaderLine("FHS", 6, VCFHeaderLineType.Float, "FreqHomSnp - The proportion of samples which score as homozygous for the SNP allele");
-            VCFInfoHeaderLine headerLineFH = new VCFInfoHeaderLine("FH", 7, VCFHeaderLineType.Float, "FreqHet - The proportion of samples which score as heterozygous");
+        VCFInfoHeaderLine headerLineGT = new VCFInfoHeaderLine("GT", 1, VCFHeaderLineType.String, "Genotype");
+        VCFInfoHeaderLine headerLineAS = new VCFInfoHeaderLine("AS", 2, VCFHeaderLineType.String, "AlleleSequence - In 1 row format: the sequence of the Reference allele. In 2 rows format: the sequence of the Reference allele is in the Ref row, the sequence of the SNP allele in the SNP row");
+        VCFInfoHeaderLine headerLineSP = new VCFInfoHeaderLine("SP", 3, VCFHeaderLineType.Integer, "SnpPosition - The position (zero indexed) in the sequence tag at which the defined SNP variant base occurs");
+        VCFInfoHeaderLine headerLineCR = new VCFInfoHeaderLine("CR", 4, VCFHeaderLineType.Float, "CallRate - The proportion of samples for which the genotype call is either '1' or '0', rather than '-'");
+        VCFInfoHeaderLine headerLineFHR = new VCFInfoHeaderLine("FHR", 5, VCFHeaderLineType.Float, "FreqHomRef - The proportion of samples which score as homozygous for the Reference allele");
+        VCFInfoHeaderLine headerLineFHS = new VCFInfoHeaderLine("FHS", 6, VCFHeaderLineType.Float, "FreqHomSnp - The proportion of samples which score as homozygous for the SNP allele");
+        VCFInfoHeaderLine headerLineFH = new VCFInfoHeaderLine("FH", 7, VCFHeaderLineType.Float, "FreqHet - The proportion of samples which score as heterozygous");
 
-            VCFHeader header = new VCFHeader(new HashSet<>(Arrays.asList(headerLineGT, headerLineAS, headerLineSP, headerLineCR, headerLineFHR, headerLineFHS, headerLineFH)));
-            finalMongoTemplate.save(new DBVCFHeader(new DBVCFHeader.VcfHeaderId(finalProject.getId(), sRun), header));
+        VCFHeader header = new VCFHeader(new HashSet<>(Arrays.asList(headerLineGT, headerLineAS, headerLineSP, headerLineCR, headerLineFHR, headerLineFHS, headerLineFH)));
+        finalMongoTemplate.save(new DBVCFHeader(new DBVCFHeader.VcfHeaderId(finalProject.getId(), sRun), header));
 
-            for (int threadIndex = 0; threadIndex < nImportThreads; threadIndex++) {
-                importThreads[threadIndex] = new Thread() {
-                    @Override
-                    public void run() {
+        for (int threadIndex = 0; threadIndex < nImportThreads; threadIndex++) {
+            importThreads[threadIndex] = new Thread() {
+                @Override
+                public void run() {
                     try {
                         int numberOfVariantsProcessedInThread = 0, localNumberOfVariantsToSaveAtOnce = -1;  // Minor optimization, copy this locally to avoid having to use the AtomicInteger every time
                         HashSet<VariantData> unsavedVariants = new HashSet<VariantData>();  // HashSet allows no duplicates
@@ -412,45 +342,7 @@ public class DartImport extends AbstractGenotypeImport {
                                     if (sampleIds.isEmpty()) {
                                         sampleIds.addAll(Arrays.asList(dartFeatures.iterator().next().getSampleIDs()));
 
-                                        HashSet<Individual> indsToAdd = new HashSet<>();
-                                        boolean fDbAlreadyContainedIndividuals = finalMongoTemplate.findOne(new Query(), Individual.class) != null;
-                                        for (String sIndOrSpId : sampleIds) {
-                                            String sIndividual = sampleToIndividualMap == null ? sIndOrSpId : sampleToIndividualMap.get(sIndOrSpId);
-                                            if (sIndividual == null) {
-                                                progress.setError("Sample / individual mapping contains no individual for sample " + sIndOrSpId);
-                                                return;
-                                            }
-
-                                            if (!fDbAlreadyContainedIndividuals && finalMongoTemplate.findById(sIndividual, Individual.class) == null)  // we don't have any population data so we don't need to update the Individual if it already exists
-                                                indsToAdd.add(new Individual(sIndividual));
-
-                                            int sampleId = AutoIncrementCounter.getNextSequence(finalMongoTemplate, MongoTemplateManager.getMongoCollectionName(GenotypingSample.class));
-                                            m_providedIdToSampleMap.put(sIndOrSpId, new GenotypingSample(sampleId, finalProject.getId(), sRun, sIndividual, sampleToIndividualMap == null ? null : sIndOrSpId));   // add a sample for this individual to the project
-                                        }
-                                        
-                                        // make sure provided sample names do not conflict with existing ones
-                                        if (finalMongoTemplate.findOne(new Query(Criteria.where(GenotypingSample.FIELDNAME_NAME).in(m_providedIdToSampleMap.values().stream().map(sp -> sp.getSampleName()).toList())), GenotypingSample.class) != null) {
-                                            progress.setError("Some of the sample IDs provided in the mapping file already exist in this database!");
-                                            return;
-                                        }
-
-                                        final int importChunkSize = 1000;
-                                        Thread sampleImportThread = new Thread() {
-                                            public void run() {                 
-                                                List<GenotypingSample> samplesToImport = new ArrayList<>(m_providedIdToSampleMap.values());
-                                                for (int j=0; j<Math.ceil((float) m_providedIdToSampleMap.size() / importChunkSize); j++)
-                                                    finalMongoTemplate.insert(samplesToImport.subList(j * importChunkSize, Math.min(samplesToImport.size(), (j + 1) * importChunkSize)), GenotypingSample.class);
-                                                samplesToImport = null;
-                                            }
-                                        };
-                                        sampleImportThread.start();
-
-                                        List<Individual> individualsToImport = new ArrayList<>(indsToAdd);
-                                        for (int j=0; j<Math.ceil((float) individualsToImport.size() / importChunkSize); j++)
-                                        	finalMongoTemplate.insert(individualsToImport.subList(j * importChunkSize, Math.min(individualsToImport.size(), (j + 1) * importChunkSize)), Individual.class);
-                                        individualsToImport = null;
-
-                                        sampleImportThread.join();
+                                        createCallSetsSamplesIndividuals(sampleIds, finalMongoTemplate, finalProject.getId(), sRun, sampleToIndividualMap, progress);
                                         setSamplesPersisted(true);
 
                                         nNumberOfVariantsToSaveAtOnce.set(sampleIds.size() == 0 ? nMaxChunkSize : Math.max(1, nMaxChunkSize / sampleIds.size()));
@@ -558,50 +450,61 @@ public class DartImport extends AbstractGenotypeImport {
                         LOG.error(progress.getError(), t);
                         return;
                     }
+                }
+            };
+
+            importThreads[threadIndex].start();
+        }
+
+        for (int i = 0; i < nImportThreads; i++)
+            importThreads[i].join();
+
+
+        saveService.shutdown();
+        saveService.awaitTermination(Integer.MAX_VALUE, TimeUnit.DAYS);
+
+        if (progress.getError() != null || progress.isAborted())
+            return 0;
+
+        return totalProcessedVariantCount.get();
+        //LOG.info("DartSeqImport took " + (System.currentTimeMillis() - before) / 1000 + "s for " + totalProcessedVariantCount.get() + " records");
+
+    }
+
+    @Override
+    protected void initReader(FileImportParameters params) throws Exception {
+        dartIterator = getDartInfo(URLDecoder.decode(params.getMainFileUrl().getPath(), "UTF-8"));
+    }
+
+    @Override
+    protected void closeResource() throws IOException {
+        dartIterator.close();
+    }
+
+    @Override
+    protected Integer findPloidyLevel(MongoTemplate mongoTemplate, Integer nPloidyParam, ProgressIndicator progress) throws IOException {
+        Integer nPloidyLevel = null;
+        if (nPloidyParam != null) {
+            nPloidyLevel = nPloidyParam;
+        } else {
+            progress.addStep("Attempting to guess ploidy level");
+            progress.moveToNextStep();
+            int nTestedVariantCount = 0;
+            variantLoop:
+            while (nTestedVariantCount < 1000 && dartIterator.hasNext()) {
+                List<DartInfo> dartFeatures = dartIterator.next();
+                for (DartInfo dartFeature : dartFeatures)
+                    if (dartFeature.getAlleles().length > 1) {
+                        nPloidyLevel = dartFeature.getAlleles().length;
+                        LOG.info("Guessed ploidy level for dataset to import: " + nPloidyLevel);
+                        break variantLoop;
                     }
-                };
-
-                importThreads[threadIndex].start();
+                nTestedVariantCount++;
             }
-
-            for (int i = 0; i < nImportThreads; i++)
-                importThreads[i].join();
-
-
-            saveService.shutdown();
-            saveService.awaitTermination(Integer.MAX_VALUE, TimeUnit.DAYS);
-
-            if (progress.getError() != null || progress.isAborted())
-                return createdProject;
-
-            // save project data
-            if (!project.getRuns().contains(sRun))
-                project.getRuns().add(sRun);
-            mongoTemplate.save(project);
-
-            LOG.info("DartSeqImport took " + (System.currentTimeMillis() - before) / 1000 + "s for " + totalProcessedVariantCount.get() + " records");
-
-            return createdProject;
+            if (nPloidyLevel == null)
+                LOG.warn("Unable to guess ploidy level for dataset to import");
         }
-        catch (Exception e) {
-            LOG.error("Error", e);
-            progress.setError(e.getMessage());
-            return createdProject;
-        }
-        finally
-        {
-            if (m_fCloseContextAfterImport && ctx != null)
-                ctx.close();
-
-            dartIterator.close();
-
-            MongoTemplateManager.unlockProjectForWriting(sModule, sProject);
-            if (progress.getError() == null && !progress.isAborted()) {
-                progress.addStep("Preparing database for searches");
-                progress.moveToNextStep();
-                MgdbDao.prepareDatabaseForSearches(sModule);
-            }
-        }
+        return nPloidyLevel;
     }
 
     /**
@@ -667,9 +570,10 @@ public class DartImport extends AbstractGenotypeImport {
             try {
 	            SampleGenotype aGT = new SampleGenotype(alleles.stream().map(allele -> alleleIndexMap.get(allele)).sorted().map(index -> index.toString()).collect(Collectors.joining("/")));
 				GenotypingSample sample = m_providedIdToSampleMap.get(sIndOrSpId);
+                CallSet callset = m_providedIdToCallsetMap.get(sIndOrSpId);
 	        	if (sample == null)
 	        		throw new Exception("Sample / individual mapping contains no individual for sample " + sIndOrSpId);
-				vrd.getSampleGenotypes().put(sample.getId(), aGT);
+				vrd.getSampleGenotypes().put(callset.getId(), aGT);
             }
             catch (NullPointerException npe) {
             	throw new Exception("Some genotypes for variant " + dartFeature.getChrom() + ":" + dartFeature.getStart() + " refer to alleles not declared at the beginning of the line!");

@@ -121,7 +121,7 @@ public class ExportManager
     
     private Long markerCount;
     
-    private Collection<Integer> sampleIDsToExport;
+    private Collection<String> sampleIDsToExport;
     
     private MongoCollection<Document> varColl;
     
@@ -183,7 +183,7 @@ public class ExportManager
         long nTotalNumberOfSamplesInDB = Helper.estimDocCount(mongoTemplate, GenotypingSample.class);
         long percentageOfExportedSamples = nTotalNumberOfSamplesInDB == 0 ? 100 : 100 * samplesToExport.size() / nTotalNumberOfSamplesInDB;
         sampleIDsToExport = samplesToExport == null ? new ArrayList<>() : samplesToExport.stream().map(sp -> sp.getId()).collect(Collectors.toList());
-        Collection<Integer> sampleIDsNotToExport = percentageOfExportedSamples >= 98 ? new ArrayList<>() /* if almost all individuals are being exported we directly omit the $project stage */ : (percentageOfExportedSamples > 50 ? mongoTemplate.findDistinct(new Query(Criteria.where("_id").not().in(sampleIDsToExport)), "_id", GenotypingSample.class, Integer.class) : null);
+        Collection<String> sampleIDsNotToExport = percentageOfExportedSamples >= 98 ? new ArrayList<>() /* if almost all individuals are being exported we directly omit the $project stage */ : (percentageOfExportedSamples > 50 ? mongoTemplate.findDistinct(new Query(Criteria.where("_id").not().in(sampleIDsToExport)), "_id", GenotypingSample.class, String.class) : null);
 
         if (variantQuery != null && !variantQuery.isEmpty())
             variantMatchStage = new BasicDBObject("$match", variantQuery);
@@ -199,7 +199,7 @@ public class ExportManager
                 projection.append(AbstractVariantData.SECTION_ADDITIONAL_INFO, 1);
         }
 
-        for (Integer spId : sampleIDsNotToExport == null ? sampleIDsToExport : sampleIDsNotToExport)
+        for (String spId : sampleIDsNotToExport == null ? sampleIDsToExport : sampleIDsNotToExport)
             projection.append(VariantRunData.FIELDNAME_SAMPLEGENOTYPES + "." + spId, sampleIDsNotToExport == null ? 1 /*include*/ : 0 /*exclude*/);
 
         if (!projection.isEmpty()) {
