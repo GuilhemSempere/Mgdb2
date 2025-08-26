@@ -183,6 +183,8 @@ public class PlinkImport extends RefactoredImport<PlinkParameters> {
         File pedFile = params.getPedFile();
         URL mapFileURL = params.getMainFileUrl();
 
+        m_fImportUnknownVariants = doesDatabaseSupportImportingUnknownVariants(sModule);
+
         progress.addStep("Scanning existing marker IDs");
         progress.moveToNextStep();
         Assembly assembly = createAssemblyIfNeeded(mongoTemplate, assemblyName);

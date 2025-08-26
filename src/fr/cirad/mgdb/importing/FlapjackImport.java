@@ -153,6 +153,8 @@ public class FlapjackImport extends RefactoredImport<FlapjackImportParameters> {
         Integer nPloidy = params.getnPloidy();
         int importMode = params.getImportMode();
 
+        m_fImportUnknownVariants = doesDatabaseSupportImportingUnknownVariants(sModule);
+
         progress.addStep("Scanning existing marker IDs");
         progress.moveToNextStep();
         Assembly assembly = createAssemblyIfNeeded(mongoTemplate, assemblyName);
