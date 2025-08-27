@@ -17,6 +17,8 @@
 package fr.cirad.mgdb.model.mongo.maintypes;
 
 import java.util.LinkedHashMap;
+import java.util.Objects;
+
 import org.springframework.data.annotation.Id;
 import org.springframework.data.annotation.Transient;
 import org.springframework.data.annotation.TypeAlias;
@@ -142,7 +144,7 @@ public class GenotypingSample {
 
     @Override
     public int hashCode() {
-        return toString().hashCode();
+        return Objects.hash(getIndividual(), getProjectId(), getRun());
     }
 
 	public String getId() {
