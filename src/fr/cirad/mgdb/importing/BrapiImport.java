@@ -393,7 +393,7 @@ public class BrapiImport extends STDVariantImport {
 		                    mongoTemplate.save(ind);
 		                }
 
-                        m_providedIdToSampleMap.put(sIndividual, new GenotypingSample(markerProfile, project.getId(), sRun, sIndividual));  // add a sample for this individual to the project
+                        m_providedIdToSampleMap.put(sIndividual, new GenotypingSample(markerProfile, sIndividual));  // add a sample for this individual to the project
 
                         int callsetId = AutoIncrementCounter.getNextSequence(mongoTemplate, MongoTemplateManager.getMongoCollectionName(CallSet.class));
                         m_providedIdToCallsetMap.put(sIndividual, new CallSet(callsetId, markerProfile, sIndividual, project.getId(), sRun));

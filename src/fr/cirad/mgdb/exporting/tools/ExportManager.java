@@ -42,6 +42,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
 
+import fr.cirad.mgdb.model.mongo.maintypes.*;
+import fr.cirad.mgdb.model.mongodao.MgdbDao;
 import org.apache.log4j.Logger;
 import org.bson.Document;
 import org.bson.codecs.configuration.CodecRegistries;
@@ -60,11 +62,6 @@ import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoCursor;
 
 import fr.cirad.mgdb.exporting.IExportHandler;
-import fr.cirad.mgdb.model.mongo.maintypes.Assembly;
-import fr.cirad.mgdb.model.mongo.maintypes.GenotypingProject;
-import fr.cirad.mgdb.model.mongo.maintypes.GenotypingSample;
-import fr.cirad.mgdb.model.mongo.maintypes.VariantData;
-import fr.cirad.mgdb.model.mongo.maintypes.VariantRunData;
 import fr.cirad.mgdb.model.mongo.subtypes.AbstractVariantData;
 import fr.cirad.mgdb.model.mongo.subtypes.ReferencePosition;
 import fr.cirad.mgdb.model.mongo.subtypes.VariantRunDataId;
@@ -74,6 +71,8 @@ import fr.cirad.tools.ProgressIndicator;
 import fr.cirad.tools.mongo.MongoTemplateManager;
 import fr.cirad.tools.query.GroupedExecutor;
 import fr.cirad.tools.query.GroupedExecutor.TaskWrapper;
+
+import javax.ejb.ObjectNotFoundException;
 
 /**
  * The class ExportManager.
@@ -147,7 +146,7 @@ public class ExportManager
 
     public static final CodecRegistry pojoCodecRegistry = CodecRegistries.fromRegistries(MongoClientSettings.getDefaultCodecRegistry(), CodecRegistries.fromProviders(PojoCodecProvider.builder().register(new IntKeyMapPropertyCodecProvider()).automatic(true).build()));
 
-	public ExportManager(String sModule, Integer nAssemblyId, MongoCollection<Document> varColl, Class resultType, Document variantQuery, Collection<GenotypingSample> samplesToExport, boolean fIncludeMetadata, int nQueryChunkSize, AbstractExportWriter exportWriter, Long markerCount, ProgressIndicator progress) {
+	public ExportManager(String sModule, Integer nAssemblyId, MongoCollection<Document> varColl, Class resultType, Document variantQuery, Collection<GenotypingSample> samplesToExport, boolean fIncludeMetadata, int nQueryChunkSize, AbstractExportWriter exportWriter, Long markerCount, ProgressIndicator progress) throws ObjectNotFoundException {
         this.progress = progress;
         this.nQueryChunkSize = nQueryChunkSize;
         this.module = sModule;
@@ -164,7 +163,8 @@ public class ExportManager
         sortStage = new BasicDBObject("$sort", new Document(refPosPath  + "." + ReferencePosition.FIELDNAME_SEQUENCE, 1).append(refPosPath + "." + ReferencePosition.FIELDNAME_START_SITE, 1));
 
         // optimization 1: filling in involvedProjectRuns will provide means to apply filtering on project and/or run fields when exporting from temporary collection
-        HashMap<Integer, List<String>> involvedProjectRuns = Helper.getRunsByProjectInSampleCollection(samplesToExport);
+        List<CallSet> callsets = MgdbDao.getCallSetsFromSamples(sModule, samplesToExport.stream().map(GenotypingSample::getId).collect(Collectors.toSet()));
+        HashMap<Integer, List<String>> involvedProjectRuns = Helper.getRunsByProjectInCallsetCollection(callsets);
         involvedRunCount = involvedProjectRuns.values().stream().mapToInt(b -> b.size()).sum();
 
         MongoTemplate mongoTemplate = MongoTemplateManager.get(module);

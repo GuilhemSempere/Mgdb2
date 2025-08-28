@@ -192,9 +192,9 @@ public class MgdbDao {
     	if (!MongoTemplateManager.isModuleAvailableForWriting(sModule)) 
     		throw new Exception("prepareDatabaseForSearches may only be called when database is unlocked");
     	
-    	// cleanup unused samples that possibly got persisted during a failed import
+    	// cleanup unused callsets that possibly got persisted during a failed import
         Collection<Integer> validProjIDs = (Collection<Integer>) mongoTemplate.getCollection(MongoTemplateManager.getMongoCollectionName(GenotypingProject.class)).distinct("_id", Integer.class).into(new ArrayList<>());
-        DeleteResult dr = mongoTemplate.remove(new Query(Criteria.where(GenotypingSample.FIELDNAME_PROJECT_ID).not().in(validProjIDs)), GenotypingSample.class);
+        DeleteResult dr = mongoTemplate.remove(new Query(Criteria.where(CallSet.FIELDNAME_PROJECT_ID).not().in(validProjIDs)), CallSet.class);
         if (dr.getDeletedCount() > 0)
             LOG.info(dr.getDeletedCount() + " unused samples were removed");
     
@@ -568,7 +568,7 @@ public class MgdbDao {
      * @return the sample genotypes
      * @throws Exception the exception
      */
-    public static LinkedHashMap<VariantData, Collection<VariantRunData>> getSampleGenotypes(MongoTemplate mongoTemplate, Collection<GenotypingSample> samples, List<String> variantIdListToRestrictTo, boolean fReturnVariantTypes, Sort sort) throws Exception {
+    public static LinkedHashMap<VariantData, Collection<VariantRunData>> getSampleGenotypes(MongoTemplate mongoTemplate, Collection<CallSet> samples, List<String> variantIdListToRestrictTo, boolean fReturnVariantTypes, Sort sort) throws Exception {
         ArrayList<String> variantFieldsToReturn = new ArrayList<String>();
         variantFieldsToReturn.add(VariantData.FIELDNAME_KNOWN_ALLELES);
         variantFieldsToReturn.add(VariantData.FIELDNAME_REFERENCE_POSITION);
@@ -577,7 +577,7 @@ public class MgdbDao {
         }
 
         HashMap<Integer /*project id*/, ArrayList<String>> projectIdToReturnedRunFieldListMap = new HashMap<Integer, ArrayList<String>>();
-        for (GenotypingSample sample : samples) {
+        for (CallSet sample : samples) {
             ArrayList<String> returnedFields = projectIdToReturnedRunFieldListMap.get(sample.getProjectId());
             if (returnedFields == null) {
                 returnedFields = new ArrayList<String>();
@@ -595,6 +595,10 @@ public class MgdbDao {
 
     public static Set<String> getProjectIndividuals(String sModule, int projId) throws ObjectNotFoundException {
         return getSamplesByIndividualForProject(sModule, projId, null).keySet();
+    }
+
+    public static Set<String> getProjectSamples(String sModule, int projId) throws ObjectNotFoundException {
+        return getCallsetsBySampleForProject(sModule, projId, null).keySet();
     }
 
     /**
@@ -619,11 +623,18 @@ public class MgdbDao {
         if (mongoTemplate == null)
             throw new ObjectNotFoundException("Database " + sModule + " does not exist");
 
-        Criteria crit = Criteria.where(GenotypingSample.FIELDNAME_PROJECT_ID).is(projId);
+        List<String> samples = mongoTemplate.findDistinct(
+                new Query().addCriteria(Criteria.where(CallSet.FIELDNAME_PROJECT_ID).is(projId)),
+                CallSet.FIELDNAME_SAMPLE,
+                CallSet.class,
+                String.class
+        );
+
+        Criteria crit = Criteria.where("_id").in(samples);
         if (individuals != null)
             crit.andOperator(Criteria.where(GenotypingSample.FIELDNAME_INDIVIDUAL).in(individuals));
         Query q = new Query(crit);
-//		q.with(new Sort(Sort.Direction.ASC, GenotypingSample.SampleId.FIELDNAME_INDIVIDUAL));
+
         for (GenotypingSample sample : mongoTemplate.find(q, GenotypingSample.class)) {
             ArrayList<GenotypingSample> individualSamples = result.get(sample.getIndividual());
             if (individualSamples == null) {
@@ -634,6 +645,7 @@ public class MgdbDao {
         }
         return result;
     }
+
 
     public static ArrayList<GenotypingSample> getSamplesForProject(final String sModule, final int projId, final Collection<String> individuals) throws ObjectNotFoundException {
         ArrayList<GenotypingSample> result = new ArrayList<>();
@@ -665,6 +677,28 @@ public class MgdbDao {
         return result;
     }
 
+    public static TreeMap<String /*sample*/, ArrayList<CallSet>> getCallsetsBySampleForProject(final String sModule, final int projId, final Collection<String> samples) throws ObjectNotFoundException {
+        TreeMap<String /*sample*/, ArrayList<CallSet>> result = new TreeMap<>();
+        MongoTemplate mongoTemplate = MongoTemplateManager.get(sModule);
+        if (mongoTemplate == null)
+            throw new ObjectNotFoundException("Database " + sModule + " does not exist");
+
+        Criteria crit = Criteria.where(CallSet.FIELDNAME_PROJECT_ID).is(projId);
+        if (samples != null)
+            crit.andOperator(Criteria.where(CallSet.FIELDNAME_SAMPLE).in(samples));
+        Query q = new Query(crit);
+//		q.with(new Sort(Sort.Direction.ASC, GenotypingSample.SampleId.FIELDNAME_INDIVIDUAL));
+        for (CallSet cs : mongoTemplate.find(q, CallSet.class)) {
+            ArrayList<CallSet> individualCallsets = result.get(cs.getIndividual());
+            if (individualCallsets == null) {
+                individualCallsets = new ArrayList<>();
+                result.put(cs.getIndividual(), individualCallsets);
+            }
+            individualCallsets.add(cs);
+        }
+        return result;
+    }
+
     public static ArrayList<CallSet> getCallsetsForProject(final String sModule, final int projId, final Collection<String> individuals) throws ObjectNotFoundException {
         ArrayList<CallSet> result = new ArrayList<>();
         for (ArrayList<CallSet> sampleList : getCallsetsByIndividualForProject(sModule, projId, individuals).values()) {
@@ -672,6 +706,30 @@ public class MgdbDao {
         }
         return result;
     }
+
+    public static List<String> getProjectRunsFromSamples(final String sModule, final int projId, final Collection<String> samples) throws ObjectNotFoundException {
+        MongoTemplate mongoTemplate = MongoTemplateManager.get(sModule);
+
+        Criteria crit = Criteria.where(CallSet.FIELDNAME_PROJECT_ID).is(projId);
+        if (samples != null)
+            crit.andOperator(Criteria.where(CallSet.FIELDNAME_SAMPLE).in(samples));
+        return mongoTemplate.findDistinct(
+                new Query(crit),
+                CallSet.FIELDNAME_RUN,
+                CallSet.class,
+                String.class
+        );
+    }
+
+    public static List<CallSet> getCallSetsFromSamples(final String sModule, final Collection<String> samples) throws ObjectNotFoundException {
+        MongoTemplate mongoTemplate = MongoTemplateManager.get(sModule);
+        List<CallSet> result = mongoTemplate.find(
+                    new Query(Criteria.where(CallSet.FIELDNAME_SAMPLE).in(samples)),
+                    CallSet.class
+                );
+        return result;
+    }
+
     
     public static Map<String /*sample name*/, GenotypingSample> getSamplesByIDs(final String sModule, final Collection<Integer> sampleIDs, boolean detachSamplesFromIndividuals) {
         Map<String, GenotypingSample> map = new HashMap<>();
@@ -741,8 +799,10 @@ public class MgdbDao {
         MongoTemplate mongoTemplate = MongoTemplateManager.get(module);
         List<Criteria> crits = new ArrayList<>();
         
-        if (indIDs == null && Helper.estimDocCount(mongoTemplate, GenotypingProject.class) != 1)	// if no list of individuals is provided we may select them by project
-            indIDs = mongoTemplate.findDistinct(projIDs == null || projIDs.isEmpty() ? new Query() : new Query(Criteria.where(GenotypingSample.FIELDNAME_PROJECT_ID).in(projIDs)), GenotypingSample.FIELDNAME_INDIVIDUAL, GenotypingSample.class, String.class);
+        if (indIDs == null && Helper.estimDocCount(mongoTemplate, CallSet.class) != 1) {// if no list of individuals is provided we may select them by project
+            List<String> sampleIds = mongoTemplate.findDistinct(projIDs == null || projIDs.isEmpty() ? new Query() : new Query(Criteria.where(CallSet.FIELDNAME_PROJECT_ID).in(projIDs)), CallSet.FIELDNAME_SAMPLE, CallSet.class, String.class);
+            indIDs = mongoTemplate.findDistinct(projIDs == null || projIDs.isEmpty() ? new Query() : new Query(Criteria.where("_id").in(sampleIds)), GenotypingSample.FIELDNAME_INDIVIDUAL, GenotypingSample.class, String.class);
+        }
         if (indIDs != null)
         	crits.add(Criteria.where("_id").in(indIDs));
  
@@ -834,7 +894,7 @@ public class MgdbDao {
 
         // build the initial list of Sample objects
         if (spIDs == null)
-            spIDs = mongoTemplate.findDistinct(projIDs == null || projIDs.isEmpty() ? new Query() : new Query(Criteria.where(GenotypingSample.FIELDNAME_PROJECT_ID).in(projIDs)), "_id", GenotypingSample.class, String.class);
+            spIDs = mongoTemplate.findDistinct(projIDs == null || projIDs.isEmpty() ? new Query() : new Query(Criteria.where(CallSet.FIELDNAME_PROJECT_ID).in(projIDs)), CallSet.FIELDNAME_SAMPLE, CallSet.class, String.class);
 
         List<Criteria> crits = new ArrayList<>();
        	crits.add(Criteria.where("_id").in(spIDs));
@@ -934,13 +994,17 @@ public class MgdbDao {
         Query query = new Query();
         query.fields().include("_id");
         Collection<String> individualsInThisProject = null, individualsInOtherProjects = new ArrayList<>();
+        Collection<String> samplesInThisProject = null, samplesInOtherProjects = new ArrayList<>();
         int nProjCount = 0;
         for (GenotypingProject proj : mongoTemplate.find(query, GenotypingProject.class)) {
             nProjCount++;
-            if (proj.getId() == nProjectId)
+            if (proj.getId() == nProjectId) {
                 individualsInThisProject = MgdbDao.getProjectIndividuals(sModule, proj.getId());
-            else
+                samplesInThisProject = MgdbDao.getProjectSamples(sModule, proj.getId());
+            } else {
                 individualsInOtherProjects.addAll(MgdbDao.getProjectIndividuals(sModule, proj.getId()));
+                individualsInOtherProjects.addAll(MgdbDao.getProjectSamples(sModule, proj.getId()));
+            }
         }
         if (nProjCount == 1 && !individualsInThisProject.isEmpty()) {
             mongoTemplate.getDb().drop();
@@ -948,10 +1012,17 @@ public class MgdbDao {
             return true;
         }
 
-        long nRemovedSampleCount = mongoTemplate.remove(new Query(Criteria.where(GenotypingSample.FIELDNAME_PROJECT_ID).is(nProjectId)), GenotypingSample.class).getDeletedCount();
-        if (nRemovedSampleCount > 0) {
-	        LOG.info("Removed " + nRemovedSampleCount + " samples for project " + nProjectId);
+        long nRemovedCallsetsCount = mongoTemplate.remove(new Query(Criteria.where(CallSet.FIELDNAME_PROJECT_ID).is(nProjectId)), CallSet.class).getDeletedCount();
+        if (nRemovedCallsetsCount > 0) {
+	        LOG.info("Removed " + nRemovedCallsetsCount + " callsets for project " + nProjectId);
 	        fAnythingRemoved.set(true);
+        }
+
+        Collection<String> samplesToRemove = CollectionUtils.disjunction(samplesInThisProject, CollectionUtils.intersection(samplesInThisProject, samplesInOtherProjects));
+        long nRemovedSampleCount = mongoTemplate.remove(new Query(Criteria.where("_id").is(samplesToRemove)), GenotypingSample.class).getDeletedCount();
+        if (nRemovedSampleCount > 0) {
+            LOG.info("Removed " + nRemovedSampleCount + " samples for project " + nProjectId);
+            fAnythingRemoved.set(true);
         }
 
         Collection<String> individualsToRemove = CollectionUtils.disjunction(individualsInThisProject, CollectionUtils.intersection(individualsInThisProject, individualsInOtherProjects));
@@ -1031,9 +1102,16 @@ public class MgdbDao {
     public static boolean removeRunAndRelatedRecords(String sModule, int nProjectId, String sRun) throws Exception {
     	AtomicBoolean fAnythingRemoved = new AtomicBoolean(false);
         MongoTemplate mongoTemplate = MongoTemplateManager.get(sModule);
-        long nRemovedSampleCount = mongoTemplate.remove(new Query(new Criteria().andOperator(Criteria.where(GenotypingSample.FIELDNAME_PROJECT_ID).is(nProjectId), Criteria.where(GenotypingSample.FIELDNAME_RUN).is(sRun))), GenotypingSample.class).getDeletedCount();
+        long nRemovedCallsetCount = mongoTemplate.remove(new Query(new Criteria().andOperator(Criteria.where(CallSet.FIELDNAME_PROJECT_ID).is(nProjectId), Criteria.where(CallSet.FIELDNAME_RUN).is(sRun))), CallSet.class).getDeletedCount();
+        if (nRemovedCallsetCount > 0) {
+            LOG.info("Removed " + nRemovedCallsetCount + " callsets for project " + nProjectId + " of module " + sModule);
+            fAnythingRemoved.set(true);
+        }
+
+        Collection<String> samplesWithCallsets = mongoTemplate.findDistinct(new Query(), CallSet.FIELDNAME_SAMPLE,  CallSet.class, String.class);
+        long nRemovedSampleCount = mongoTemplate.remove(new Query(Criteria.where("_id").not().in(samplesWithCallsets)), GenotypingSample.class).getDeletedCount();
         if (nRemovedSampleCount > 0) {
-            LOG.info("Removed " + nRemovedSampleCount + " samples for project " + nProjectId + " of module " + sModule);
+            LOG.info("Removed " + nRemovedSampleCount + " samples from project " + nProjectId + " of module " + sModule);
             fAnythingRemoved.set(true);
         }
 

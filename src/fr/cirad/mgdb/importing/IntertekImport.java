@@ -326,7 +326,7 @@ public class IntertekImport extends AbstractGenotypeImport<FileImportParameters>
                             String sampleId = sampleToIndividualMap == null ? sIndividual + "-" + project.getId() + "-" + sRun : sIndOrSpId;
                             sample = mongoTemplate.findById(sampleId, GenotypingSample.class);
                             if (sample == null) {
-                                sample = new GenotypingSample(sampleId, project.getId(), sRun, sIndividual);
+                                sample = new GenotypingSample(sampleId, sIndividual);
                                 sample.getAdditionalInfo().put("masterPlate", masterPlate);
                                 samplesToCreate.add(sample);
                             }

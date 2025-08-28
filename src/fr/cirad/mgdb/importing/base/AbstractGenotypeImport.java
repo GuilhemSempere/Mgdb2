@@ -568,7 +568,7 @@ public abstract class AbstractGenotypeImport<T extends ImportParameters> {
             String sampleId = sampleToIndividualMap == null ? sIndividual + "-" + projId + "-" + sRun : sIndOrSpId;
             GenotypingSample sample = fDbAlreadyContainedSamples ? mongoTemplate.findById(sampleId, GenotypingSample.class) : null;
             if (sample == null) {
-                sample = new GenotypingSample(sampleId, projId, sRun, sIndividual);
+                sample = new GenotypingSample(sampleId, sIndividual);
                 samplesToAdd.add(sample);
             }
             m_providedIdToSampleMap.put(sIndOrSpId, sample);  // add a sample for this individual to the project

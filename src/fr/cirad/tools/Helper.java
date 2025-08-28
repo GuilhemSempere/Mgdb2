@@ -35,6 +35,7 @@ import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
+import fr.cirad.mgdb.model.mongo.maintypes.CallSet;
 import org.apache.commons.lang.StringUtils;
 import org.apache.log4j.Logger;
 import org.bson.Document;
@@ -48,7 +49,6 @@ import com.mongodb.client.MongoCursor;
 
 import fr.cirad.mgdb.exporting.IExportHandler;
 import fr.cirad.mgdb.model.mongo.maintypes.Assembly;
-import fr.cirad.mgdb.model.mongo.maintypes.GenotypingSample;
 import fr.cirad.mgdb.model.mongo.maintypes.VariantData;
 import fr.cirad.mgdb.model.mongo.subtypes.ReferencePosition;
 import fr.cirad.mgdb.model.mongo.subtypes.Run;
@@ -383,7 +383,7 @@ public class Helper {
         return t -> map.putIfAbsent(keyExtractor.apply(t), Boolean.TRUE) == null;
     }
 
-    public static HashMap<Integer /*project*/, List<String /*runs*/>> getRunsByProjectInSampleCollection(Collection<GenotypingSample> samples) {
+    public static HashMap<Integer /*project*/, List<String /*runs*/>> getRunsByProjectInCallsetCollection(Collection<CallSet> samples) {
 		HashMap<Integer, List<String>> runsByProject = new HashMap<>();
 		for (String projectAndRun : samples.stream().map(sp -> sp.getProjectId() + ID_SEPARATOR + sp.getRun()).distinct().collect(Collectors.toList())) {
 			String[] separateIDs = projectAndRun.split(ID_SEPARATOR);

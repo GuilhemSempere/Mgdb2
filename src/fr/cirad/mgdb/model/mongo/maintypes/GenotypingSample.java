@@ -33,8 +33,6 @@ import org.springframework.data.mongodb.core.mapping.Field;
 public class GenotypingSample {
 
 	public final static String FIELDNAME_INDIVIDUAL = "in";
-	public final static String FIELDNAME_PROJECT_ID = "pj";
-	public final static String FIELDNAME_RUN = "rn";
     public final static String SECTION_ADDITIONAL_INFO = "ai";
 
 	/** The sample id. */
@@ -44,14 +42,6 @@ public class GenotypingSample {
 	/** The individual. */
 	@Field(FIELDNAME_INDIVIDUAL)
 	private String individual;
-
-	/** The projectId. */
-	@Field(FIELDNAME_PROJECT_ID)
-	private int projectId;
-
-	/** The run. */
-	@Field(FIELDNAME_RUN)
-	private String run;
 
 	@Transient
 	private boolean detached = false;
@@ -66,32 +56,12 @@ public class GenotypingSample {
 	 * Instantiates a new GenotypingSample.
 	 *
 	 * @param sampleId the sample id
-	 * @param projectId the project id
-	 * @param run the run name
 	 * @param individual the individual
 	 */
-	public GenotypingSample(String sampleId, int projectId, String run, String individual) {
+	public GenotypingSample(String sampleId, String individual) {
 		this.id = sampleId;
-		this.projectId = projectId;
-		this.run = run;
 		this.individual = individual;
 	}
-
-	public Integer getProjectId() {
-		return projectId;
-	}
-
-//	public void setProjectId(Integer projectId) {
-//		this.projectId = projectId;
-//	}
-
-	public String getRun() {
-		return run;
-	}
-
-//	public void setRun(String run) {
-//		this.run = run;
-//	}
 
 	public String getIndividual() {
 		return detached ? getId().toString() : individual;
@@ -134,17 +104,20 @@ public class GenotypingSample {
 			return false;
 		
 		boolean f1 = getIndividual() == ((GenotypingSample) o).getIndividual() || (getIndividual() != null && getIndividual().equals(((GenotypingSample) o).getIndividual()));
-		boolean f2 = getProjectId() == ((GenotypingSample) o).getProjectId() || (getProjectId() != null && getProjectId().equals(((GenotypingSample) o).getProjectId()));
-		boolean f3 = getRun() == ((GenotypingSample) o).getRun() || (getRun() != null && getRun().equals(((GenotypingSample) o).getRun()));
-		return f1 && f2 && f3;
+        return f1;
 	}
 
     public GenotypingSample() {
     }
 
     @Override
+    public String toString() {
+        return id;
+    }
+
+    @Override
     public int hashCode() {
-        return Objects.hash(getIndividual(), getProjectId(), getRun());
+        return toString().hashCode();
     }
 
 	public String getId() {
