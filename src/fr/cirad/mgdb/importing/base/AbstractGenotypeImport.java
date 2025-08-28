@@ -571,7 +571,7 @@ public abstract class AbstractGenotypeImport<T extends ImportParameters> {
                 sample = new GenotypingSample(sampleId, projId, sRun, sIndividual);
                 samplesToAdd.add(sample);
             }
-            m_providedIdToSampleMap.put(sIndOrSpId, new GenotypingSample(sampleId, projId, sRun, sIndividual));  // add a sample for this individual to the project
+            m_providedIdToSampleMap.put(sIndOrSpId, sample);  // add a sample for this individual to the project
             int callsetId = AutoIncrementCounter.getNextSequence(mongoTemplate, MongoTemplateManager.getMongoCollectionName(CallSet.class));
             m_providedIdToCallsetMap.put(sIndOrSpId, new CallSet(callsetId, sampleId, sIndividual, projId, sRun));
         }
@@ -593,14 +593,9 @@ public abstract class AbstractGenotypeImport<T extends ImportParameters> {
         callsetImportThread.start();
 
         // Samples import
-        Thread sampleImportThread = new Thread() {
-            public void run() {
-                List<GenotypingSample> samplesToImport = new ArrayList<>(samplesToAdd);
-                for (int j=0; j<Math.ceil((float) m_providedIdToSampleMap.size() / importChunkSize); j++)
-                    mongoTemplate.insert(samplesToImport.subList(j * importChunkSize, Math.min(samplesToImport.size(), (j + 1) * importChunkSize)), GenotypingSample.class);
-            }
-        };
-        sampleImportThread.start();
+        List<GenotypingSample> samplesToImport = new ArrayList<>(samplesToAdd);
+        for (int j=0; j<Math.ceil((float) samplesToAdd.size() / importChunkSize); j++)
+            mongoTemplate.insert(samplesToImport.subList(j * importChunkSize, Math.min(samplesToImport.size(), (j + 1) * importChunkSize)), GenotypingSample.class);
 
         // Individuals import
         List<Individual> individualsToImport = new ArrayList<>(indsToAdd);

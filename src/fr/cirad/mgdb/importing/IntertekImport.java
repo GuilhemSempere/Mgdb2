@@ -191,6 +191,9 @@ public class IntertekImport extends AbstractGenotypeImport<FileImportParameters>
             assemblyIDs.add(null);	// old-style, assembly-less DB
 
 
+        Set<Individual> indsToCreate = new HashSet<>();
+        Set<GenotypingSample> samplesToCreate = new HashSet<>();
+
         // Reading csv file
         // Getting alleleX and alleleY for each SNP by reading lines between lines {"SNPID","SNPNum","AlleleY","AlleleX","Sequence"} and {"Scaling"};
         // Then getting genotypes for each individual by reading lines after line {"DaughterPlate","MasterPlate","MasterWell","Call","X","Y","SNPID","SubjectID","Norm","Carrier","DaughterWell","LongID"}
@@ -277,11 +280,16 @@ public class IntertekImport extends AbstractGenotypeImport<FileImportParameters>
                                 if (sample == null) {
                                     Individual ind = mongoTemplate.findById(sIndividual, Individual.class);
                                     if (ind == null)
-                                        mongoTemplate.save(new Individual(sIndividual));
+                                        indsToCreate.add(new Individual(sIndividual));
+                                        //mongoTemplate.save(new Individual(sIndividual));
 
-                                    String sampleId = sampleToIndividualMap == null ? sIndividual : sIndOrSpId;
-                                    sample = new GenotypingSample(sampleId, project.getId(), sRun, sIndividual);
-                                    sample.getAdditionalInfo().put("masterPlate", masterPlate);
+                                    String sampleId = sampleToIndividualMap == null ? sIndividual + "-" + project.getId() + "-" + sRun : sIndOrSpId;
+                                    sample = mongoTemplate.findById(sampleId, GenotypingSample.class);
+                                    if (sample == null) {
+                                        sample = new GenotypingSample(sampleId, project.getId(), sRun, sIndividual);
+                                        sample.getAdditionalInfo().put("masterPlate", masterPlate);
+                                        samplesToCreate.add(sample);
+                                    }
                                     m_providedIdToSampleMap.put(sIndOrSpId, sample);
 
                                     int callsetId = AutoIncrementCounter.getNextSequence(mongoTemplate, MongoTemplateManager.getMongoCollectionName(CallSet.class));
@@ -305,7 +313,7 @@ public class IntertekImport extends AbstractGenotypeImport<FileImportParameters>
             }
         }
 
-        mongoTemplate.insert(m_providedIdToSampleMap.values(), GenotypingSample.class);
+        insertNewCallSetsSamplesIndividuals(mongoTemplate, indsToCreate, samplesToCreate);
         setSamplesPersisted(true);
 
         VCFFormatHeaderLine headerLineGT = new VCFFormatHeaderLine("GT", 1, VCFHeaderLineType.String, "Genotype");
@@ -372,13 +380,8 @@ public class IntertekImport extends AbstractGenotypeImport<FileImportParameters>
         if (!variantsChunk.isEmpty())
             persistVariantsAndGenotypes(!existingVariantIDs.isEmpty(), mongoTemplate, variantsChunk, variantRunsChunk);
 
-//        // Store the project
-//        if (!project.getRuns().contains(sRun))
-//            project.getRuns().add(sRun);
-//        if (createdProject == null)
-//            mongoTemplate.save(project);
-//        else
-//            mongoTemplate.insert(project);
+        saveService.shutdown();
+        saveService.awaitTermination(Integer.MAX_VALUE, TimeUnit.DAYS);
 
         return count;
     }
