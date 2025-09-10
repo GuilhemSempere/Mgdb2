@@ -717,10 +717,10 @@ public class MgdbDao {
     /**
      * @param module the database name (mandatory)
      * @param sCurrentUser username for whom to get custom metadata (optional)
-     * @param projIDs a list of project IDs (optional)
-     * @param indIDs a list of individual IDs (optional), has priority over projIDs
+     * @param projIDs a collection of project IDs (optional)
+     * @param indIDs a collection of individual IDs (optional), has priority over projIDs
      * @param filters the filters to apply (optional)
-     * @return Individual IDs mapped to Individual objects with static metada +
+     * @return Individual IDs mapped to Individual objects with static metadata +
      * custom metadata (if available). If indIDs is specified the list is
      * restricted by it, otherwise if projIDs is specified the list is
      * restricted by it, otherwise all database Individuals are returned
@@ -1105,14 +1105,14 @@ public class MgdbDao {
     /**
      * @param module the database name (mandatory)
      * @param sCurrentUser username for whom to get custom metadata (optional)
-     * @param projID a project ID (optional)
+     * @param projIDs a collection of project IDs (optional)
      * @param indIDs a list of individual IDs (optional)
      * @return LinkedHashMap which contains all different metadata of the project
      */
-    public LinkedHashMap<String, Set<String>> distinctIndividualMetadata(String module, String sCurrentUser, Integer projID, Collection<String> indIDs) {
+    public LinkedHashMap<String, Set<String>> distinctIndividualMetadata(String module, String sCurrentUser, Collection<Integer> projIDs, Collection<String> indIDs) {
         LinkedHashMap<String, Set<String>> result = new LinkedHashMap<>();	// this one will be sorted according to the provided list
         HashSet<String> wrongFormatFields = new HashSet<>();
-        MgdbDao.getInstance().loadIndividualsWithAllMetadata(module, sCurrentUser, Arrays.asList(projID), indIDs, null).values().stream().filter(ind -> ind.getAdditionalInfo() != null).map(ind -> {
+        MgdbDao.getInstance().loadIndividualsWithAllMetadata(module, sCurrentUser, projIDs, indIDs, null).values().stream().filter(ind -> ind.getAdditionalInfo() != null).map(ind -> {
         	for (String fieldName : ind.getAdditionalInfo().keySet()) {
         		Object val = ind.getAdditionalInfo().get(fieldName);
         		if (val instanceof String)
