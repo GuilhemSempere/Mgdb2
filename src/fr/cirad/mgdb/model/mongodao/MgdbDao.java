@@ -699,7 +699,15 @@ public class MgdbDao {
         return result;
     }
 
-    public static ArrayList<CallSet> getCallsetsForProject(final String sModule, final int projId, final Collection<String> individuals) throws ObjectNotFoundException {
+    public static ArrayList<CallSet> getCallsetsForProjectAndSamples(final String sModule, final int projId, final Collection<String> samples) throws ObjectNotFoundException {
+        ArrayList<CallSet> result = new ArrayList<>();
+        for (ArrayList<CallSet> sampleList : getCallsetsBySampleForProject(sModule, projId, samples).values()) {
+            result.addAll(sampleList);
+        }
+        return result;
+    }
+
+    public static ArrayList<CallSet> getCallsetsForProjectAndIndividuals(final String sModule, final int projId, final Collection<String> individuals) throws ObjectNotFoundException {
         ArrayList<CallSet> result = new ArrayList<>();
         for (ArrayList<CallSet> sampleList : getCallsetsByIndividualForProject(sModule, projId, individuals).values()) {
             result.addAll(sampleList);
