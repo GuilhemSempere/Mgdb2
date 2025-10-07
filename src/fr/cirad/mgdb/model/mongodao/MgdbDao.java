@@ -243,10 +243,15 @@ public class MgdbDao {
             throw new Exception("An error occured while preparing database for searches, please check server logs");
     }
     
-    static public List<String> getVariantTypes(MongoTemplate mongoTemplate, Integer projId) {
+    // kept for backwards compatibility
+//    static public List<String> getVariantTypes(MongoTemplate mongoTemplate, Integer projId) {
+//    	return getVariantTypes(mongoTemplate, Arrays.asList(projId));
+//    }
+
+    static public List<String> getVariantTypes(MongoTemplate mongoTemplate, Collection<Integer> projIDs) {
         Query q = new Query();
-        if (projId != null)
-        	q.addCriteria(Criteria.where("_id").is(projId));
+        if (projIDs != null)
+        	q.addCriteria(Criteria.where("_id").in(projIDs));
         List<String> res = mongoTemplate.findDistinct(q, GenotypingProject.FIELDNAME_VARIANT_TYPES, GenotypingProject.class, String.class);
         return res;
     }
@@ -323,10 +328,10 @@ public class MgdbDao {
      */
     public static int ensurePositionIndexes(MongoTemplate mongoTemplate, Collection<MongoCollection<Document>> varColls, boolean fEvenIfCollectionIsEmpty, boolean fWaitForCompletion) throws InterruptedException {
         int nResult = 0;
-        
+
         List<String> variantTypes = getVariantTypes(mongoTemplate, null);
         boolean fOnlySNPsInDB = variantTypes.size() == 1 && Type.SNP.toString().equals(variantTypes.iterator().next());
-        	
+
         List<Assembly> assemblies = mongoTemplate.findAll(Assembly.class);
         List<Integer> asmIDs = !assemblies.isEmpty() ? assemblies.stream().map(asm -> asm.getId()).collect(Collectors.toList()) : new ArrayList() {{ add(null); }};
         for (Integer assemblyId : asmIDs) {
@@ -593,12 +598,12 @@ public class MgdbDao {
         return result;
     }
 
-    public static Set<String> getProjectIndividuals(String sModule, int projId) throws ObjectNotFoundException {
-        return getSamplesByIndividualForProject(sModule, projId, null).keySet();
+    public static Set<String> getProjectIndividuals(String sModule, Collection<Integer> projIDs) throws ObjectNotFoundException {
+        return getSamplesByIndividualForProjects(sModule, projIDs, null).keySet();
     }
 
-    public static Set<String> getProjectSamples(String sModule, int projId) throws ObjectNotFoundException {
-        return getCallsetsBySampleForProject(sModule, projId, null).keySet();
+    public static Set<String> getProjectSamples(String sModule, Collection<Integer> projIDs) throws ObjectNotFoundException {
+        return getCallsetsBySampleForProject(sModule, projIDs, null).keySet();
     }
 
     /**
@@ -617,17 +622,21 @@ public class MgdbDao {
         return result;
     }
 
-    public static TreeMap<String /*individual*/, ArrayList<GenotypingSample>> getSamplesByIndividualForProject(final String sModule, final int projId, final Collection<String> individuals) throws ObjectNotFoundException {
+    public static TreeMap<String /*individual*/, ArrayList<GenotypingSample>> getSamplesByIndividualForProject(final String sModule, final Collection<Integer> projIDs, final Collection<String> individuals) throws ObjectNotFoundException {
+    	return getSamplesByIndividualForProjects(sModule, projIDs, individuals);
+    }
+    
+    public static TreeMap<String /*individual*/, ArrayList<GenotypingSample>> getSamplesByIndividualForProjects(final String sModule, final Collection<Integer> projIDs, final Collection<String> individuals) throws ObjectNotFoundException {
         TreeMap<String /*individual*/, ArrayList<GenotypingSample>> result = new TreeMap<>();
         MongoTemplate mongoTemplate = MongoTemplateManager.get(sModule);
         if (mongoTemplate == null)
             throw new ObjectNotFoundException("Database " + sModule + " does not exist");
 
         List<String> samples = mongoTemplate.findDistinct(
-                new Query().addCriteria(Criteria.where(CallSet.FIELDNAME_PROJECT_ID).is(projId)),
-                CallSet.FIELDNAME_SAMPLE,
-                CallSet.class,
-                String.class
+            new Query().addCriteria(Criteria.where(CallSet.FIELDNAME_PROJECT_ID).in(projIDs)),
+            CallSet.FIELDNAME_SAMPLE,
+            CallSet.class,
+            String.class
         );
 
         Criteria crit = Criteria.where("_id").in(samples);
@@ -647,21 +656,25 @@ public class MgdbDao {
     }
 
 
-    public static ArrayList<GenotypingSample> getSamplesForProject(final String sModule, final int projId, final Collection<String> individuals) throws ObjectNotFoundException {
+//    public static ArrayList<GenotypingSample> getSamplesForProject(final String sModule, final Collection<Integer> projIDs, final Collection<String> individuals) throws ObjectNotFoundException {
+//    	return getSamplesForProjects(sModule, projIDs, individuals);
+//    }
+    
+    public static ArrayList<GenotypingSample> getSamplesForProjects(final String sModule, final Collection<Integer> projIDs, final Collection<String> individuals) throws ObjectNotFoundException {
         ArrayList<GenotypingSample> result = new ArrayList<>();
-        for (ArrayList<GenotypingSample> sampleList : getSamplesByIndividualForProject(sModule, projId, individuals).values()) {
+        for (ArrayList<GenotypingSample> sampleList : getSamplesByIndividualForProjects(sModule, projIDs, individuals).values()) {
             result.addAll(sampleList);
         }
         return result;
     }
 
-    public static TreeMap<String /*individual*/, ArrayList<CallSet>> getCallsetsByIndividualForProject(final String sModule, final int projId, final Collection<String> individuals) throws ObjectNotFoundException {
+    public static TreeMap<String /*individual*/, ArrayList<CallSet>> getCallsetsByIndividualForProject(final String sModule, final Collection<Integer> projIDs, final Collection<String> individuals) throws ObjectNotFoundException {
         TreeMap<String /*individual*/, ArrayList<CallSet>> result = new TreeMap<>();
         MongoTemplate mongoTemplate = MongoTemplateManager.get(sModule);
         if (mongoTemplate == null)
             throw new ObjectNotFoundException("Database " + sModule + " does not exist");
 
-        Criteria crit = Criteria.where(CallSet.FIELDNAME_PROJECT_ID).is(projId);
+        Criteria crit = Criteria.where(CallSet.FIELDNAME_PROJECT_ID).in(projIDs);
         if (individuals != null)
             crit.andOperator(Criteria.where(CallSet.FIELDNAME_INDIVIDUAL).in(individuals));
         Query q = new Query(crit);
@@ -677,15 +690,15 @@ public class MgdbDao {
         return result;
     }
 
-    public static TreeMap<String /*sample*/, ArrayList<CallSet>> getCallsetsBySampleForProject(final String sModule, final int projId, final Collection<String> samples) throws ObjectNotFoundException {
+    public static TreeMap<String /*sample*/, ArrayList<CallSet>> getCallsetsBySampleForProject(final String sModule, final Collection<Integer> projIDs, final Collection<String> sampleIDs) throws ObjectNotFoundException {
         TreeMap<String /*sample*/, ArrayList<CallSet>> result = new TreeMap<>();
         MongoTemplate mongoTemplate = MongoTemplateManager.get(sModule);
         if (mongoTemplate == null)
             throw new ObjectNotFoundException("Database " + sModule + " does not exist");
 
-        Criteria crit = Criteria.where(CallSet.FIELDNAME_PROJECT_ID).is(projId);
-        if (samples != null)
-            crit.andOperator(Criteria.where(CallSet.FIELDNAME_SAMPLE).in(samples));
+        Criteria crit = Criteria.where(CallSet.FIELDNAME_PROJECT_ID).in(projIDs);
+        if (sampleIDs != null)
+            crit.andOperator(Criteria.where(CallSet.FIELDNAME_SAMPLE).in(sampleIDs));
         Query q = new Query(crit);
 //		q.with(new Sort(Sort.Direction.ASC, GenotypingSample.SampleId.FIELDNAME_INDIVIDUAL));
         for (CallSet cs : mongoTemplate.find(q, CallSet.class)) {
@@ -699,26 +712,26 @@ public class MgdbDao {
         return result;
     }
 
-    public static ArrayList<CallSet> getCallsetsForProjectAndSamples(final String sModule, final int projId, final Collection<String> samples) throws ObjectNotFoundException {
+    public static ArrayList<CallSet> getCallsetsForProjectAndSamples(final String sModule, final Collection<Integer> projIDs, final Collection<String> samples) throws ObjectNotFoundException {
         ArrayList<CallSet> result = new ArrayList<>();
-        for (ArrayList<CallSet> sampleList : getCallsetsBySampleForProject(sModule, projId, samples).values()) {
+        for (ArrayList<CallSet> sampleList : getCallsetsBySampleForProject(sModule, projIDs, samples).values()) {
             result.addAll(sampleList);
         }
         return result;
     }
 
-    public static ArrayList<CallSet> getCallsetsForProjectAndIndividuals(final String sModule, final int projId, final Collection<String> individuals) throws ObjectNotFoundException {
+    public static ArrayList<CallSet> getCallsetsForProjectAndIndividuals(final String sModule, final Collection<Integer> projIDs, final Collection<String> individuals) throws ObjectNotFoundException {
         ArrayList<CallSet> result = new ArrayList<>();
-        for (ArrayList<CallSet> sampleList : getCallsetsByIndividualForProject(sModule, projId, individuals).values()) {
+        for (ArrayList<CallSet> sampleList : getCallsetsByIndividualForProject(sModule, projIDs, individuals).values()) {
             result.addAll(sampleList);
         }
         return result;
     }
 
-    public static List<String> getProjectRunsFromSamples(final String sModule, final int projId, final Collection<String> samples) throws ObjectNotFoundException {
+    public static List<String> getProjectRunsFromSamples(final String sModule, final Collection<Integer> projIDs, final Collection<String> samples) throws ObjectNotFoundException {
         MongoTemplate mongoTemplate = MongoTemplateManager.get(sModule);
 
-        Criteria crit = Criteria.where(CallSet.FIELDNAME_PROJECT_ID).is(projId);
+        Criteria crit = Criteria.where(CallSet.FIELDNAME_PROJECT_ID).in(projIDs);
         if (samples != null)
             crit.andOperator(Criteria.where(CallSet.FIELDNAME_SAMPLE).in(samples));
         return mongoTemplate.findDistinct(
@@ -771,12 +784,12 @@ public class MgdbDao {
         return MongoTemplateManager.get(sModule).find(query, Individual.class).stream().collect(Collectors.toMap(ind -> ind.getId(), ind -> metadataFielToUseAsPop == null ? ind.getPopulation() : ind.getAdditionalInfo().values().toArray()[0].toString()));            
     }
 
-    public static TreeSet<String> getAnnotationFields(MongoTemplate mongoTemplate, int projId, boolean fOnlySearchableFields) {
+    public static TreeSet<String> getAnnotationFields(MongoTemplate mongoTemplate, Collection<Integer> projIDs, boolean fOnlySearchableFields) {
         TreeSet<String> result = new TreeSet<>();
 
         // we can't use Spring queries here (leads to "Failed to instantiate htsjdk.variant.vcf.VCFInfoHeaderLine using constructor NO_CONSTRUCTOR with arguments")
         MongoCollection<org.bson.Document> vcfHeaderColl = mongoTemplate.getCollection(MongoTemplateManager.getMongoCollectionName(DBVCFHeader.class));
-        Document vcfHeaderQuery = new Document("_id." + VcfHeaderId.FIELDNAME_PROJECT, projId);
+        Document vcfHeaderQuery = new Document("_id." + VcfHeaderId.FIELDNAME_PROJECT, new Document("$in", projIDs));
         MongoCursor<Document> headerCursor = vcfHeaderColl.find(vcfHeaderQuery).iterator();
 
         while (headerCursor.hasNext()) {
@@ -795,10 +808,10 @@ public class MgdbDao {
     /**
      * @param module the database name (mandatory)
      * @param sCurrentUser username for whom to get custom metadata (optional)
-     * @param projIDs a list of project IDs (optional)
-     * @param indIDs a list of individual IDs (optional), has priority over projIDs
+     * @param projIDs a collection of project IDs (optional)
+     * @param indIDs a collection of individual IDs (optional), has priority over projIDs
      * @param filters the filters to apply (optional)
-     * @return Individual IDs mapped to Individual objects with static metada +
+     * @return Individual IDs mapped to Individual objects with static metadata +
      * custom metadata (if available). If indIDs is specified the list is
      * restricted by it, otherwise if projIDs is specified the list is
      * restricted by it, otherwise all database Individuals are returned
@@ -997,6 +1010,7 @@ public class MgdbDao {
     }
 
     public static boolean removeProjectAndRelatedRecords(String sModule, int nProjectId) throws Exception {
+    	// FIXME: test me
     	AtomicBoolean fAnythingRemoved = new AtomicBoolean(false);
         MongoTemplate mongoTemplate = MongoTemplateManager.get(sModule);
         Query query = new Query();
@@ -1006,12 +1020,13 @@ public class MgdbDao {
         int nProjCount = 0;
         for (GenotypingProject proj : mongoTemplate.find(query, GenotypingProject.class)) {
             nProjCount++;
+            List<Integer> projIdAsList = Arrays.asList(proj.getId());
             if (proj.getId() == nProjectId) {
-                individualsInThisProject = MgdbDao.getProjectIndividuals(sModule, proj.getId());
-                samplesInThisProject = MgdbDao.getProjectSamples(sModule, proj.getId());
+                individualsInThisProject = MgdbDao.getProjectIndividuals(sModule, projIdAsList);
+                samplesInThisProject = MgdbDao.getProjectSamples(sModule, projIdAsList);
             } else {
-                individualsInOtherProjects.addAll(MgdbDao.getProjectIndividuals(sModule, proj.getId()));
-                individualsInOtherProjects.addAll(MgdbDao.getProjectSamples(sModule, proj.getId()));
+                individualsInOtherProjects.addAll(MgdbDao.getProjectIndividuals(sModule, projIdAsList));
+                individualsInOtherProjects.addAll(MgdbDao.getProjectSamples(sModule, projIdAsList));
             }
         }
         if (nProjCount == 1 && !individualsInThisProject.isEmpty()) {
@@ -1214,14 +1229,14 @@ public class MgdbDao {
     /**
      * @param module the database name (mandatory)
      * @param sCurrentUser username for whom to get custom metadata (optional)
-     * @param projID a project ID (optional)
+     * @param projIDs a collection of project IDs (optional)
      * @param indIDs a list of individual IDs (optional)
      * @return LinkedHashMap which contains all different metadata of the project
      */
-    public LinkedHashMap<String, Set<String>> distinctIndividualMetadata(String module, String sCurrentUser, Integer projID, Collection<String> indIDs) {
+    public LinkedHashMap<String, Set<String>> distinctIndividualMetadata(String module, String sCurrentUser, Collection<Integer> projIDs, Collection<String> indIDs) {
         LinkedHashMap<String, Set<String>> result = new LinkedHashMap<>();	// this one will be sorted according to the provided list
         HashSet<String> wrongFormatFields = new HashSet<>();
-        MgdbDao.getInstance().loadIndividualsWithAllMetadata(module, sCurrentUser, Arrays.asList(projID), indIDs, null).values().stream().filter(ind -> ind.getAdditionalInfo() != null).map(ind -> {
+        MgdbDao.getInstance().loadIndividualsWithAllMetadata(module, sCurrentUser, projIDs, indIDs, null).values().stream().filter(ind -> ind.getAdditionalInfo() != null).map(ind -> {
         	for (String fieldName : ind.getAdditionalInfo().keySet()) {
         		Object val = ind.getAdditionalInfo().get(fieldName);
         		if (val instanceof String)

@@ -23,6 +23,7 @@ import org.springframework.data.mongodb.core.mapping.Document;
 import org.springframework.data.mongodb.core.mapping.Field;
 
 import fr.cirad.mgdb.model.mongo.subtypes.AbstractVariantData;
+import fr.cirad.tools.mongo.MongoTemplateManager;
 
 /**
  * The Class Assembly.
@@ -58,6 +59,23 @@ public class Assembly {
 	public static void setThreadAssembly(Integer threadAssembly) {
 		Assembly.threadAssembly.set(threadAssembly);
 	}
+	
+    /**
+     * "Safe" wrapper for Assembly.getThreadBoundAssembly()
+     * i.e., when null is bound to the thread, if assemblies are defined in the DB, return the first foud one
+     * This is a workaround for cases when GA4GH is being invoked by a client that does not know about the "Assembly" request header trick
+     * @param sModule
+     * @return
+     */
+	public static Integer safelyGetThreadBoundAssembly(String sModule) {
+        Integer nAssembly = Assembly.getThreadBoundAssembly();
+        if (nAssembly == null)
+            for (Assembly assembly : MongoTemplateManager.get(sModule).findAll(Assembly.class)) {
+            	nAssembly = assembly.getId();
+            	break;
+            }
+        return nAssembly;
+    }
 	
     /**
      * The id.
