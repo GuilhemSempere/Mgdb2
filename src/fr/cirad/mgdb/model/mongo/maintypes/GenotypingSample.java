@@ -17,7 +17,6 @@
 package fr.cirad.mgdb.model.mongo.maintypes;
 
 import java.util.LinkedHashMap;
-import java.util.Objects;
 
 import org.springframework.data.annotation.Id;
 import org.springframework.data.annotation.Transient;

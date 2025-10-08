@@ -603,7 +603,7 @@ public class MgdbDao {
     }
 
     public static Set<String> getProjectSamples(String sModule, Collection<Integer> projIDs) throws ObjectNotFoundException {
-        return getCallsetsBySampleForProject(sModule, projIDs, null).keySet();
+        return getCallsetsBySampleForProjects(sModule, projIDs, null).keySet();
     }
 
     /**
@@ -668,7 +668,7 @@ public class MgdbDao {
         return result;
     }
 
-    public static TreeMap<String /*individual*/, ArrayList<CallSet>> getCallsetsByIndividualForProject(final String sModule, final Collection<Integer> projIDs, final Collection<String> individuals) throws ObjectNotFoundException {
+    public static TreeMap<String /*individual*/, ArrayList<CallSet>> getCallsetsByIndividualForProjects(final String sModule, final Collection<Integer> projIDs, final Collection<String> individuals) throws ObjectNotFoundException {
         TreeMap<String /*individual*/, ArrayList<CallSet>> result = new TreeMap<>();
         MongoTemplate mongoTemplate = MongoTemplateManager.get(sModule);
         if (mongoTemplate == null)
@@ -678,7 +678,6 @@ public class MgdbDao {
         if (individuals != null)
             crit.andOperator(Criteria.where(CallSet.FIELDNAME_INDIVIDUAL).in(individuals));
         Query q = new Query(crit);
-//		q.with(new Sort(Sort.Direction.ASC, GenotypingSample.SampleId.FIELDNAME_INDIVIDUAL));
         for (CallSet cs : mongoTemplate.find(q, CallSet.class)) {
             ArrayList<CallSet> individualCallsets = result.get(cs.getIndividual());
             if (individualCallsets == null) {
@@ -690,7 +689,7 @@ public class MgdbDao {
         return result;
     }
 
-    public static TreeMap<String /*sample*/, ArrayList<CallSet>> getCallsetsBySampleForProject(final String sModule, final Collection<Integer> projIDs, final Collection<String> sampleIDs) throws ObjectNotFoundException {
+    public static TreeMap<String /*sample*/, ArrayList<CallSet>> getCallsetsBySampleForProjects(final String sModule, final Collection<Integer> projIDs, final Collection<String> sampleIDs) throws ObjectNotFoundException {
         TreeMap<String /*sample*/, ArrayList<CallSet>> result = new TreeMap<>();
         MongoTemplate mongoTemplate = MongoTemplateManager.get(sModule);
         if (mongoTemplate == null)
@@ -700,21 +699,20 @@ public class MgdbDao {
         if (sampleIDs != null)
             crit.andOperator(Criteria.where(CallSet.FIELDNAME_SAMPLE).in(sampleIDs));
         Query q = new Query(crit);
-//		q.with(new Sort(Sort.Direction.ASC, GenotypingSample.SampleId.FIELDNAME_INDIVIDUAL));
         for (CallSet cs : mongoTemplate.find(q, CallSet.class)) {
-            ArrayList<CallSet> individualCallsets = result.get(cs.getIndividual());
-            if (individualCallsets == null) {
-                individualCallsets = new ArrayList<>();
-                result.put(cs.getIndividual(), individualCallsets);
+            ArrayList<CallSet> sampleCallsets = result.get(cs.getSampleId());
+            if (sampleCallsets == null) {
+                sampleCallsets = new ArrayList<>();
+                result.put(cs.getSampleId(), sampleCallsets);
             }
-            individualCallsets.add(cs);
+            sampleCallsets.add(cs);
         }
         return result;
     }
 
     public static ArrayList<CallSet> getCallsetsForProjectAndSamples(final String sModule, final Collection<Integer> projIDs, final Collection<String> samples) throws ObjectNotFoundException {
         ArrayList<CallSet> result = new ArrayList<>();
-        for (ArrayList<CallSet> sampleList : getCallsetsBySampleForProject(sModule, projIDs, samples).values()) {
+        for (ArrayList<CallSet> sampleList : getCallsetsBySampleForProjects(sModule, projIDs, samples).values()) {
             result.addAll(sampleList);
         }
         return result;
@@ -722,7 +720,7 @@ public class MgdbDao {
 
     public static ArrayList<CallSet> getCallsetsForProjectAndIndividuals(final String sModule, final Collection<Integer> projIDs, final Collection<String> individuals) throws ObjectNotFoundException {
         ArrayList<CallSet> result = new ArrayList<>();
-        for (ArrayList<CallSet> sampleList : getCallsetsByIndividualForProject(sModule, projIDs, individuals).values()) {
+        for (ArrayList<CallSet> sampleList : getCallsetsByIndividualForProjects(sModule, projIDs, individuals).values()) {
             result.addAll(sampleList);
         }
         return result;
