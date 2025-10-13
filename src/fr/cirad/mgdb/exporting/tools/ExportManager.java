@@ -420,15 +420,16 @@ public class ExportManager
 		            	}
 	            	};
 	            	
+	            	if (nFinalChunkIndex - 1 >= chunkExportTasks.length) {
+	            		AtomicInteger nRemaining = new AtomicInteger(0);
+	            		markerCursor.forEachRemaining(t -> nRemaining.incrementAndGet());
+	            		throw new Exception("All expected (" + chunkExportTasks.length + ") export chunks already processed but markerCursor still had " + nRemaining + " elements! markerCount=" + markerCount + " and " + sampleIDsToExport.size() + " samples");
+	            	}
+
             		chunkExportTasks[nFinalChunkIndex - 1] = (Future<Void>) executor.submit(new TaskWrapper(taskGroup, chunkExportThread));
 	                currentMarkerIDs = new ArrayList<>(nQueryChunkSize);
 	            }
 	        }
-	        
-	        if (executor instanceof GroupedExecutor)
-	        	((GroupedExecutor) executor).shutdown(taskGroup);
-	        else
-	        	executor.shutdown();
 	        
 	        for (Future<Void> t : chunkExportTasks) // wait for all threads before moving to next phase
 	        	if (t != null) {	// we can have null tasks with IGV exports
@@ -461,6 +462,13 @@ public class ExportManager
         finally {
         	os.flush();
 	        markerCursor.close();
+
+	    	// CRITICAL: Always shutdown the group, even if there was an error
+	        if (executor instanceof GroupedExecutor)
+	        	((GroupedExecutor) executor).shutdown(taskGroup);
+	        else
+	        	executor.shutdown();
+
 	        for (int i=0; i<chunkGenotypeFiles.length; i++) {
 		        if (chunkGenotypeFiles[i] != null && chunkGenotypeFiles[i].exists()) 
 		        	chunkGenotypeFiles[i].delete();	// delete all genotype files because if everything went well their contents have been written to the OutputStream
