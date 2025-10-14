@@ -219,8 +219,9 @@ public class BrapiImport extends STDVariantImport {
 			Assembly assembly = createAssemblyIfNeeded(mongoTemplate, assemblyName);
 			HashMap<String, String> existingVariantIDs = buildSynonymToIdMapForExistingVariants(mongoTemplate, true, assembly == null ? null : assembly.getId());
             
+			progress.setPercentageEnabled(true);
 			progress.addStep("Reading remote marker list");
-			progress.moveToNextStep();			
+			progress.moveToNextStep();
 			ArrayList<String> variantsToQueryGenotypesFor = new ArrayList<>();
 			Boolean fGotKnownAllelesWhenImportingVariants = null;	// value will be determined below
 			
@@ -342,7 +343,7 @@ public class BrapiImport extends STDVariantImport {
 			
 			client.setStudyID(studyDbId);			
 			List<BrapiMarkerProfile> markerprofiles = client.getMarkerProfiles();
-			HashMap<String, List<String>> germplasmToProfilesMap = new HashMap();
+			HashMap<String, List<String>> germplasmToProfilesMap = new HashMap<>();
 			for (BrapiMarkerProfile markerPofile : markerprofiles) {
 				List<String> gpProfiles = germplasmToProfilesMap.get(markerPofile.getGermplasmDbId());
 				if (gpProfiles == null) {
@@ -359,8 +360,8 @@ public class BrapiImport extends STDVariantImport {
 				profileToGermplasmMap.put(profiles.get(0), gp);
 			}
 			
-			if (mongoTemplate.findOne(new Query(Criteria.where("_id").in(profileToGermplasmMap.keySet())), GenotypingSample.class) != null)
-				throw new Exception("The dataset you are trying to import contains markerProfile IDs that already exist in the target database!");
+//			if (mongoTemplate.findOne(new Query(Criteria.where("_id").in(profileToGermplasmMap.keySet())), GenotypingSample.class) != null)
+//				throw new Exception("The dataset you are trying to import contains markerProfile IDs that already exist in the target database!");
 			
 			LOG.debug("Importing " + markerprofiles.size() + " individuals");
 			List<String> markerProfileIDs = markerprofiles.stream().map(BrapiMarkerProfile::getMarkerprofileDbId).collect(Collectors.toList());
@@ -382,7 +383,8 @@ public class BrapiImport extends STDVariantImport {
 	                	createdProject = project.getId();
 	            }
 
-				m_providedIdToSampleMap = new TreeMap<>();	// will auto-magically remove all duplicates, and sort data by keys
+				m_providedIdToSampleMap = new TreeMap<>();
+				m_providedIdToCallsetMap = new TreeMap<>();
 				for (String markerProfile : profileToGermplasmMap.keySet()) {
 					String sIndividual = profileToGermplasmMap.get(markerProfile);
 
@@ -400,7 +402,8 @@ public class BrapiImport extends STDVariantImport {
 		            }
 				}
                 mongoTemplate.insert(m_providedIdToCallsetMap.values(), CallSet.class);
-				mongoTemplate.insert(m_providedIdToSampleMap.values(), GenotypingSample.class);
+                for (GenotypingSample sample : m_providedIdToSampleMap.values())	// don't use insert in case some samples already exist
+                	mongoTemplate.save(sample);
 				setSamplesPersisted(true);
 				
 				// Initiate data export on server-side
@@ -489,7 +492,7 @@ public class BrapiImport extends STDVariantImport {
 					}
 				}
 			}
-			else {	// writing json contents to STD format then invoke STDVariantImport's code
+			else {	// write json contents to STD format then invoke STDVariantImport's code
 				LOG.debug("Writing remote json data to temp file: " + tempFile);
 				FileWriter tempFileWriter = new FileWriter(tempFile);
 				
@@ -583,7 +586,8 @@ public class BrapiImport extends STDVariantImport {
 		        }
 				tempFileWriter.close();
 				
-                if (progress.getError() != null || progress.isAborted())
+				progress.setPercentageEnabled(false);
+				if (progress.getError() != null || progress.isAborted())
                     return createdProject;
 
 		        // we use STDVariantImport as a base class because it is convenient as it always sorts data by variants

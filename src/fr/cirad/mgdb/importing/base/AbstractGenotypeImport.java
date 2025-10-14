@@ -547,15 +547,15 @@ public abstract class AbstractGenotypeImport<T extends ImportParameters> {
         return project;
     }
 
-    protected void createCallSetsSamplesIndividuals(List<String> sampleIds, MongoTemplate mongoTemplate, int projId, String sRun, Map<String, String> sampleToIndividualMap, ProgressIndicator progress) throws Exception {
+    protected void createCallSetsSamplesIndividuals(List<String> biologicalMaterialIDs, MongoTemplate mongoTemplate, int projId, String sRun, Map<String, String> sampleToIndividualMap, ProgressIndicator progress) throws Exception {
         m_providedIdToSampleMap = new HashMap<String /*individual*/, GenotypingSample>();
         m_providedIdToCallsetMap = new HashMap<String /*individual*/, CallSet>();
         HashSet<Individual> indsToAdd = new HashSet<>();
         HashSet<GenotypingSample> samplesToAdd = new HashSet<>();
         boolean fDbAlreadyContainedIndividuals = mongoTemplate.findOne(new Query(), Individual.class) != null;
         boolean fDbAlreadyContainedSamples = mongoTemplate.findOne(new Query(), GenotypingSample.class) != null;
-        attemptPreloadingIndividuals(sampleIds, progress);
-        for (String sIndOrSpId : sampleIds) {
+        attemptPreloadingIndividuals(biologicalMaterialIDs, progress);
+        for (String sIndOrSpId : biologicalMaterialIDs) {
             String sIndividual = determineIndividualName(sampleToIndividualMap, sIndOrSpId, progress);
             if (sIndividual == null) {
                 progress.setError("Unable to determine individual for sample " + sIndOrSpId);
@@ -570,6 +570,10 @@ public abstract class AbstractGenotypeImport<T extends ImportParameters> {
             if (sample == null) {
                 sample = new GenotypingSample(sampleId, sIndividual);
                 samplesToAdd.add(sample);
+            }
+            else if (!sIndividual.equals(sample.getIndividual())) {
+                progress.setError("Sample " + sIndOrSpId + " already exists and is attached to individual " + sample.getIndividual() + ", not " + sIndividual);
+                return;
             }
             m_providedIdToSampleMap.put(sIndOrSpId, sample);  // add a sample for this individual to the project
             int callsetId = AutoIncrementCounter.getNextSequence(mongoTemplate, MongoTemplateManager.getMongoCollectionName(CallSet.class));

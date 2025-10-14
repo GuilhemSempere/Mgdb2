@@ -482,17 +482,17 @@ public class MgdbDao {
     }
 
     /**
-     * Gets the sample genotypes.
+     * Gets the genotypes.
      *
      * @param mongoTemplate the mongo template
      * @param variantFieldsToReturn the variant fields to return
      * @param projectIdToReturnedRunFieldListMap the project id to returned run field list map
      * @param variantIdListToRestrictTo the variant id list to restrict to
      * @param sort the sort
-     * @return the sample genotypes
+     * @return the genotypes
      * @throws Exception the exception
      */
-    private static LinkedHashMap<VariantData, Collection<VariantRunData>> getSampleGenotypes(MongoTemplate mongoTemplate, ArrayList<String> variantFieldsToReturn, HashMap<Integer, ArrayList<String>> projectIdToReturnedRunFieldListMap, List<String> variantIdListToRestrictTo, Sort sort) throws Exception {
+    private static LinkedHashMap<VariantData, Collection<VariantRunData>> getGenotypes(MongoTemplate mongoTemplate, ArrayList<String> variantFieldsToReturn, HashMap<Integer, ArrayList<String>> projectIdToReturnedRunFieldListMap, List<String> variantIdListToRestrictTo, Sort sort) throws Exception {
         Query variantQuery = new Query();
         if (sort != null) {
             variantQuery.with(sort);
@@ -563,17 +563,17 @@ public class MgdbDao {
     }
 
     /**
-     * Gets the sample genotypes.
+     * Gets the CallSet genotypes.
      *
      * @param mongoTemplate the mongo template
-     * @param samples the samples
+     * @param callSets the callSets
      * @param variantIdListToRestrictTo the variant id list to restrict to
      * @param fReturnVariantTypes whether or not to return variant types
      * @param sort the sort
      * @return the sample genotypes
      * @throws Exception the exception
      */
-    public static LinkedHashMap<VariantData, Collection<VariantRunData>> getSampleGenotypes(MongoTemplate mongoTemplate, Collection<CallSet> samples, List<String> variantIdListToRestrictTo, boolean fReturnVariantTypes, Sort sort) throws Exception {
+    public static LinkedHashMap<VariantData, Collection<VariantRunData>> getCallSetGenotypes(MongoTemplate mongoTemplate, Collection<CallSet> callSets, List<String> variantIdListToRestrictTo, boolean fReturnVariantTypes, Sort sort) throws Exception {
         ArrayList<String> variantFieldsToReturn = new ArrayList<String>();
         variantFieldsToReturn.add(VariantData.FIELDNAME_KNOWN_ALLELES);
         variantFieldsToReturn.add(VariantData.FIELDNAME_REFERENCE_POSITION);
@@ -582,18 +582,18 @@ public class MgdbDao {
         }
 
         HashMap<Integer /*project id*/, ArrayList<String>> projectIdToReturnedRunFieldListMap = new HashMap<Integer, ArrayList<String>>();
-        for (CallSet sample : samples) {
-            ArrayList<String> returnedFields = projectIdToReturnedRunFieldListMap.get(sample.getProjectId());
+        for (CallSet cs : callSets) {
+            ArrayList<String> returnedFields = projectIdToReturnedRunFieldListMap.get(cs.getProjectId());
             if (returnedFields == null) {
                 returnedFields = new ArrayList<String>();
                 returnedFields.add("_class");
                 returnedFields.add(VariantRunData.SECTION_ADDITIONAL_INFO);
-                projectIdToReturnedRunFieldListMap.put(sample.getProjectId(), returnedFields);
+                projectIdToReturnedRunFieldListMap.put(cs.getProjectId(), returnedFields);
             }
-            returnedFields.add(VariantRunData.FIELDNAME_SAMPLEGENOTYPES + "." + sample.getId());
+            returnedFields.add(VariantRunData.FIELDNAME_SAMPLEGENOTYPES + "." + cs.getId());
         }
 
-        LinkedHashMap<VariantData, Collection<VariantRunData>> result = getSampleGenotypes(mongoTemplate, variantFieldsToReturn, projectIdToReturnedRunFieldListMap, variantIdListToRestrictTo, sort);
+        LinkedHashMap<VariantData, Collection<VariantRunData>> result = getGenotypes(mongoTemplate, variantFieldsToReturn, projectIdToReturnedRunFieldListMap, variantIdListToRestrictTo, sort);
 
         return result;
     }
