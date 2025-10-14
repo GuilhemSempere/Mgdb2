@@ -197,7 +197,7 @@ public class STDVariantImport extends RefactoredImport<ImportParameters> {
 			// group data into one variant per line AND build alphabetically-sorted individual-to-population Map
 			progress.addStep("Grouping genotyping data lines into one per variant");
 			progress.moveToNextStep();
-			progress.setPercentageEnabled(false);
+//			progress.setPercentageEnabled(false);
 			FileWriter fw = new FileWriter(variantOrientedFile);
 			Scanner scanner = new Scanner(sortedFile);
 			String sInputLine;
@@ -255,8 +255,8 @@ public class STDVariantImport extends RefactoredImport<ImportParameters> {
 
             // Create the necessary samples
             //ImportParameters only used here in the createCallSetsSamplesIndividuals, only giving useful arguments)
-            ImportParameters params = new ImportParameters(sModule, sProject, sRun, null, null, null, sampleToIndividualMap, false, 0);
-            createCallSetsSamplesIndividuals(new ArrayList(orderedIndividualToPopulationMap.keySet()), mongoTemplate, project.getId(), sRun, sampleToIndividualMap, progress);
+//            ImportParameters params = new ImportParameters(sModule, sProject, sRun, null, null, null, sampleToIndividualMap, false, 0);
+            createCallSetsSamplesIndividuals(new ArrayList<>(orderedIndividualToPopulationMap.keySet()), mongoTemplate, project.getId(), sRun, sampleToIndividualMap, progress);
 
             if (progress.getError() != null || progress.isAborted())
                 return createdProject;

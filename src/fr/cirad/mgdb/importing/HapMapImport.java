@@ -202,7 +202,7 @@ public class HapMapImport extends AbstractGenotypeImport<FileImportParameters> {
         Integer nPloidy = params.getnPloidy();
         Map<String, String> sampleToIndividualMap = params.getSampleToIndividualMap();
 
-        progress.setPercentageEnabled(false);
+//        progress.setPercentageEnabled(false);
 
         if (project == null || params.getImportMode() > 0) {	// create it
             if (params.getnPloidy() != null)
