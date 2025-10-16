@@ -375,15 +375,16 @@ public class MongoTemplateManager implements ApplicationContextAware {
         MongoClient client = mongoClients.get(sHost);
         if (client == null)
             throw new IOException("Unknown host: " + sHost);
-
+        
         MongoTemplate mongoTemplate = new MongoTemplate(client, sDbName);
-        ((MappingMongoConverter) mongoTemplate.getConverter()).setMapKeyDotReplacement(DOT_REPLACEMENT_STRING);
-
+		mongoTemplate.setApplicationContext(applicationContext);
+		((MappingMongoConverter) mongoTemplate.getConverter()).setMapKeyDotReplacement(DOT_REPLACEMENT_STRING);
+        
         MgdbDao.ensurePositionIndexes(mongoTemplate, Arrays.asList(mongoTemplate.getCollection(mongoTemplate.getCollectionName(VariantData.class)), mongoTemplate.getCollection(mongoTemplate.getCollectionName(VariantRunData.class))), false, false);	// make sure we have indexes defined as required in v2.4
 
         return mongoTemplate;
     }
-
+    
     public enum ModuleAction {
     	CREATE, UPDATE_STATUS, DELETE;
     }

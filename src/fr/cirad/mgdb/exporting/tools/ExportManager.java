@@ -163,7 +163,7 @@ public class ExportManager
         sortStage = new BasicDBObject("$sort", new Document(refPosPath  + "." + ReferencePosition.FIELDNAME_SEQUENCE, 1).append(refPosPath + "." + ReferencePosition.FIELDNAME_START_SITE, 1));
 
         // optimization 1: filling in involvedProjectRuns will provide means to apply filtering on project and/or run fields when exporting from temporary collection
-        List<CallSet> callsets = MgdbDao.getCallSetsFromSamples(sModule, samplesToExport.stream().map(GenotypingSample::getId).collect(Collectors.toSet()));
+        List<CallSet> callsets = samplesToExport.stream().map(sp -> sp.getCallSets()).flatMap(Collection::stream).toList();
         HashMap<Integer, List<String>> involvedProjectRuns = Helper.getRunsByProjectInCallsetCollection(callsets);
         involvedRunCount = involvedProjectRuns.values().stream().mapToInt(b -> b.size()).sum();
 

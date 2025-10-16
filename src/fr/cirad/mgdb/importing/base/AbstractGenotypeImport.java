@@ -355,15 +355,19 @@ public abstract class AbstractGenotypeImport<T extends ImportParameters> {
 //		System.err.println("VD: " + t1 + " / VRD: " + (System.currentTimeMillis() - b4));
     }
 
-    protected void cleanupBeforeImport(MongoTemplate mongoTemplate, String sModule, GenotypingProject project, int importMode, String sRun) throws Exception {	/*FIXME: we don't need MongoTemplate param*/
+    protected void cleanupBeforeImport(MongoTemplate mongoTemplate, String sModule, GenotypingProject project, int importMode, String sRun) throws Exception {
         if (importMode == 2)
             mongoTemplate.getDb().drop(); // drop database before importing
         else if (project != null)
         {
+        	boolean fAnythingChanged = false;
 			if (importMode == 1 || (project.getRuns().size() == 1 && project.getRuns().get(0).equals(sRun)))
-				MgdbDao.removeProjectAndRelatedRecords(sModule, project.getId());	// empty project data before importing
+				fAnythingChanged = MgdbDao.removeProjectAndRelatedRecords(sModule, project.getId());	// empty project data before importing
 			else
-	            MgdbDao.removeRunAndRelatedRecords(sModule, project.getId(), sRun);	// empty run data before importing
+				fAnythingChanged = MgdbDao.removeRunAndRelatedRecords(sModule, project.getId(), sRun, false);	// empty run data before importing
+
+			if (fAnythingChanged)
+				MongoTemplateManager.updateDatabaseLastModification(sModule);
 
 			if (Helper.estimDocCount(mongoTemplate, VariantRunData.class) == 0 && m_fAllowDbDropIfNoGenotypingData && doesDatabaseSupportImportingUnknownVariants(sModule))
                 mongoTemplate.getDb().drop();	// if there is no genotyping data left and we are not working on a fixed list of variants then any other data is irrelevant
@@ -551,7 +555,7 @@ public abstract class AbstractGenotypeImport<T extends ImportParameters> {
         m_providedIdToSampleMap = new HashMap<String /*individual*/, GenotypingSample>();
         m_providedIdToCallsetMap = new HashMap<String /*individual*/, CallSet>();
         HashSet<Individual> indsToAdd = new HashSet<>();
-        HashSet<GenotypingSample> samplesToAdd = new HashSet<>();
+        HashSet<GenotypingSample> samplesToAdd = new HashSet<>(), samplesToUpdate = new HashSet<>();
         boolean fDbAlreadyContainedIndividuals = mongoTemplate.findOne(new Query(), Individual.class) != null;
         boolean fDbAlreadyContainedSamples = mongoTemplate.findOne(new Query(), GenotypingSample.class) != null;
         attemptPreloadingIndividuals(biologicalMaterialIDs, progress);
@@ -571,41 +575,54 @@ public abstract class AbstractGenotypeImport<T extends ImportParameters> {
                 sample = new GenotypingSample(sampleId, sIndividual);
                 samplesToAdd.add(sample);
             }
-            else if (!sIndividual.equals(sample.getIndividual())) {
-                progress.setError("Sample " + sIndOrSpId + " already exists and is attached to individual " + sample.getIndividual() + ", not " + sIndividual);
-                return;
+            else {
+            	if (!sIndividual.equals(sample.getIndividual())) {
+	                progress.setError("Sample " + sIndOrSpId + " already exists and is attached to individual " + sample.getIndividual() + ", not " + sIndividual);
+	                return;
+	            }
+            	samplesToUpdate.add(sample);
             }
             m_providedIdToSampleMap.put(sIndOrSpId, sample);  // add a sample for this individual to the project
             int callsetId = AutoIncrementCounter.getNextSequence(mongoTemplate, MongoTemplateManager.getMongoCollectionName(CallSet.class));
-            m_providedIdToCallsetMap.put(sIndOrSpId, new CallSet(callsetId, sampleId, sIndividual, projId, sRun));
+            CallSet cs = new CallSet(callsetId, sample/*, sIndividual*/, projId, sRun);
+            sample.getCallSets().add(cs);
+            m_providedIdToCallsetMap.put(sIndOrSpId, cs);
         }
 
-        insertNewCallSetsSamplesIndividuals(mongoTemplate, indsToAdd, samplesToAdd);
+        insertNewCallSetsSamplesIndividuals(mongoTemplate, indsToAdd, samplesToAdd, samplesToUpdate);
     }
 
-    protected void insertNewCallSetsSamplesIndividuals(MongoTemplate mongoTemplate, Set<Individual> indsToAdd, Set<GenotypingSample> samplesToAdd) throws InterruptedException {
+    protected void insertNewCallSetsSamplesIndividuals(MongoTemplate mongoTemplate, Set<Individual> indsToAdd, Set<GenotypingSample> samplesToAdd, Set<GenotypingSample> samplesToUpdate) throws InterruptedException {
         final int importChunkSize = 1000;
 
-        // Callsets import
-        Thread callsetImportThread = new Thread() {
-            public void run() {
-                List<CallSet> callsetsToImport = new ArrayList<>(m_providedIdToCallsetMap.values());
-                for (int j=0; j<Math.ceil((float) callsetsToImport.size() / importChunkSize); j++)
-                    mongoTemplate.insert(callsetsToImport.subList(j * importChunkSize, Math.min(callsetsToImport.size(), (j + 1) * importChunkSize)), CallSet.class);
+        // Sample update
+        List<Thread> callsetImportThreads = new ArrayList<>();
+        if (!samplesToUpdate.isEmpty()) {
+        	List<GenotypingSample> samplesToSave = new ArrayList<>(samplesToUpdate);
+            for (int j=0; j<Math.ceil((float) samplesToSave.size() / importChunkSize); j++) {
+            	final Collection<GenotypingSample> subList = samplesToSave.subList(j * importChunkSize, Math.min(samplesToSave.size(), (j + 1) * importChunkSize));
+		        Thread callsetImportThread = new Thread() {
+		            public void run() {
+		                for (GenotypingSample sample : subList)
+		                    mongoTemplate.save(sample);
+		            }
+		        };
+		        callsetImportThread.start();
+		        callsetImportThreads.add(callsetImportThread);
             }
-        };
-        callsetImportThread.start();
+        }
 
-        // Samples import
+        // Sample import
         List<GenotypingSample> samplesToImport = new ArrayList<>(samplesToAdd);
         for (int j=0; j<Math.ceil((float) samplesToAdd.size() / importChunkSize); j++)
             mongoTemplate.insert(samplesToImport.subList(j * importChunkSize, Math.min(samplesToImport.size(), (j + 1) * importChunkSize)), GenotypingSample.class);
-
-        // Individuals import
+        
+        // Individual import
         List<Individual> individualsToImport = new ArrayList<>(indsToAdd);
         for (int j=0; j<Math.ceil((float) individualsToImport.size() / importChunkSize); j++)
             mongoTemplate.insert(individualsToImport.subList(j * importChunkSize, Math.min(individualsToImport.size(), (j + 1) * importChunkSize)), Individual.class);
 
-        callsetImportThread.join();
+        for (Thread t : callsetImportThreads)
+        	t.join();
     }
 }

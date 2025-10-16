@@ -384,7 +384,7 @@ public class BrapiImport extends STDVariantImport {
 	            }
 
 				m_providedIdToSampleMap = new TreeMap<>();
-				m_providedIdToCallsetMap = new TreeMap<>();
+//				m_providedIdToCallsetMap = new TreeMap<>();
 				for (String markerProfile : profileToGermplasmMap.keySet()) {
 					String sIndividual = profileToGermplasmMap.get(markerProfile);
 
@@ -395,13 +395,14 @@ public class BrapiImport extends STDVariantImport {
 		                    mongoTemplate.save(ind);
 		                }
 
-                        m_providedIdToSampleMap.put(sIndividual, new GenotypingSample(markerProfile, sIndividual));  // add a sample for this individual to the project
+		                GenotypingSample sample = new GenotypingSample(markerProfile, sIndividual);
+                        m_providedIdToSampleMap.put(sIndividual, sample);  // add a sample for this individual to the project
 
                         int callsetId = AutoIncrementCounter.getNextSequence(mongoTemplate, MongoTemplateManager.getMongoCollectionName(CallSet.class));
-                        m_providedIdToCallsetMap.put(sIndividual, new CallSet(callsetId, markerProfile, sIndividual, project.getId(), sRun));
+                        sample.getCallSets().add(new CallSet(callsetId, sample/*, sIndividual*/, project.getId(), sRun));
 		            }
 				}
-                mongoTemplate.insert(m_providedIdToCallsetMap.values(), CallSet.class);
+//                mongoTemplate.insert(m_providedIdToCallsetMap.values(), CallSet.class);
                 for (GenotypingSample sample : m_providedIdToSampleMap.values())	// don't use insert in case some samples already exist
                 	mongoTemplate.save(sample);
 				setSamplesPersisted(true);

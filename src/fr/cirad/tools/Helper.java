@@ -51,6 +51,7 @@ import com.mongodb.client.MongoCursor;
 import fr.cirad.mgdb.exporting.IExportHandler;
 import fr.cirad.mgdb.model.mongo.maintypes.Assembly;
 import fr.cirad.mgdb.model.mongo.maintypes.CallSet;
+import fr.cirad.mgdb.model.mongo.maintypes.GenotypingSample;
 import fr.cirad.mgdb.model.mongo.maintypes.VariantData;
 import fr.cirad.mgdb.model.mongo.subtypes.ReferencePosition;
 import fr.cirad.mgdb.model.mongo.subtypes.Run;
@@ -590,28 +591,10 @@ public class Helper {
 	    }
 	    return result.substring(0, result.length() - 1);
 	}
-	
-//    public static HashMap<Integer /*project*/, List<String /*runs*/>> getRunsByProjectInSampleCollection(String sModule, Collection<GenotypingSample> samples) {
-//    	MongoTemplate mongoTemplate = MongoTemplateManager.get(sModule);
-//    	List<CallSet> sampleCallSets = mongoTemplate.find(new Query(Criteria.where(CallSet.FIELDNAME_SAMPLE).in(samples.stream().map(sp -> sp.getId()).toList())), CallSet.class);
-//		HashMap<Integer, List<String>> runsByProject = new HashMap<>();
-//		for (String projectAndRun : sampleCallSets.stream().map(cs -> cs.getProjectId() + ID_SEPARATOR + cs.getRun()).distinct().collect(Collectors.toList())) {
-//			String[] separateIDs = projectAndRun.split(ID_SEPARATOR);
-//			int projId = Integer.parseInt(separateIDs[0]);
-//			List<String> projectRuns = runsByProject.get(projId);
-//			if (projectRuns == null) {
-//				projectRuns = new ArrayList<>();
-//				runsByProject.put(projId, projectRuns);
-//			}
-//			projectRuns.add(separateIDs[1]);
-//		}
-//		return runsByProject;
-//    }
 
 	public static HashMap<Integer, List<String>> getRunsByProjectFromCallSetIDs(String sModule, Collection<Integer> callSetIDs) {
-	    List<CallSet> callSets = MongoTemplateManager.get(sModule).find(new Query(Criteria.where("_id").in(callSetIDs)), CallSet.class);
-
-	    return callSets.stream()
+	    List<GenotypingSample> samples = MongoTemplateManager.get(sModule).find(new Query(Criteria.where("_id").in(GenotypingSample.FIELDNAME_CALLSETS + "." + "_id")), GenotypingSample.class);
+	    return samples.stream().map(sp -> sp.getCallSets()).flatMap(Collection::stream)
 	        .collect(Collectors.groupingBy(
 	            CallSet::getProjectId,
 	            HashMap::new,
@@ -625,9 +608,8 @@ public class Helper {
 	}
 
 	public static HashMap<Integer, List<String>> getRunsByProjectFromSampleIDs(String sModule, Collection<String> sampleIDs) {
-	    List<CallSet> callSets = MongoTemplateManager.get(sModule).find(new Query(Criteria.where(CallSet.FIELDNAME_SAMPLE).in(sampleIDs)), CallSet.class);
-
-	    return callSets.stream()
+	    List<GenotypingSample> samples = MongoTemplateManager.get(sModule).find(new Query(Criteria.where("_id").in(sampleIDs)), GenotypingSample.class);
+	    return samples.stream().map(sp -> sp.getCallSets()).flatMap(Collection::stream)
 	        .collect(Collectors.groupingBy(
 	            CallSet::getProjectId,
 	            HashMap::new,
@@ -639,5 +621,5 @@ public class Helper {
 	            )
 	        ));
 	}
-    
+   
 }

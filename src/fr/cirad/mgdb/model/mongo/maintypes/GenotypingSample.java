@@ -16,8 +16,8 @@
  *******************************************************************************/
 package fr.cirad.mgdb.model.mongo.maintypes;
 
+import java.util.HashSet;
 import java.util.LinkedHashMap;
-
 import org.springframework.data.annotation.Id;
 import org.springframework.data.annotation.Transient;
 import org.springframework.data.annotation.TypeAlias;
@@ -27,11 +27,12 @@ import org.springframework.data.mongodb.core.mapping.Field;
 /**
  * The Class Sample.
  */
-@Document(collection = "indSamples")
-@TypeAlias("IS")
+@Document(collection = "samplesAndCallSets")
+@TypeAlias("SC")
 public class GenotypingSample {
 
 	public final static String FIELDNAME_INDIVIDUAL = "in";
+    public final static String FIELDNAME_CALLSETS = "cs";
     public final static String SECTION_ADDITIONAL_INFO = "ai";
 
 	/** The sample id. */
@@ -42,6 +43,10 @@ public class GenotypingSample {
 	@Field(FIELDNAME_INDIVIDUAL)
 	private String individual;
 
+	/** The callsets. */
+	@Field(FIELDNAME_CALLSETS)
+	private HashSet<CallSet> callSets = new HashSet<>();
+	
 	@Transient
 	private boolean detached = false;
 
@@ -60,6 +65,14 @@ public class GenotypingSample {
 	public GenotypingSample(String sampleId, String individual) {
 		this.id = sampleId;
 		this.individual = individual;
+	}
+
+	public HashSet<CallSet> getCallSets() {
+		return callSets;
+	}
+
+	public void setCallSets(HashSet<CallSet> callSets) {
+		this.callSets = callSets;
 	}
 
 	public String getIndividual() {

@@ -1,6 +1,8 @@
 package fr.cirad.mgdb.model.mongo.maintypes;
 
+import javax.ejb.ObjectNotFoundException;
 import org.springframework.data.annotation.Id;
+import org.springframework.data.annotation.Transient;
 import org.springframework.data.annotation.TypeAlias;
 import org.springframework.data.mongodb.core.mapping.Document;
 import org.springframework.data.mongodb.core.mapping.Field;
@@ -9,8 +11,8 @@ import org.springframework.data.mongodb.core.mapping.Field;
 @TypeAlias("CS")
 public class CallSet {
 
-    public final static String FIELDNAME_SAMPLE = "sp";
-    public final static String FIELDNAME_INDIVIDUAL = "in";
+//    public final static String FIELDNAME_SAMPLE = "sp";
+//    public final static String FIELDNAME_INDIVIDUAL = "in";
     public final static String FIELDNAME_PROJECT_ID = "pj";
     public final static String FIELDNAME_RUN = "rn";
 
@@ -19,11 +21,11 @@ public class CallSet {
     private int id;
 
     /** The sample id. */
-    @Field(FIELDNAME_SAMPLE)
+    @Transient
     private String sampleId;
 
     /** The individual. */
-    @Field(FIELDNAME_INDIVIDUAL)
+    @Transient
     private String individual;
 
     /** The projectId. */
@@ -34,10 +36,13 @@ public class CallSet {
     @Field(FIELDNAME_RUN)
     private String run;
 
-    public CallSet(int id, String sampleId, String individual, int projectId, String run) {
+    public CallSet() {
+    }
+
+    public CallSet(int id, GenotypingSample sample, int projectId, String run) {
         this.id = id;
-        this.sampleId = sampleId;
-        this.individual = individual;
+        this.sampleId = sample.getId();
+        this.individual = sample.getIndividual();
         this.projectId = projectId;
         this.run = run;
     }
@@ -49,21 +54,25 @@ public class CallSet {
     public void setId(int id) {
         this.id = id;
     }
+   
+	public void setSampleId(String sampleId) {
+		this.sampleId = sampleId;
+	}
 
-    public String getSampleId() {
-        return sampleId;
-    }
+	public void setIndividual(String individual) {
+		this.individual = individual;
+	}
 
-    public void setSampleId(String sampleId) {
-        this.sampleId = sampleId;
-    }
-
-    public String getIndividual() {
-        return individual;
-    }
-
-    public void setIndividual(String individual) {
-        this.individual = individual;
+	public String getSampleId() throws ObjectNotFoundException {
+		if (sampleId == null)
+			throw new ObjectNotFoundException("If you load directly CallSet objects from the GenotypingSample's collection then their sample reference is not set");
+		return sampleId;
+	}
+	
+    public String getIndividual() throws ObjectNotFoundException {
+		if (individual == null)
+			throw new ObjectNotFoundException("If you load directly CallSet objects from the GenotypingSample's collection then their sample reference is not set");
+    	return individual;
     }
 
     public int getProjectId() {
