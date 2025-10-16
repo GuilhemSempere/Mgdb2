@@ -77,6 +77,10 @@ public class Assembly {
         return nAssembly;
     }
 	
+    public static void cleanupThreadAssembly() {
+        threadAssembly.remove();
+    }
+	
     /**
      * The id.
      */
