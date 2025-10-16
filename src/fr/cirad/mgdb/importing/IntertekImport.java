@@ -192,7 +192,7 @@ public class IntertekImport extends AbstractGenotypeImport<FileImportParameters>
 
         int count = 0;
         Set<Individual> indsToCreate = new HashSet<>();
-        Set<GenotypingSample> samplesToCreate = new HashSet<>();
+        Set<GenotypingSample> samplesToCreate = new HashSet<>(), samplesToUpdate = new HashSet<>();
 
         // Reading csv file
         // Getting alleleX and alleleY for each SNP by reading lines between lines {"SNPID","SNPNum","AlleleY","AlleleX","Sequence"} and {"Scaling"};
@@ -300,13 +300,10 @@ public class IntertekImport extends AbstractGenotypeImport<FileImportParameters>
                                 }
                             }
                             gtCode = String.join("/", gt);
-                            if (nPloidy == 0) {
+                            if (nPloidy == 0)
                                 nPloidy = alleles.size();
-                            } else {
-                                if (nPloidy != alleles.size()) {
-                                    throw new Exception("Ploidy levels differ between variants");
-                                }
-                            }
+                            else if (nPloidy != alleles.size())
+                            	throw new Exception("Ploidy levels differ between variants");
                         }
 
                         String sIndividual = determineIndividualName(sampleToIndividualMap, sIndOrSpId, progress);
@@ -332,17 +329,21 @@ public class IntertekImport extends AbstractGenotypeImport<FileImportParameters>
                             }
                             m_providedIdToSampleMap.put(sIndOrSpId, sample);
                         }
+                        else {
+                        	if (!sIndividual.equals(sample.getIndividual()))
+            	                throw new Exception("Sample " + sIndOrSpId + " already exists and is attached to individual " + sample.getIndividual() + ", not " + sIndividual);
+                        	samplesToUpdate.add(sample);
+                        }
 
                         if (m_providedIdToCallsetMap.get(sIndOrSpId) == null) {
                             int callsetId = AutoIncrementCounter.getNextSequence(mongoTemplate, MongoTemplateManager.getMongoCollectionName(CallSet.class));
-                            m_providedIdToCallsetMap.put(sIndOrSpId, new CallSet(callsetId, sample.getId(), sIndividual, project.getId(), params.getsRun()));
+                            m_providedIdToCallsetMap.put(sIndOrSpId, new CallSet(callsetId, sample/*, sIndividual*/, project.getId(), params.getsRun()));
                         }
 
                         SampleGenotype sampleGt = new SampleGenotype(gtCode);
                         sampleGt.getAdditionalInfo().put(AbstractVariantData.GT_FIELD_FI, FI);	//TODO - Check how the fluorescence indexes X et Y should be stored
 
                         sampleGenotypes.put(m_providedIdToCallsetMap.get(sIndOrSpId).getId(), sampleGt);
-
                     }
                 }
 
@@ -360,7 +361,7 @@ public class IntertekImport extends AbstractGenotypeImport<FileImportParameters>
         }
 
         //Insert new callsets, samples and individuals
-        insertNewCallSetsSamplesIndividuals(mongoTemplate, indsToCreate, samplesToCreate);
+        insertNewCallSetsSamplesIndividuals(mongoTemplate, indsToCreate, samplesToCreate, samplesToUpdate);
         setSamplesPersisted(true);
 
         VCFFormatHeaderLine headerLineGT = new VCFFormatHeaderLine("GT", 1, VCFHeaderLineType.String, "Genotype");
