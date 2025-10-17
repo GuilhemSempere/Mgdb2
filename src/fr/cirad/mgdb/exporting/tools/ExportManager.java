@@ -120,7 +120,7 @@ public class ExportManager
     
     private Long markerCount;
     
-    private Collection<String> sampleIDsToExport;
+    private Collection<Integer> callSetIDsToExport;
     
     private MongoCollection<Document> varColl;
     
@@ -146,7 +146,7 @@ public class ExportManager
 
     public static final CodecRegistry pojoCodecRegistry = CodecRegistries.fromRegistries(MongoClientSettings.getDefaultCodecRegistry(), CodecRegistries.fromProviders(PojoCodecProvider.builder().register(new IntKeyMapPropertyCodecProvider()).automatic(true).build()));
 
-	public ExportManager(String sModule, Integer nAssemblyId, MongoCollection<Document> varColl, Class resultType, Document variantQuery, Collection<GenotypingSample> samplesToExport, boolean fIncludeMetadata, int nQueryChunkSize, AbstractExportWriter exportWriter, Long markerCount, ProgressIndicator progress) throws ObjectNotFoundException {
+	public ExportManager(String sModule, Integer nAssemblyId, MongoCollection<Document> varColl, Class resultType, Document variantQuery, Collection<CallSet> callSetsToExport, boolean fIncludeMetadata, int nQueryChunkSize, AbstractExportWriter exportWriter, Long markerCount, ProgressIndicator progress) throws ObjectNotFoundException {
         this.progress = progress;
         this.nQueryChunkSize = nQueryChunkSize;
         this.module = sModule;
@@ -163,8 +163,7 @@ public class ExportManager
         sortStage = new BasicDBObject("$sort", new Document(refPosPath  + "." + ReferencePosition.FIELDNAME_SEQUENCE, 1).append(refPosPath + "." + ReferencePosition.FIELDNAME_START_SITE, 1));
 
         // optimization 1: filling in involvedProjectRuns will provide means to apply filtering on project and/or run fields when exporting from temporary collection
-        List<CallSet> callsets = samplesToExport.stream().map(sp -> sp.getCallSets()).flatMap(Collection::stream).toList();
-        HashMap<Integer, List<String>> involvedProjectRuns = Helper.getRunsByProjectInCallsetCollection(callsets);
+        HashMap<Integer, List<String>> involvedProjectRuns = Helper.getRunsByProjectInCallsetCollection(callSetsToExport);
         involvedRunCount = involvedProjectRuns.values().stream().mapToInt(b -> b.size()).sum();
 
         MongoTemplate mongoTemplate = MongoTemplateManager.get(module);
@@ -181,15 +180,15 @@ public class ExportManager
 
         // optimization 2: build the $project stage by excluding fields when over 50% of overall samples are selected; even remove that stage when exporting all (or almost all) samples (makes it much faster)
         long nTotalNumberOfSamplesInDB = Helper.estimDocCount(mongoTemplate, GenotypingSample.class);
-        long percentageOfExportedSamples = nTotalNumberOfSamplesInDB == 0 ? 100 : 100 * samplesToExport.size() / nTotalNumberOfSamplesInDB;
-        sampleIDsToExport = samplesToExport == null ? new ArrayList<>() : samplesToExport.stream().map(sp -> sp.getId()).collect(Collectors.toList());
-        Collection<String> sampleIDsNotToExport = percentageOfExportedSamples >= 98 ? new ArrayList<>() /* if almost all individuals are being exported we directly omit the $project stage */ : (percentageOfExportedSamples > 50 ? mongoTemplate.findDistinct(new Query(Criteria.where("_id").not().in(sampleIDsToExport)), "_id", GenotypingSample.class, String.class) : null);
+        long percentageOfExportedSamples = nTotalNumberOfSamplesInDB == 0 ? 100 : 100 * callSetsToExport.size() / nTotalNumberOfSamplesInDB;
+        callSetIDsToExport = callSetsToExport == null ? new ArrayList<>() : callSetsToExport.stream().map(cs -> cs.getId()).collect(Collectors.toList());
+        Collection<Integer> callSetIDsNotToExport = percentageOfExportedSamples >= 98 ? new ArrayList<>() /* if almost all individuals are being exported we directly omit the $project stage */ : (percentageOfExportedSamples > 50 ? mongoTemplate.findDistinct(new Query(Criteria.where(GenotypingSample.FIELDNAME_CALLSETS + "._id").not().in(callSetIDsToExport)), GenotypingSample.FIELDNAME_CALLSETS + "._id", GenotypingSample.class, Integer.class) : null);
 
         if (variantQuery != null && !variantQuery.isEmpty())
             variantMatchStage = new BasicDBObject("$match", variantQuery);
 
         Document projection = new Document();
-        if (sampleIDsNotToExport == null) {    // inclusive $project (less than a half of the samples are being exported)
+        if (callSetIDsNotToExport == null) {    // inclusive $project (less than a half of the samples are being exported)
             projection.append(refPosPath, 1);
             projection.append(AbstractVariantData.FIELDNAME_KNOWN_ALLELES, 1);
             projection.append(AbstractVariantData.FIELDNAME_TYPE, 1);
@@ -199,15 +198,15 @@ public class ExportManager
                 projection.append(AbstractVariantData.SECTION_ADDITIONAL_INFO, 1);
         }
 
-        for (String spId : sampleIDsNotToExport == null ? sampleIDsToExport : sampleIDsNotToExport)
-            projection.append(VariantRunData.FIELDNAME_SAMPLEGENOTYPES + "." + spId, sampleIDsNotToExport == null ? 1 /*include*/ : 0 /*exclude*/);
+        for (Integer csId : callSetIDsNotToExport == null ? callSetIDsToExport : callSetIDsNotToExport)
+            projection.append(VariantRunData.FIELDNAME_SAMPLEGENOTYPES + "." + csId, callSetIDsNotToExport == null ? 1 /*include*/ : 0 /*exclude*/);
 
         if (!projection.isEmpty()) {
-            if (sampleIDsNotToExport != null && !fIncludeMetadata)    // exclusive $project (more than a half of the samples are being exported). We only add it if the $project stage is already justified (it's expensive so avoiding it is better when possible)
+            if (callSetIDsNotToExport != null && !fIncludeMetadata)    // exclusive $project (more than a half of the samples are being exported). We only add it if the $project stage is already justified (it's expensive so avoiding it is better when possible)
                 projection.append(AbstractVariantData.SECTION_ADDITIONAL_INFO, 0);
 
             projectStage = new BasicDBObject("$project", projection);
-            if (markerCount > 5000 && nTotalNumberOfSamplesInDB > 200 && sampleIDsNotToExport != null && !sampleIDsNotToExport.isEmpty()) {   // we may only attempt evaluating if it's worth removing $project when exported markers are numerous enough, overall sample count is large enough and more than a half of them is involved
+            if (markerCount > 5000 && nTotalNumberOfSamplesInDB > 200 && callSetIDsNotToExport != null && !callSetIDsNotToExport.isEmpty()) {   // we may only attempt evaluating if it's worth removing $project when exported markers are numerous enough, overall sample count is large enough and more than a half of them is involved
                 double nTotalChunkCount = Math.ceil(markerCount.intValue() / nQueryChunkSize);
                 if (nTotalChunkCount > 30)   // at least 10 chunks would be used for comparison, we only bother doing it if the optimization can be applied to at least 20 others
                     nNumberOfChunksUsedForSpeedEstimation = markerCount == null ? 5 : Math.max(5, (int) nTotalChunkCount / 100 /*1% of the whole stuff*/);
@@ -423,7 +422,7 @@ public class ExportManager
 	            	if (nFinalChunkIndex - 1 >= chunkExportTasks.length) {
 	            		AtomicInteger nRemaining = new AtomicInteger(0);
 	            		markerCursor.forEachRemaining(t -> nRemaining.incrementAndGet());
-	            		throw new Exception("All expected (" + chunkExportTasks.length + ") export chunks already processed but markerCursor still had " + nRemaining + " elements! markerCount=" + markerCount + " and " + sampleIDsToExport.size() + " samples");
+	            		throw new Exception("All expected (" + chunkExportTasks.length + ") export chunks already processed but markerCursor still had " + nRemaining + " elements! markerCount=" + markerCount + " and " + callSetIDsToExport.size() + " samples");
 	            	}
 
             		chunkExportTasks[nFinalChunkIndex - 1] = (Future<Void>) executor.submit(new TaskWrapper(taskGroup, chunkExportThread));

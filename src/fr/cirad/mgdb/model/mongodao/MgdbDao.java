@@ -651,18 +651,14 @@ public class MgdbDao {
         return result;
     }
     
-//    public static ArrayList<GenotypingSample> getSamplesForProjects(final String sModule, final Collection<Integer> projIDs, final Collection<String> individuals) throws ObjectNotFoundException {
-//        ArrayList<GenotypingSample> result = new ArrayList<>();
-//        for (ArrayList<GenotypingSample> sampleList : getSamplesByIndividualForProjects(sModule, projIDs, individuals).values()) {
-//            result.addAll(sampleList);
-//        }andOperator
-//        return result;
+//    public static List<GenotypingSample> getSamplesForProjects(final String sModule, final Collection<Integer> projIDs, final Collection<String> individuals) throws ObjectNotFoundException {
+//        return getSamplesByIndividualForProjects(sModule, projIDs, individuals).values().stream().flatMap(Collection::stream).toList();
+//    }
+
+//    public static List<CallSet> getCallSetsForProjects(final String sModule, final Collection<Integer> projIDs, final Collection<String> individuals) throws ObjectNotFoundException {
+//        return getCallsetsByIndividualForProjects(sModule, projIDs, individuals).values().stream().flatMap(Collection::stream).toList();
 //    }
     
-    public static List<GenotypingSample> getSamplesForProjects(final String sModule, final Collection<Integer> projIDs, final Collection<String> individuals) throws ObjectNotFoundException {
-        return getSamplesByIndividualForProjects(sModule, projIDs, individuals).values().stream().flatMap(Collection::stream).toList();
-    }
-
     public static TreeMap<String /*individual*/, ArrayList<CallSet>> getCallsetsByIndividualForProjects(final String sModule, final Collection<Integer> projIDs, final Collection<String> individuals) throws ObjectNotFoundException {
         TreeMap<String /*individual*/, ArrayList<CallSet>> result = new TreeMap<>();
         for (CallSet cs : getCallsetsForProjectAndIndividuals(sModule, projIDs, individuals)) {
@@ -690,12 +686,6 @@ public class MgdbDao {
     }
 
     public static List<CallSet> getCallsetsForProjectAndSamples(final String sModule, final Collection<Integer> projIDs, final Collection<String> sampleIDs) throws ObjectNotFoundException {
-//        ArrayList<CallSet> result = new ArrayList<>();
-//        for (ArrayList<CallSet> sampleList : getCallsetsBySampleForProjects(sModule, projIDs, sampleIDs).values()) {
-//            result.addAll(sampleList);
-//        }
-//        return result;
-
         Criteria crit = Criteria.where(GenotypingSample.FIELDNAME_CALLSETS + "." + CallSet.FIELDNAME_PROJECT_ID).in(projIDs);
         if (sampleIDs != null)
             crit.andOperator(Criteria.where("_id").in(sampleIDs));

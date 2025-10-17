@@ -29,9 +29,11 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.stream.Collectors;
+import java.util.TreeSet;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
+
+import javax.ejb.ObjectNotFoundException;
 
 import org.apache.log4j.Logger;
 import org.bson.Document;
@@ -43,6 +45,7 @@ import com.mongodb.client.model.Collation;
 
 import fr.cirad.mgdb.exporting.tools.ExportManager.ExportOutputs;
 import fr.cirad.mgdb.model.mongo.maintypes.Assembly;
+import fr.cirad.mgdb.model.mongo.maintypes.CallSet;
 import fr.cirad.mgdb.model.mongo.maintypes.GenotypingSample;
 import fr.cirad.mgdb.model.mongo.maintypes.Individual;
 import fr.cirad.mgdb.model.mongo.maintypes.VariantRunData;
@@ -266,10 +269,14 @@ public interface IExportHandler
     	}
 	}
     
-    public static Map<String, Integer> buildIndividualPositions(Collection<GenotypingSample> samplesToExport) {
+    public static Map<String, Integer> buildIndividualPositions(Collection<CallSet> callSetsToExport, boolean workWithSamples) throws ObjectNotFoundException {
+    	TreeSet<String> sortedIndividuals = new TreeSet<>(new AlphaNumericComparator<String>());
+		for (CallSet cs : callSetsToExport)
+			sortedIndividuals.add(workWithSamples ? cs.getSampleId() : cs.getIndividual());			
+
 		Map<String, Integer> individualPositions = new LinkedHashMap<>();
-		for (String ind : samplesToExport.stream().map(gs -> gs.getIndividual()).distinct().sorted(new AlphaNumericComparator<String>()).collect(Collectors.toList()))
-			individualPositions.put(ind, individualPositions.size());
+		for (String spOrInd : sortedIndividuals)
+			individualPositions.put(spOrInd, individualPositions.size());
 		return individualPositions;
     }
 

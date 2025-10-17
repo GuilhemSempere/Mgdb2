@@ -36,7 +36,7 @@ import org.bson.codecs.pojo.annotations.BsonProperty;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.mapping.Field;
 
-import fr.cirad.mgdb.model.mongo.maintypes.GenotypingSample;
+import fr.cirad.mgdb.model.mongo.maintypes.CallSet;
 import fr.cirad.mgdb.model.mongo.maintypes.VariantData;
 import fr.cirad.mgdb.model.mongo.maintypes.VariantRunData;
 import fr.cirad.tools.Helper;
@@ -644,9 +644,9 @@ abstract public class AbstractVariantData
 	 * @param runs the runs
      * @param nAssemblyId ID of the assembly to work with
 	 * @param exportVariantIDs the export variant ids
-	 * @param samplesToExport overall list of samples involved in the export
+	 * @param callSetsToExport overall list of samples involved in the export
 	 * @param individualPositions map providing the index at which each individual must appear in the export file
-	 * @param individuals List of individual IDs for each group
+	 * @param individualsByPop List of individual IDs for each group
 	 * @param annotationFieldThresholds the annotation field thresholds for each group
 	 * @param previousPhasingIds the previous phasing ids
 	 * @param warningOS the warning file writer
@@ -654,43 +654,44 @@ abstract public class AbstractVariantData
 	 * @return the variant context
 	 * @throws Exception the exception
 	 */
-	public VariantContext toVariantContext(MongoTemplate mongoTemplate, Collection<VariantRunData> runs, Integer nAssemblyId, boolean exportVariantIDs, Collection<GenotypingSample> samplesToExport, Map<String, Integer> individualPositions, Map<String /*population*/, Collection<String>> individuals, Map<String /*population*/, HashMap<String, Float>> annotationFieldThresholds, HashMap<String, Object> previousPhasingIds, OutputStream warningOS, String synonym) throws Exception
+	public VariantContext toVariantContext(MongoTemplate mongoTemplate, Collection<VariantRunData> runs, Integer nAssemblyId, boolean exportVariantIDs, Collection<CallSet> callSetsToExport, Map<String, Integer> individualPositions, Map<String /*population*/, Collection<String>> individualsByPop, boolean workWithSamples, Map<String /*population*/, HashMap<String, Float>> annotationFieldThresholds, HashMap<Integer, Object> previousPhasingIds, OutputStream warningOS, String synonym) throws Exception
 	{
 		ArrayList<Genotype> genotypes = new ArrayList<Genotype>();
 		String sRefAllele = knownAlleles.isEmpty() ? null : knownAlleles.iterator().next();
 
-        HashMap<String, SampleGenotype> sampleGenotypes = new HashMap<>();
+        HashMap<Integer, SampleGenotype> sampleGenotypes = new HashMap<>();
         HashSet<VariantRunData> runsWhereDataWasFound = new HashSet<>();
 
         // collect all genotypes from various runs for all individuals
-        HashMap<String/*genotype code*/, LinkedHashSet<String/*sample*/>>[] individualGenotypes = new HashMap[individualPositions.size()];
+        HashMap<String/*genotype code*/, LinkedHashSet<Integer/*callSet*/>>[] individualGenotypes = new HashMap[individualPositions.size()];
         Integer knownAlleleCount = null;
         if (runs != null && !runs.isEmpty())
             for (VariantRunData run : runs) {
-                for (GenotypingSample sample : samplesToExport) {
+                for (CallSet cs : callSetsToExport) {
                     if (sRefAllele == null) {
                         knownAlleleCount = run.getKnownAlleles().size();
                         if (knownAlleleCount > 0)
                             sRefAllele = run.getKnownAlleles().iterator().next();
                     }
     
-                    SampleGenotype sampleGenotype = run.getSampleGenotypes().get(sample.getId());
-                    if (sampleGenotype == null || !gtPassesVcfAnnotationFilters(sample.getIndividual(), sampleGenotype, individuals, annotationFieldThresholds))
+                    String materialName = workWithSamples ? cs.getSampleId() : cs.getIndividual();
+                    SampleGenotype sampleGenotype = run.getSampleGenotypes().get(cs.getId());
+                    if (sampleGenotype == null || !gtPassesVcfAnnotationFilters(materialName, sampleGenotype, individualsByPop, annotationFieldThresholds))
                         continue;    // run contains no data for this sample, or its annotation values are below filter thresholds
 
                     // keep track of SampleGenotype and Run so we can have access to additional info later on
-                    sampleGenotypes.put(sample.getId(), sampleGenotype);
+                    sampleGenotypes.put(cs.getId(), sampleGenotype);
                     runsWhereDataWasFound.add(run);
 
-                    int nIndividualIndex = individualPositions.get(sample.getIndividual());
+                    int nIndividualIndex = individualPositions.get(materialName);
                     if (individualGenotypes[nIndividualIndex] == null)
                         individualGenotypes[nIndividualIndex] = new HashMap<>(1);
-                    LinkedHashSet<String> samplesWithGivenGenotype = individualGenotypes[nIndividualIndex].get(sampleGenotype.getCode());
+                    LinkedHashSet<Integer> samplesWithGivenGenotype = individualGenotypes[nIndividualIndex].get(sampleGenotype.getCode());
                     if (samplesWithGivenGenotype == null) {
                         samplesWithGivenGenotype = new LinkedHashSet<>(2);
                         individualGenotypes[nIndividualIndex].put(sampleGenotype.getCode(), samplesWithGivenGenotype);
                     }
-                    samplesWithGivenGenotype.add(sample.getId());
+                    samplesWithGivenGenotype.add(cs.getId());
                 }
             }
         
@@ -736,11 +737,11 @@ abstract public class AbstractVariantData
                 continue;    // no genotype for this individual
             }
 
-            String spId = individualGenotypes[nIndividualIndex].get(mostFrequentGenotype).iterator().next();    // any will do (although ideally we should make sure we export the best annotation values found)
-            SampleGenotype sampleGenotype = sampleGenotypes.get(spId);
+            int csId = individualGenotypes[nIndividualIndex].get(mostFrequentGenotype).iterator().next();    // any will do (although ideally we should make sure we export the best annotation values found)
+            SampleGenotype sampleGenotype = sampleGenotypes.get(csId);
 
             Object currentPhId = sampleGenotype.getAdditionalInfo().get(GT_FIELD_PHASED_ID);
-            boolean isPhased = currentPhId != null && currentPhId.equals(previousPhasingIds.get(spId));
+            boolean isPhased = currentPhId != null && currentPhId.equals(previousPhasingIds.get(csId));
             String gtCode = isPhased ? (String) sampleGenotype.getAdditionalInfo().get(GT_FIELD_PHASED_GT) : mostFrequentGenotype;
             List<String> alleles = genotypeStringCache.get(gtCode);
             if (alleles == null) {
@@ -752,7 +753,7 @@ abstract public class AbstractVariantData
                 warningOS.write(("- Dissimilar genotypes found for variant " + (synonym == null ? getVariantId() : synonym) + ", individual " + entry.getKey() + ". " + "Exporting most frequent: " + StringUtils.join(alleles, "/") + "\n").getBytes());
 
             ArrayList<Allele> individualAlleles = new ArrayList<>(alleles.size());
-            previousPhasingIds.put(spId, currentPhId == null ? getVariantId() : currentPhId);
+            previousPhasingIds.put(csId, currentPhId == null ? getVariantId() : currentPhId);
 //            if (alleles.size() == 0)
 //                continue;    /* skip this individual because there is no genotype for it */
             

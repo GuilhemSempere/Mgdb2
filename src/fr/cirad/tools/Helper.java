@@ -593,7 +593,7 @@ public class Helper {
 	}
 
 	public static HashMap<Integer, List<String>> getRunsByProjectFromCallSetIDs(String sModule, Collection<Integer> callSetIDs) {
-	    List<GenotypingSample> samples = MongoTemplateManager.get(sModule).find(new Query(Criteria.where("_id").in(GenotypingSample.FIELDNAME_CALLSETS + "." + "_id")), GenotypingSample.class);
+	    List<GenotypingSample> samples = MongoTemplateManager.get(sModule).find(new Query(Criteria.where(GenotypingSample.FIELDNAME_CALLSETS + "." + "_id").in(callSetIDs)), GenotypingSample.class);
 	    return samples.stream().map(sp -> sp.getCallSets()).flatMap(Collection::stream)
 	        .collect(Collectors.groupingBy(
 	            CallSet::getProjectId,
