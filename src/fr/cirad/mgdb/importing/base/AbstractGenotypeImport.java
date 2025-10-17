@@ -41,6 +41,7 @@ import org.springframework.data.mongodb.core.query.Query;
 import com.mongodb.client.MongoCursor;
 
 import fr.cirad.mgdb.importing.IndividualMetadataImport;
+import fr.cirad.mgdb.model.mongo.subtypes.Callset;
 import fr.cirad.mgdb.model.mongo.subtypes.ReferencePosition;
 import fr.cirad.mgdb.model.mongodao.MgdbDao;
 import fr.cirad.tools.Helper;
@@ -71,8 +72,8 @@ public abstract class AbstractGenotypeImport<T extends ImportParameters> {
 	private boolean m_fSamplesPersisted = false;
 
 	protected Map<String /* individual or sample name */, GenotypingSample> m_providedIdToSampleMap = null;
-    protected Map<String /* individual or sample name */, CallSet> m_providedIdToCallsetMap = null;
-    protected List<CallSet> m_callsets = new ArrayList<>();
+    protected Map<String /* individual or sample name */, Callset> m_providedIdToCallsetMap = null;
+    protected List<Callset> m_callsets = new ArrayList<>();
 	
 	protected String brapiEndPointUriForNamingIndividuals;
 	protected String brapiEndPointTokenForNamingIndividuals;
@@ -553,7 +554,7 @@ public abstract class AbstractGenotypeImport<T extends ImportParameters> {
 
     protected void createCallSetsSamplesIndividuals(List<String> biologicalMaterialIDs, MongoTemplate mongoTemplate, int projId, String sRun, Map<String, String> sampleToIndividualMap, ProgressIndicator progress) throws Exception {
         m_providedIdToSampleMap = new HashMap<String /*individual*/, GenotypingSample>();
-        m_providedIdToCallsetMap = new HashMap<String /*individual*/, CallSet>();
+        m_providedIdToCallsetMap = new HashMap<String /*individual*/, Callset>();
         HashSet<Individual> indsToAdd = new HashSet<>();
         HashSet<GenotypingSample> samplesToAdd = new HashSet<>(), samplesToUpdate = new HashSet<>();
         boolean fDbAlreadyContainedIndividuals = mongoTemplate.findOne(new Query(), Individual.class) != null;
@@ -583,8 +584,8 @@ public abstract class AbstractGenotypeImport<T extends ImportParameters> {
             	samplesToUpdate.add(sample);
             }
             m_providedIdToSampleMap.put(sIndOrSpId, sample);  // add a sample for this individual to the project
-            int callsetId = AutoIncrementCounter.getNextSequence(mongoTemplate, MongoTemplateManager.getMongoCollectionName(CallSet.class));
-            CallSet cs = new CallSet(callsetId, sample/*, sIndividual*/, projId, sRun);
+            int callsetId = AutoIncrementCounter.getNextSequence(mongoTemplate, MongoTemplateManager.getMongoCollectionName(Callset.class));
+            Callset cs = new Callset(callsetId, sample, projId, sRun);
             sample.getCallSets().add(cs);
             m_providedIdToCallsetMap.put(sIndOrSpId, cs);
         }
@@ -592,7 +593,7 @@ public abstract class AbstractGenotypeImport<T extends ImportParameters> {
         insertNewCallSetsSamplesIndividuals(mongoTemplate, indsToAdd, samplesToAdd, samplesToUpdate);
     }
 
-    protected void insertNewCallSetsSamplesIndividuals(MongoTemplate mongoTemplate, Set<Individual> indsToAdd, Set<GenotypingSample> samplesToAdd, Set<GenotypingSample> samplesToUpdate) throws InterruptedException {
+    protected void insertNewCallSetsSamplesIndividuals(MongoTemplate mongoTemplate, Collection<Individual> indsToAdd, Collection<GenotypingSample> samplesToAdd, Collection<GenotypingSample> samplesToUpdate) throws InterruptedException {
         final int importChunkSize = 1000;
 
         // Sample update

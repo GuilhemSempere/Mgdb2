@@ -47,6 +47,7 @@ import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.query.Query;
 
 import fr.cirad.mgdb.importing.base.AbstractGenotypeImport;
+import fr.cirad.mgdb.model.mongo.subtypes.Callset;
 import fr.cirad.mgdb.model.mongo.subtypes.ReferencePosition;
 import fr.cirad.mgdb.model.mongo.subtypes.Run;
 import fr.cirad.mgdb.model.mongo.subtypes.SampleGenotype;
@@ -258,7 +259,7 @@ public class HapMapImport extends AbstractGenotypeImport<FileImportParameters> {
         final MongoTemplate finalMongoTemplate = mongoTemplate;
         final Assembly finalAssembly = assembly;
         m_providedIdToSampleMap = new HashMap<String /*individual*/, GenotypingSample>();
-        m_providedIdToCallsetMap = new HashMap<String /*individual*/, CallSet>();
+        m_providedIdToCallsetMap = new HashMap<String /*individual*/, Callset>();
 
         for (int threadIndex = 0; threadIndex < nImportThreads; threadIndex++) {
             importThreads[threadIndex] = new Thread() {

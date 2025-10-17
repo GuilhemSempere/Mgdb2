@@ -1,4 +1,4 @@
-package fr.cirad.mgdb.model.mongo.maintypes;
+package fr.cirad.mgdb.model.mongo.subtypes;
 
 import javax.ejb.ObjectNotFoundException;
 import org.springframework.data.annotation.Id;
@@ -7,12 +7,11 @@ import org.springframework.data.annotation.TypeAlias;
 import org.springframework.data.mongodb.core.mapping.Document;
 import org.springframework.data.mongodb.core.mapping.Field;
 
-@Document(collection = "callsets")
-@TypeAlias("CS")
-public class CallSet {
+import fr.cirad.mgdb.model.mongo.maintypes.GenotypingSample;
 
-//    public final static String FIELDNAME_SAMPLE = "sp";
-//    public final static String FIELDNAME_INDIVIDUAL = "in";
+@Document(collection = "callsets")
+//@TypeAlias("CS")
+public class Callset {
     public final static String FIELDNAME_PROJECT_ID = "pj";
     public final static String FIELDNAME_RUN = "rn";
 
@@ -36,10 +35,10 @@ public class CallSet {
     @Field(FIELDNAME_RUN)
     private String run;
 
-    public CallSet() {
+    public Callset() {
     }
 
-    public CallSet(int id, GenotypingSample sample, int projectId, String run) {
+    public Callset(int id, GenotypingSample sample, int projectId, String run) {
         this.id = id;
         this.sampleId = sample.getId();
         this.individual = sample.getIndividual();

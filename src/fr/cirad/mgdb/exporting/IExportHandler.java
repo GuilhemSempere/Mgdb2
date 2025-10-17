@@ -45,10 +45,10 @@ import com.mongodb.client.model.Collation;
 
 import fr.cirad.mgdb.exporting.tools.ExportManager.ExportOutputs;
 import fr.cirad.mgdb.model.mongo.maintypes.Assembly;
-import fr.cirad.mgdb.model.mongo.maintypes.CallSet;
 import fr.cirad.mgdb.model.mongo.maintypes.GenotypingSample;
 import fr.cirad.mgdb.model.mongo.maintypes.Individual;
 import fr.cirad.mgdb.model.mongo.maintypes.VariantRunData;
+import fr.cirad.mgdb.model.mongo.subtypes.Callset;
 import fr.cirad.mgdb.model.mongodao.MgdbDao;
 import fr.cirad.tools.AlphaNumericComparator;
 import fr.cirad.tools.Helper;
@@ -269,9 +269,9 @@ public interface IExportHandler
     	}
 	}
     
-    public static Map<String, Integer> buildIndividualPositions(Collection<CallSet> callSetsToExport, boolean workWithSamples) throws ObjectNotFoundException {
+    public static Map<String, Integer> buildIndividualPositions(Collection<Callset> callSetsToExport, boolean workWithSamples) throws ObjectNotFoundException {
     	TreeSet<String> sortedIndividuals = new TreeSet<>(new AlphaNumericComparator<String>());
-		for (CallSet cs : callSetsToExport)
+		for (Callset cs : callSetsToExport)
 			sortedIndividuals.add(workWithSamples ? cs.getSampleId() : cs.getIndividual());			
 
 		Map<String, Integer> individualPositions = new LinkedHashMap<>();

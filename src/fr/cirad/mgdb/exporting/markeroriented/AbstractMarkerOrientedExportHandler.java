@@ -35,8 +35,8 @@ import org.springframework.context.annotation.ClassPathScanningCandidateComponen
 import org.springframework.core.type.filter.AssignableTypeFilter;
 
 import fr.cirad.mgdb.exporting.IExportHandler;
-import fr.cirad.mgdb.model.mongo.maintypes.CallSet;
 import fr.cirad.mgdb.model.mongo.maintypes.GenotypingSample;
+import fr.cirad.mgdb.model.mongo.subtypes.Callset;
 import fr.cirad.tools.ProgressIndicator;
 import fr.cirad.tools.mgdb.VariantQueryWrapper;
 
@@ -74,7 +74,7 @@ public abstract class AbstractMarkerOrientedExportHandler implements IExportHand
      * @param readyToExportFiles files to export along with the genotyping data
      * @throws Exception the exception
      */
-    abstract public void exportData(OutputStream outputStream, String sModule, Integer nAssemblyId, String sExportingUser, ProgressIndicator progress, String tmpVarCollName, VariantQueryWrapper varQueryWrapper, long markerCount, Map<String, String> markerSynonyms, Map<String, Collection<String>> individualsByPop, boolean workWithSamples, Map<String, HashMap<String, Float>> annotationFieldThresholds, Collection<CallSet> callSetsToExport, Collection<String> individualMetadataFieldsToExport, Map<String, InputStream> readyToExportFiles) throws Exception;
+    abstract public void exportData(OutputStream outputStream, String sModule, Integer nAssemblyId, String sExportingUser, ProgressIndicator progress, String tmpVarCollName, VariantQueryWrapper varQueryWrapper, long markerCount, Map<String, String> markerSynonyms, Map<String, Collection<String>> individualsByPop, boolean workWithSamples, Map<String, HashMap<String, Float>> annotationFieldThresholds, Collection<Callset> callSetsToExport, Collection<String> individualMetadataFieldsToExport, Map<String, InputStream> readyToExportFiles) throws Exception;
 
     /**
 	 * Gets the marker oriented export handlers.

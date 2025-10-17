@@ -43,6 +43,7 @@ import com.opencsv.CSVReader;
 
 import fr.cirad.mgdb.importing.base.AbstractGenotypeImport;
 import fr.cirad.mgdb.model.mongo.subtypes.AbstractVariantData;
+import fr.cirad.mgdb.model.mongo.subtypes.Callset;
 import fr.cirad.mgdb.model.mongo.subtypes.ReferencePosition;
 import fr.cirad.mgdb.model.mongo.subtypes.Run;
 import fr.cirad.mgdb.model.mongo.subtypes.SampleGenotype;
@@ -336,8 +337,8 @@ public class IntertekImport extends AbstractGenotypeImport<FileImportParameters>
                         }
 
                         if (m_providedIdToCallsetMap.get(sIndOrSpId) == null) {
-                            int callsetId = AutoIncrementCounter.getNextSequence(mongoTemplate, MongoTemplateManager.getMongoCollectionName(CallSet.class));
-                            m_providedIdToCallsetMap.put(sIndOrSpId, new CallSet(callsetId, sample/*, sIndividual*/, project.getId(), params.getsRun()));
+                            int callsetId = AutoIncrementCounter.getNextSequence(mongoTemplate, MongoTemplateManager.getMongoCollectionName(Callset.class));
+                            m_providedIdToCallsetMap.put(sIndOrSpId, new Callset(callsetId, sample/*, sIndividual*/, project.getId(), params.getsRun()));
                         }
 
                         SampleGenotype sampleGt = new SampleGenotype(gtCode);

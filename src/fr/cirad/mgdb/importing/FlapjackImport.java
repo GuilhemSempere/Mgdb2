@@ -135,7 +135,7 @@ public class FlapjackImport extends RefactoredImport<FlapjackImportParameters> {
                 false,//fSkipMonomorphic
                 mode, //importMode
                 (new File(args[4]).toURI().toURL()),
-                new File(args[5])
+                (new File(args[5]).toURI().toURL())
         );
         new FlapjackImport().importToMongo(params);
     }
@@ -148,8 +148,8 @@ public class FlapjackImport extends RefactoredImport<FlapjackImportParameters> {
         String assemblyName = params.getAssemblyName();
         Map<String, String> sampleToIndividualMap = params.getSampleToIndividualMap();
         boolean fSkipMonomorphic = params.isfSkipMonomorphic();
-        URL mapFileURL = params.getMainFileUrl();
-        File genotypeFile = params.getGenotypeFile();
+        URL mapFileURL = params.getMapFileUrl();
+        URL genotypeFileURL = params.getMainFileUrl();
         Integer nPloidy = params.getnPloidy();
         int importMode = params.getImportMode();
 
@@ -199,7 +199,7 @@ public class FlapjackImport extends RefactoredImport<FlapjackImportParameters> {
         ArrayList<String> individualNames = new ArrayList<>();
         try {
             m_nCurrentlyTransposingMatrixCount++;
-            nPloidy = transposeGenotypeFile(genotypeFile, rotatedFile, nPloidy, nonSnpVariantTypeMap, individualNames, fSkipMonomorphic, progress);
+            nPloidy = transposeGenotypeFile(genotypeFileURL, rotatedFile, nPloidy, nonSnpVariantTypeMap, individualNames, fSkipMonomorphic, progress);
             if (importMode == 0 && createdProject == null && project.getPloidyLevel() != nPloidy)
                 throw new Exception("Ploidy levels differ between existing (" + project.getPloidyLevel() + ") and provided (" + nPloidy + ") data!");
             project.setPloidyLevel(nPloidy);
@@ -237,7 +237,8 @@ public class FlapjackImport extends RefactoredImport<FlapjackImportParameters> {
 
     @Override
     protected void initReader(FlapjackImportParameters params) throws Exception {
-        rotatedFile = File.createTempFile("fjImport-" + params.getGenotypeFile().getName() + "-", ".tsv");
+    	String path = params.getMainFileUrl().getPath();
+        rotatedFile = File.createTempFile("fjImport-" + path.substring(path.lastIndexOf('/') + 1) + "-", ".tsv");
     }
 
     @Override
@@ -264,7 +265,7 @@ public class FlapjackImport extends RefactoredImport<FlapjackImportParameters> {
 
     /**
      * 
-     * @param genotypeFile
+     * @param genotypeFileURL
      * @param outputFile
      * @param nProvidedPloidy 
      * @param nonSnpVariantTypeMapToFill
@@ -274,7 +275,7 @@ public class FlapjackImport extends RefactoredImport<FlapjackImportParameters> {
      * @return dataset's ploidy
      * @throws Exception
      */
-    private int transposeGenotypeFile(File genotypeFile, File outputFile, Integer nProvidedPloidy, Map<String, Type> nonSnpVariantTypeMapToFill, ArrayList<String> individualListToFill, boolean fSkipMonomorphic, ProgressIndicator progress) throws Exception {
+    private int transposeGenotypeFile(URL genotypeFileURL, File outputFile, Integer nProvidedPloidy, Map<String, Type> nonSnpVariantTypeMapToFill, ArrayList<String> individualListToFill, boolean fSkipMonomorphic, ProgressIndicator progress) throws Exception {
         long before = System.currentTimeMillis();
 
         StackTraceElement[] stacktrace = Thread.currentThread().getStackTrace();
@@ -296,7 +297,7 @@ public class FlapjackImport extends RefactoredImport<FlapjackImportParameters> {
         blockStartMarkers.add(0);
 
         // Read the line headers, fill the individual map and creates the block positions arrays
-        BufferedReader reader = new BufferedReader(new FileReader(genotypeFile));
+        BufferedReader reader = new BufferedReader(new InputStreamReader(genotypeFileURL.openStream()));
         String initLine;
         int nIndividuals = 0, lineno = -1;
         while ((initLine = reader.readLine()) != null) {
@@ -380,7 +381,7 @@ public class FlapjackImport extends RefactoredImport<FlapjackImportParameters> {
                         ArrayList<StringBuilder> transposed = new ArrayList<StringBuilder>();
 
                         while (blockStartMarkers.get(blockStartMarkers.size() - 1) < cVariants && progress.getError() == null && !progress.isAborted()) {
-                        	FileReader reader = new FileReader(genotypeFile);
+                        	BufferedReader reader = new BufferedReader(new InputStreamReader(genotypeFileURL.openStream()));
                             try {
                                 int blockIndex, blockSize, blockStart;
                                 int bufferPosition = 0, bufferLength = 0;

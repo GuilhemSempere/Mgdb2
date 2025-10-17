@@ -776,8 +776,9 @@ public class MongoTemplateManager implements ApplicationContextAware {
 	public static void unlockProjectForWriting(String sModule, String sProject) {
 		Set<String> moduleLockedProjects = currentlyImportedProjects.get(sModule);
 		if (moduleLockedProjects == null)
-			throw new NoSuchElementException("There are currently no locked projects in database " + sModule);
-		moduleLockedProjects.remove(sProject);
+			LOG.error("There are currently no locked projects in database " + sModule);
+		else
+			moduleLockedProjects.remove(sProject);
 	}
 
 	public static void lockModuleForWriting(String sModule) {

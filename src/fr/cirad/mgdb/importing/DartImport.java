@@ -1,8 +1,9 @@
 package fr.cirad.mgdb.importing;
 
-import java.io.File;
+import java.io.BufferedReader;
 import java.io.IOException;
-import java.net.URLDecoder;
+import java.io.InputStreamReader;
+import java.net.URL;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
@@ -22,17 +23,20 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
-import fr.cirad.mgdb.importing.parameters.FileImportParameters;
-import fr.cirad.mgdb.model.mongo.maintypes.*;
-import htsjdk.variant.vcf.VCFHeader;
-import htsjdk.variant.vcf.VCFHeaderLineType;
-import htsjdk.variant.vcf.VCFInfoHeaderLine;
 import org.apache.log4j.Logger;
 import org.bson.types.ObjectId;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.query.Query;
 
 import fr.cirad.mgdb.importing.base.AbstractGenotypeImport;
+import fr.cirad.mgdb.importing.parameters.FileImportParameters;
+import fr.cirad.mgdb.model.mongo.maintypes.Assembly;
+import fr.cirad.mgdb.model.mongo.maintypes.DBVCFHeader;
+import fr.cirad.mgdb.model.mongo.maintypes.GenotypingProject;
+import fr.cirad.mgdb.model.mongo.maintypes.GenotypingSample;
+import fr.cirad.mgdb.model.mongo.maintypes.VariantData;
+import fr.cirad.mgdb.model.mongo.maintypes.VariantRunData;
+import fr.cirad.mgdb.model.mongo.subtypes.Callset;
 import fr.cirad.mgdb.model.mongo.subtypes.ReferencePosition;
 import fr.cirad.mgdb.model.mongo.subtypes.Run;
 import fr.cirad.mgdb.model.mongo.subtypes.SampleGenotype;
@@ -41,6 +45,9 @@ import fr.cirad.tools.Helper;
 import fr.cirad.tools.ProgressIndicator;
 import htsjdk.variant.variantcontext.Allele;
 import htsjdk.variant.variantcontext.VariantContext.Type;
+import htsjdk.variant.vcf.VCFHeader;
+import htsjdk.variant.vcf.VCFHeaderLineType;
+import htsjdk.variant.vcf.VCFInfoHeaderLine;
 
 public class DartImport extends AbstractGenotypeImport<FileImportParameters> {
 
@@ -112,10 +119,8 @@ public class DartImport extends AbstractGenotypeImport<FileImportParameters> {
 		}
     }
 
-    public DartIterator getDartInfo(String path) throws Exception {
-//        FileReader fileReader = new FileReader(path);
-
-        Scanner scanner = new Scanner(new File(path));
+    public DartIterator getDartInfo(URL url) throws Exception {
+        Scanner scanner = new Scanner(new BufferedReader(new InputStreamReader(url.openStream())));
         HashMap<String, Integer> fieldPositions = new HashMap<String, Integer>();
 	    String[] columnNames = null;
 
@@ -289,7 +294,7 @@ public class DartImport extends AbstractGenotypeImport<FileImportParameters> {
         LOG.debug("Importing project '" + sProject + "' into " + sModule + " using " + nNConcurrentThreads + " threads");
 
 //            Iterator<DartInfo> it = reader.iterator();
-        DartIterator dataReader = getDartInfo(URLDecoder.decode(params.getMainFileUrl().getPath(), "UTF-8"));
+        DartIterator dataReader = getDartInfo(params.getMainFileUrl());
         BlockingQueue<Runnable> saveServiceQueue = new LinkedBlockingQueue<Runnable>(saveServiceQueueLength(nNConcurrentThreads));
         ExecutorService saveService = new ThreadPoolExecutor(1, saveServiceThreads(nNConcurrentThreads), 30, TimeUnit.SECONDS, saveServiceQueue, new ThreadPoolExecutor.CallerRunsPolicy());
         final Collection<Integer> assemblyIDs = mongoTemplate.findDistinct(new Query(), "_id", Assembly.class, Integer.class);
@@ -473,12 +478,13 @@ public class DartImport extends AbstractGenotypeImport<FileImportParameters> {
 
     @Override
     protected void initReader(FileImportParameters params) throws Exception {
-        dartIterator = getDartInfo(URLDecoder.decode(params.getMainFileUrl().getPath(), "UTF-8"));
+        dartIterator = getDartInfo(params.getMainFileUrl());
     }
 
     @Override
     protected void closeResource() throws IOException {
-        dartIterator.close();
+    	if (dartIterator != null)
+    		dartIterator.close();
     }
 
     @Override
@@ -570,7 +576,7 @@ public class DartImport extends AbstractGenotypeImport<FileImportParameters> {
             try {
 	            SampleGenotype aGT = new SampleGenotype(alleles.stream().map(allele -> alleleIndexMap.get(allele)).sorted().map(index -> index.toString()).collect(Collectors.joining("/")));
 				GenotypingSample sample = m_providedIdToSampleMap.get(sIndOrSpId);
-                CallSet callset = m_providedIdToCallsetMap.get(sIndOrSpId);
+                Callset callset = m_providedIdToCallsetMap.get(sIndOrSpId);
 	        	if (sample == null)
 	        		throw new Exception("Sample / individual mapping contains no individual for sample " + sIndOrSpId);
 				vrd.getSampleGenotypes().put(callset.getId(), aGT);

@@ -36,7 +36,6 @@ import org.bson.codecs.pojo.annotations.BsonProperty;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.mapping.Field;
 
-import fr.cirad.mgdb.model.mongo.maintypes.CallSet;
 import fr.cirad.mgdb.model.mongo.maintypes.VariantData;
 import fr.cirad.mgdb.model.mongo.maintypes.VariantRunData;
 import fr.cirad.tools.Helper;
@@ -654,7 +653,7 @@ abstract public class AbstractVariantData
 	 * @return the variant context
 	 * @throws Exception the exception
 	 */
-	public VariantContext toVariantContext(MongoTemplate mongoTemplate, Collection<VariantRunData> runs, Integer nAssemblyId, boolean exportVariantIDs, Collection<CallSet> callSetsToExport, Map<String, Integer> individualPositions, Map<String /*population*/, Collection<String>> individualsByPop, boolean workWithSamples, Map<String /*population*/, HashMap<String, Float>> annotationFieldThresholds, HashMap<Integer, Object> previousPhasingIds, OutputStream warningOS, String synonym) throws Exception
+	public VariantContext toVariantContext(MongoTemplate mongoTemplate, Collection<VariantRunData> runs, Integer nAssemblyId, boolean exportVariantIDs, Collection<Callset> callSetsToExport, Map<String, Integer> individualPositions, Map<String /*population*/, Collection<String>> individualsByPop, boolean workWithSamples, Map<String /*population*/, HashMap<String, Float>> annotationFieldThresholds, HashMap<Integer, Object> previousPhasingIds, OutputStream warningOS, String synonym) throws Exception
 	{
 		ArrayList<Genotype> genotypes = new ArrayList<Genotype>();
 		String sRefAllele = knownAlleles.isEmpty() ? null : knownAlleles.iterator().next();
@@ -667,7 +666,7 @@ abstract public class AbstractVariantData
         Integer knownAlleleCount = null;
         if (runs != null && !runs.isEmpty())
             for (VariantRunData run : runs) {
-                for (CallSet cs : callSetsToExport) {
+                for (Callset cs : callSetsToExport) {
                     if (sRefAllele == null) {
                         knownAlleleCount = run.getKnownAlleles().size();
                         if (knownAlleleCount > 0)

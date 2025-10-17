@@ -50,9 +50,9 @@ import com.mongodb.client.MongoCursor;
 
 import fr.cirad.mgdb.exporting.IExportHandler;
 import fr.cirad.mgdb.model.mongo.maintypes.Assembly;
-import fr.cirad.mgdb.model.mongo.maintypes.CallSet;
 import fr.cirad.mgdb.model.mongo.maintypes.GenotypingSample;
 import fr.cirad.mgdb.model.mongo.maintypes.VariantData;
+import fr.cirad.mgdb.model.mongo.subtypes.Callset;
 import fr.cirad.mgdb.model.mongo.subtypes.ReferencePosition;
 import fr.cirad.mgdb.model.mongo.subtypes.Run;
 import fr.cirad.mgdb.model.mongo.subtypes.VariantRunDataId;
@@ -386,7 +386,7 @@ public class Helper {
         return t -> map.putIfAbsent(keyExtractor.apply(t), Boolean.TRUE) == null;
     }
 
-    public static HashMap<Integer /*project*/, List<String /*runs*/>> getRunsByProjectInCallsetCollection(Collection<CallSet> samples) {
+    public static HashMap<Integer /*project*/, List<String /*runs*/>> getRunsByProjectInCallsetCollection(Collection<Callset> samples) {
 		HashMap<Integer, List<String>> runsByProject = new HashMap<>();
 		for (String projectAndRun : samples.stream().map(sp -> sp.getProjectId() + ID_SEPARATOR + sp.getRun()).distinct().collect(Collectors.toList())) {
 			String[] separateIDs = projectAndRun.split(ID_SEPARATOR);
@@ -591,29 +591,40 @@ public class Helper {
 	    }
 	    return result.substring(0, result.length() - 1);
 	}
-
-	public static HashMap<Integer, List<String>> getRunsByProjectFromCallSetIDs(String sModule, Collection<Integer> callSetIDs) {
-	    List<GenotypingSample> samples = MongoTemplateManager.get(sModule).find(new Query(Criteria.where(GenotypingSample.FIELDNAME_CALLSETS + "." + "_id").in(callSetIDs)), GenotypingSample.class);
-	    return samples.stream().map(sp -> sp.getCallSets()).flatMap(Collection::stream)
-	        .collect(Collectors.groupingBy(
-	            CallSet::getProjectId,
-	            HashMap::new,
-	            Collectors.mapping(CallSet::getRun,
-	                Collectors.collectingAndThen(
-	                    Collectors.toSet(),  // use toSet() to ensure distinct runs
-	                    set -> new ArrayList<>(set)
-	                )
-	            )
-	        ));
-	}
+//
+//	public static HashMap<Integer, List<String>> getRunsByProjectFromCallSetIDs(String sModule, Collection<Integer> callSetIDs) {
+////	    List<CallSet> callSets = MongoTemplateManager.get(sModule).findDistinct(new Query(Criteria.where(GenotypingSample.FIELDNAME_CALLSETS + "." + "_id").in(callSetIDs)), GenotypingSample.FIELDNAME_CALLSETS, GenotypingSample.class, CallSet.class);
+////	    return callSets.stream()
+////	        .collect(Collectors.groupingBy(
+////	            CallSet::getProjectId,
+////	            HashMap::new,
+////	            Collectors.mapping(CallSet::getRun,
+////	                Collectors.collectingAndThen(
+////	                    Collectors.toSet(),  // use toSet() to ensure distinct runs
+////	                    set -> new ArrayList<>(set)
+////	                )
+////	            )
+////	        ));
+//		return MgdbDao.findCallSetsByIDs(MongoTemplateManager.get(sModule), callSetIDs).stream().collect(Collectors.groupingBy(
+//            CallSet::getProjectId,
+//            HashMap::new,
+//            Collectors.mapping(CallSet::getRun,
+//                Collectors.collectingAndThen(
+//                    Collectors.toSet(),  // use toSet() to ensure distinct runs
+//                    set -> new ArrayList<>(set)
+//                )
+//            )
+//        ));
+//	}
+	
 
 	public static HashMap<Integer, List<String>> getRunsByProjectFromSampleIDs(String sModule, Collection<String> sampleIDs) {
 	    List<GenotypingSample> samples = MongoTemplateManager.get(sModule).find(new Query(Criteria.where("_id").in(sampleIDs)), GenotypingSample.class);
 	    return samples.stream().map(sp -> sp.getCallSets()).flatMap(Collection::stream)
 	        .collect(Collectors.groupingBy(
-	            CallSet::getProjectId,
+	            Callset::getProjectId,
 	            HashMap::new,
-	            Collectors.mapping(CallSet::getRun,
+	            Collectors.mapping(Callset::getRun,
 	                Collectors.collectingAndThen(
 	                    Collectors.toSet(),  // use toSet() to ensure distinct runs
 	                    set -> new ArrayList<>(set)

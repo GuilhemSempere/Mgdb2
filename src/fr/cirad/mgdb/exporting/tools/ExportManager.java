@@ -63,6 +63,7 @@ import com.mongodb.client.MongoCursor;
 
 import fr.cirad.mgdb.exporting.IExportHandler;
 import fr.cirad.mgdb.model.mongo.subtypes.AbstractVariantData;
+import fr.cirad.mgdb.model.mongo.subtypes.Callset;
 import fr.cirad.mgdb.model.mongo.subtypes.ReferencePosition;
 import fr.cirad.mgdb.model.mongo.subtypes.VariantRunDataId;
 import fr.cirad.tools.AlphaNumericComparator;
@@ -146,7 +147,7 @@ public class ExportManager
 
     public static final CodecRegistry pojoCodecRegistry = CodecRegistries.fromRegistries(MongoClientSettings.getDefaultCodecRegistry(), CodecRegistries.fromProviders(PojoCodecProvider.builder().register(new IntKeyMapPropertyCodecProvider()).automatic(true).build()));
 
-	public ExportManager(String sModule, Integer nAssemblyId, MongoCollection<Document> varColl, Class resultType, Document variantQuery, Collection<CallSet> callSetsToExport, boolean fIncludeMetadata, int nQueryChunkSize, AbstractExportWriter exportWriter, Long markerCount, ProgressIndicator progress) throws ObjectNotFoundException {
+	public ExportManager(String sModule, Integer nAssemblyId, MongoCollection<Document> varColl, Class resultType, Document variantQuery, Collection<Callset> callSetsToExport, boolean fIncludeMetadata, int nQueryChunkSize, AbstractExportWriter exportWriter, Long markerCount, ProgressIndicator progress) throws ObjectNotFoundException {
         this.progress = progress;
         this.nQueryChunkSize = nQueryChunkSize;
         this.module = sModule;

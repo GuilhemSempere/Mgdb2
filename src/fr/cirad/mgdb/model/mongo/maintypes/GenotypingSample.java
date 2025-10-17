@@ -24,6 +24,8 @@ import org.springframework.data.annotation.TypeAlias;
 import org.springframework.data.mongodb.core.mapping.Document;
 import org.springframework.data.mongodb.core.mapping.Field;
 
+import fr.cirad.mgdb.model.mongo.subtypes.Callset;
+
 /**
  * The Class Sample.
  */
@@ -45,7 +47,7 @@ public class GenotypingSample {
 
 	/** The callsets. */
 	@Field(FIELDNAME_CALLSETS)
-	private HashSet<CallSet> callSets = new HashSet<>();
+	private HashSet<Callset> callSets = new HashSet<>();
 	
 	@Transient
 	private boolean detached = false;
@@ -67,11 +69,11 @@ public class GenotypingSample {
 		this.individual = individual;
 	}
 
-	public HashSet<CallSet> getCallSets() {
+	public HashSet<Callset> getCallSets() {
 		return callSets;
 	}
 
-	public void setCallSets(HashSet<CallSet> callSets) {
+	public void setCallSets(HashSet<Callset> callSets) {
 		this.callSets = callSets;
 	}
 
