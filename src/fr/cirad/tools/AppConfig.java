@@ -139,4 +139,16 @@ public class AppConfig {
         }
         return result;
     }
+
+    public int getAlleleSearchMaxTotalPageSize() {
+        try {
+            String value = get("alleleSearchMaxTotalPageSize");
+            if (value != null) {
+                return Integer.parseInt(value);
+            }
+        } catch (NumberFormatException e) {
+            LOG.info("Invalid value for maxAlleleSearchTotalCount in config, using default: 10000", e);
+        }
+        return 10000; // default value
+    }
 }
