@@ -344,9 +344,10 @@ public class MongoTemplateManager implements ApplicationContextAware {
 						MgdbDao.addRunsToVariantCollectionIfNecessary(mongoTemplate);
 						MgdbDao.ensureCustomMetadataIndexes(mongoTemplate);
 						MgdbDao.ensurePositionIndexes(mongoTemplate, Arrays.asList(mongoTemplate.getCollection(mongoTemplate.getCollectionName(VariantData.class))), false, false);	// FIXME: move to end of addRunsToVariantCollectionIfNecessary()
+						MgdbDao.createCallsetsFromSamplesIfNecessary(mongoTemplate);
 						MgdbDao.createGeneCacheIfNecessary(db, MgdbDao.COLLECTION_NAME_GENE_CACHE);
                     } catch (Exception e) {
-						LOG.error("Error while adding run info to variants collection for db " + db, e);
+						LOG.error("Error while adding ensuring data model is up to date for database " + db, e);
 					}
         		}
         	});

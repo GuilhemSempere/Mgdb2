@@ -22,6 +22,7 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -53,12 +54,16 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.aggregation.Aggregation;
+import org.springframework.data.mongodb.core.aggregation.AggregationExpression;
 import org.springframework.data.mongodb.core.aggregation.AggregationOperation;
 import org.springframework.data.mongodb.core.aggregation.AggregationOptions;
 import org.springframework.data.mongodb.core.aggregation.AggregationResults;
+import org.springframework.data.mongodb.core.aggregation.ArrayOperators;
 import org.springframework.data.mongodb.core.aggregation.Fields;
 import org.springframework.data.mongodb.core.aggregation.LookupOperation;
 import org.springframework.data.mongodb.core.aggregation.ObjectOperators.MergeObjects;
+import org.springframework.data.mongodb.core.aggregation.OutOperation;
+import org.springframework.data.mongodb.core.aggregation.ProjectionOperation;
 import org.springframework.data.mongodb.core.aggregation.VariableOperators.Let.ExpressionVariable;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
@@ -1222,7 +1227,6 @@ public class MgdbDao {
         return result;
 	}
 
-	
     public static void addRunsToVariantCollectionIfNecessary(MongoTemplate mongoTemplate) throws Exception {
         String variantDataCollName = mongoTemplate.getCollectionName(VariantData.class), copyCollectionName = variantDataCollName + "_copy";
         String info = "Ensuring presence of run info in variants collection for db " + mongoTemplate.getDb().getName();
@@ -1326,5 +1330,35 @@ public class MgdbDao {
         }
         LOG.debug("Creating index on field " + individualIdField + " of collection " + coll.getNamespace());
         coll.createIndex(new BasicDBObject(individualIdField, 1));
+	}
+
+	public static void createCallsetsFromSamplesIfNecessary(MongoTemplate mongoTemplate) {
+		MongoCollection<Document> coll = mongoTemplate.getCollection(mongoTemplate.getCollectionName(GenotypingSample.class));
+		if (mongoTemplate.count(new Query(), "samples") > mongoTemplate.count(new Query(), GenotypingSample.class)) {
+			AggregationExpression csExpression = context ->
+		    new Document("$concatArrays", Collections.singletonList(
+		        Collections.singletonList(
+		            new Document("pj", "$pj")
+		                .append("rn", "$rn")
+		                .append("_id", "$_id")
+		        )
+		    ));
+
+			ProjectionOperation projectStage = Aggregation.project()
+			    .and("nm").as("_id")
+			    .andInclude("in", "ai")
+			    .and(csExpression).as("cs")
+			    .andExpression("'SC'").as("_class");
+	
+			Aggregation aggregation = Aggregation.newAggregation(
+			    projectStage,
+			    Aggregation.out("samplesAndCallSets")
+			);
+	        
+	        mongoTemplate.aggregate(aggregation, "samples", Document.class);
+	        LOG.info("Migrated sample documents to include callsets into " + coll.getNamespace());
+		}
+		else
+			LOG.debug("Sample documents already up to date in " + coll.getNamespace());
 	}
 }
