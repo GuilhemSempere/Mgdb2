@@ -146,12 +146,12 @@ public class IntertekImport extends AbstractGenotypeImport<FileImportParameters>
 
     @Override
     protected long doImport(FileImportParameters params, MongoTemplate mongoTemplate, GenotypingProject project, ProgressIndicator progress, Integer createdProject) throws Exception {
-        String sModule = params.getsModule();
-        String sProject = params.getsRun();
-        String sRun = params.getsRun();
+        String sModule = params.getModule();
+        String sProject = params.getRun();
+        String sRun = params.getRun();
         String assemblyName = params.getAssemblyName();
         Map<String, String> sampleToIndividualMap = params.getSampleToIndividualMap();
-        boolean fSkipMonomorphic = params.isfSkipMonomorphic();
+        boolean fSkipMonomorphic = params.isSkipMonomorphic();
         URL fileURL = params.getMainFileUrl();
 
         final String[] snpHeader = {"SNPID","SNPNum","AlleleY","AlleleX","Sequence"};
@@ -338,7 +338,7 @@ public class IntertekImport extends AbstractGenotypeImport<FileImportParameters>
 
                         if (m_providedIdToCallsetMap.get(sIndOrSpId) == null) {
                             int callsetId = AutoIncrementCounter.getNextSequence(mongoTemplate, MongoTemplateManager.getMongoCollectionName(Callset.class));
-                            m_providedIdToCallsetMap.put(sIndOrSpId, new Callset(callsetId, sample/*, sIndividual*/, project.getId(), params.getsRun()));
+                            m_providedIdToCallsetMap.put(sIndOrSpId, new Callset(callsetId, sample/*, sIndividual*/, project.getId(), params.getRun()));
                         }
 
                         SampleGenotype sampleGt = new SampleGenotype(gtCode);

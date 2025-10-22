@@ -46,7 +46,6 @@ import org.apache.commons.io.FileUtils;
 import org.apache.commons.lang.StringUtils;
 import org.apache.log4j.Logger;
 import org.bson.types.ObjectId;
-import org.springframework.context.support.GenericXmlApplicationContext;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.data.mongodb.core.MongoTemplate;
@@ -61,7 +60,6 @@ import fr.cirad.io.brapi.BrapiClient;
 import fr.cirad.io.brapi.BrapiClient.Pager;
 import fr.cirad.io.brapi.BrapiService;
 import fr.cirad.io.brapi.CallsUtils;
-import fr.cirad.mgdb.model.mongo.subtypes.AbstractVariantData;
 import fr.cirad.mgdb.model.mongo.subtypes.Callset;
 import fr.cirad.mgdb.model.mongo.subtypes.ReferencePosition;
 import fr.cirad.mgdb.model.mongo.subtypes.SampleGenotype;
@@ -169,7 +167,6 @@ public class BrapiImport extends STDVariantImport {
 		long before = System.currentTimeMillis();
 		final ProgressIndicator progress = ProgressIndicator.get(m_processID) != null ? ProgressIndicator.get(m_processID) : new ProgressIndicator(m_processID, new String[]{"Initializing import"});	// better to add it straight-away so the JSP doesn't get null in return when it checks for it (otherwise it will assume the process has ended)
 		
-		GenericXmlApplicationContext ctx = null;
 		File tempFile = File.createTempFile("brapiImportVariants-" + progress.getProcessId() + "-", ".tsv");
 		MongoTemplate mongoTemplate = MongoTemplateManager.get(sModule);
 		if (m_processID == null)
@@ -689,8 +686,7 @@ public class BrapiImport extends STDVariantImport {
                 MgdbDao.prepareDatabaseForSearches(sModule);
             }
 
-			if (ctx != null)
-				ctx.close();
+            MongoTemplateManager.closeApplicationContextIfOffline();
 		}
 	}
 
@@ -698,22 +694,11 @@ public class BrapiImport extends STDVariantImport {
 	{
 		long before = System.currentTimeMillis();
 		
-		GenericXmlApplicationContext ctx = null;
 		File genotypeFile = new File(mainFilePath);
 		BufferedReader in = new BufferedReader(new FileReader(genotypeFile));
 		try
 		{
 			MongoTemplate mongoTemplate = MongoTemplateManager.get(sModule);
-			if (mongoTemplate == null)
-			{	// we are probably being invoked offline
-				ctx = new GenericXmlApplicationContext("applicationContext-data.xml");
-	
-				MongoTemplateManager.initialize(ctx);
-				mongoTemplate = MongoTemplateManager.get(sModule);
-				if (mongoTemplate == null)
-					throw new Exception("DATASOURCE '" + sModule + "' does not exist!");
-			}
-			
 			mongoTemplate.getDb().runCommand(new BasicDBObject("profile", 0));	// disable profiling
 			
 			// Find out ploidy level

@@ -39,7 +39,6 @@ import java.util.function.Consumer;
 import org.apache.log4j.Logger;
 import org.bson.Document;
 import org.bson.codecs.pojo.annotations.BsonProperty;
-import org.springframework.context.support.GenericXmlApplicationContext;
 import org.springframework.data.mongodb.core.BulkOperations;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.mapping.Field;
@@ -146,19 +145,8 @@ public class InitialVariantImport {
         if (!chipInfoFile.exists() || chipInfoFile.isDirectory())
             throw new Exception("Data file does not exist: " + chipInfoFile.getAbsolutePath());
         
-        GenericXmlApplicationContext ctx = null;
-        try
-        {
+        try {
             MongoTemplate mongoTemplate = MongoTemplateManager.get(sModule);
-            if (mongoTemplate == null)
-            {   // we are probably being invoked offline
-                ctx = new GenericXmlApplicationContext("applicationContext-data.xml");
-    
-                MongoTemplateManager.initialize(ctx);
-                mongoTemplate = MongoTemplateManager.get(sModule);
-                if (mongoTemplate == null)
-                    throw new Exception("DATASOURCE '" + sModule + "' is not supported!");
-            }
 
 //          if (Helper.estimDocCount(mongoTemplate, VariantData.class) > 0)
 //          	throw new Exception("There are already some variants in this database!");
@@ -172,8 +160,7 @@ public class InitialVariantImport {
             long before = System.currentTimeMillis();
 
             BufferedReader in = new BufferedReader(new FileReader(chipInfoFile));
-            try
-            {
+            try {
                 String sLine = in.readLine();   // read header
                 if (sLine != null)
                     sLine = sLine.trim();
@@ -236,10 +223,8 @@ public class InitialVariantImport {
                 int nVariantIndex = 1;
                 final MongoTemplate finalMongoTemplate = mongoTemplate;
                 boolean fGenerateIDs = idPrefix != null && !idPrefix.trim().isEmpty();
-                do
-                {
-                    if (sLine.length() > 0)
-                    {
+                do  {
+                    if (sLine.length() > 0) {
                         List<String> cells = Helper.split(sLine, "\t");
                         if (cells.size() < 7)
                         	LOG.warn("Skipping incomplete line: " + sLine);
@@ -262,11 +247,9 @@ public class InitialVariantImport {
                                 variant.setReferencePosition(assembly == null ? 0 : assembly.getId(), new ReferencePosition(seqAndPos[0], Long.parseLong(seqAndPos[1])));
                         }
                         
-                        if (!fDeprecatedVariant)    // otherwise we don't want this variant to appear when selecting them by chip
-                        {
+                        if (!fDeprecatedVariant) {   // otherwise we don't want this variant to appear when selecting them by chip
                             String chipList = cells.get(chipColIndex);
-                            if (chipList.length() > 0)
-                            {
+                            if (chipList.length() > 0) {
                                 TreeSet<String> analysisMethods = new TreeSet<String>();
                                     for (String chip : chipList.split(";"))
                                         analysisMethods.add(chip);
@@ -398,15 +381,12 @@ public class InitialVariantImport {
 
                 LOG.info("InitialVariantImport took " + (System.currentTimeMillis() - before) / 1000 + "s for " + count + " records");
             }
-            finally
-            {
+            finally {
                 in.close();         
             }
         }
-        finally
-        {
-            if (ctx != null)
-                ctx.close();
+        finally {
+        	MongoTemplateManager.closeApplicationContextIfOffline();
         }
     }
 

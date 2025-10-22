@@ -84,90 +84,63 @@ public class ReferencePositionImport {
 			throw new Exception("No chip info files found in folder: " + chipInfoFolder.getAbsolutePath());
 		
 		int nMarkerNameColNum, nMarkerChrColNum, nMarkerPosColNum;
-		try
-		{
+		try {
 			nMarkerNameColNum = Integer.parseInt(args[2]);
 		}
-		catch (NumberFormatException nfe)
-		{
+		catch (NumberFormatException nfe) {
 			throw new Exception("Unable to parse marker name column number: " + args[2]);
 		}
-		try
-		{
+		try {
 			nMarkerChrColNum = Integer.parseInt(args[3]);
 		}
-		catch (NumberFormatException nfe)
-		{
+		catch (NumberFormatException nfe) {
 			throw new Exception("Unable to parse marker chromosome column number: " + args[3]);
 		}
-		try
-		{
+		try {
 			nMarkerPosColNum = Integer.parseInt(args[4]);
 		}
-		catch (NumberFormatException nfe)
-		{
+		catch (NumberFormatException nfe) {
 			throw new Exception("Unable to parse marker position column number: " + args[4]);
 		}
 
-		GenericXmlApplicationContext ctx = null;
-		try
-		{
+		try {
 			MongoTemplate mongoTemplate = MongoTemplateManager.get(args[0]);
-			if (mongoTemplate == null)
-			{	// we are probably being invoked offline
-				ctx = new GenericXmlApplicationContext("applicationContext-data.xml");
-	
-				MongoTemplateManager.initialize(ctx);
-				mongoTemplate = MongoTemplateManager.get(args[0]);
-				if (mongoTemplate == null)
-					throw new Exception("DATASOURCE '" + args[0] + "' is not supported!");
-			}
-
-			for (int i=0; i<chipInfoFiles.length; i++)
-			{
+			for (int i=0; i<chipInfoFiles.length; i++) {
 				int nVariantIndex = 0;
 				if (chipInfoFiles[i].isDirectory())
 					continue;
 				
 				BufferedReader in = new BufferedReader(new FileReader(chipInfoFiles[i]));
-				try
-				{
+				try {
 					in.readLine();	// skip header
 					String sLine = in.readLine();
 					if (sLine != null)
 						sLine = sLine.trim();
-					do
-					{
-						if (sLine.length() > 0)
-						{
+					do {
+						if (sLine.length() > 0) {
 							nVariantIndex++;
 							List<String> cells = splitByComaSpaceOrTab(sLine);
 		
 							Boolean fSaved = null;
-							for (int j=0; j<10; j++)
-							{
+							for (int j=0; j<10; j++) {
 								Query q = new Query(Criteria.where("_id").is(cells.get(nMarkerNameColNum)));
 								q.fields().include(VariantData.FIELDNAME_VERSION);
 								q.fields().include(VariantData.FIELDNAME_REFERENCE_POSITION);
 								VariantData variant = mongoTemplate.findOne(q, VariantData.class);
-								if (variant == null)
-								{
+								if (variant == null) {
 									LOG.warn("Not found: " + cells.get(nMarkerNameColNum) + " (" + nVariantIndex + ")");
 									fSaved = false;
 									break;
 								}
-								else
-								{
+								else {
 									ReferencePosition chromPos = new ReferencePosition(cells.get(nMarkerChrColNum), Integer.parseInt(cells.get(nMarkerPosColNum)));
-									if (chromPos.equals(variant.getReferencePosition(0 /*FIXME : make it multi-assembly?*/)))
-									{
+									if (chromPos.equals(variant.getReferencePosition(0 /*FIXME : make it multi-assembly?*/))) {
 										LOG.warn("No change to apply: " + cells.get(nMarkerNameColNum) + " (" + nVariantIndex + ")");
 										fSaved = false;
 										break;
 									}
 									q = new Query(Criteria.where("_id").is(cells.get(nMarkerNameColNum))).addCriteria(Criteria.where(VariantData.FIELDNAME_VERSION).is(variant.getVersion()));
-									try
-									{
+									try {
 										UpdateResult ur = mongoTemplate.updateFirst(q, new Update().set(VariantData.FIELDNAME_REFERENCE_POSITION, chromPos), VariantData.class);
 										if (ur.getModifiedCount() == 0)
 											throw new Exception("Not written: " + cells.get(nMarkerNameColNum) + " (" + nVariantIndex + ")");
@@ -178,8 +151,7 @@ public class ReferencePositionImport {
 											LOG.warn("Took " + j + " retries to save variant " + cells.get(nMarkerNameColNum));
 										break;
 									}
-									catch (OptimisticLockingFailureException olfe)
-									{
+									catch (OptimisticLockingFailureException olfe) {
 										LOG.error("failed: " + cells.get(nMarkerNameColNum));
 									}
 								}
@@ -193,16 +165,13 @@ public class ReferencePositionImport {
 					}
 					while (sLine != null);		
 				}
-				finally
-				{
+				finally {
 					in.close();			
 				}
 			}
 		}
-		finally
-		{
-			if (ctx != null)
-				ctx.close();
+		finally {
+			MongoTemplateManager.closeApplicationContextIfOffline();
 		}
 	}
 
@@ -212,8 +181,7 @@ public class ReferencePositionImport {
 	 * @param s the s
 	 * @return the list
 	 */
-	private static List<String> splitByComaSpaceOrTab(String s)
-	{
+	private static List<String> splitByComaSpaceOrTab(String s) {
 		return Helper.split(s, s.contains(",") ? "," : (s.contains(" ") ? " " : "\t"));
 	}
 }

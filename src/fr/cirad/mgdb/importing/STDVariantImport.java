@@ -29,7 +29,6 @@ import java.util.Scanner;
 
 import fr.cirad.mgdb.importing.parameters.ImportParameters;
 import org.apache.log4j.Logger;
-import org.springframework.context.support.GenericXmlApplicationContext;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
@@ -103,23 +102,7 @@ public class STDVariantImport extends RefactoredImport<ImportParameters> {
 			ProgressIndicator.registerProgressIndicator(progress);
 		}
 		
-		GenericXmlApplicationContext ctx = null;
 		MongoTemplate mongoTemplate = MongoTemplateManager.get(sModule);
-		if (mongoTemplate == null) { // we are probably being invoked offline
-			ctx = new GenericXmlApplicationContext("applicationContext-data.xml");
-
-			MongoTemplateManager.initialize(ctx);
-			mongoTemplate = MongoTemplateManager.get(sModule);
-			if (mongoTemplate == null)
-			{	// we are probably being invoked offline
-				ctx = new GenericXmlApplicationContext("applicationContext-data.xml");
-	
-				MongoTemplateManager.initialize(ctx);
-				mongoTemplate = MongoTemplateManager.get(sModule);
-				if (mongoTemplate == null)
-					throw new Exception("DATASOURCE '" + sModule + "' is not supported!");
-			}
-		}
 
 		File genotypeFile = new File(mainFilePath);
 		List<File> sortedTempFiles = null;
@@ -308,8 +291,7 @@ public class STDVariantImport extends RefactoredImport<ImportParameters> {
                 MgdbDao.prepareDatabaseForSearches(sModule);
             }
 
-			if (ctx != null)
-				ctx.close();
+            MongoTemplateManager.closeApplicationContextIfOffline();
 		}
 	}
 

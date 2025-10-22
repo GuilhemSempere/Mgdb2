@@ -199,14 +199,14 @@ public class HapMapImport extends AbstractGenotypeImport<FileImportParameters> {
 
     @Override
     public long doImport(FileImportParameters params, MongoTemplate mongoTemplate, GenotypingProject project, ProgressIndicator progress, Integer createdProject) throws Exception {
-        String sRun = params.getsRun();
-        Integer nPloidy = params.getnPloidy();
+        String sRun = params.getRun();
+        Integer nPloidy = params.getPloidy();
         Map<String, String> sampleToIndividualMap = params.getSampleToIndividualMap();
 
 //        progress.setPercentageEnabled(false);
 
         if (project == null || params.getImportMode() > 0) {	// create it
-            if (params.getnPloidy() != null)
+            if (params.getPloidy() != null)
                 project.setPloidyLevel(nPloidy);
             else {
                 progress.addStep("Attempting to guess ploidy level");
@@ -241,7 +241,7 @@ public class HapMapImport extends AbstractGenotypeImport<FileImportParameters> {
         progress.moveToNextStep();
 
         int nNConcurrentThreads = Math.max(1, nNumProc);
-        LOG.debug("Importing project '" + params.getsProject() + "' into " + params.getsModule() + " using " + nNConcurrentThreads + " threads");
+        LOG.debug("Importing project '" + params.getProject() + "' into " + params.getModule() + " using " + nNConcurrentThreads + " threads");
 
         Iterator<RawHapMapFeature> it = reader.iterator();
         BlockingQueue<Runnable> saveServiceQueue = new LinkedBlockingQueue<Runnable>(saveServiceQueueLength(nNConcurrentThreads));
@@ -309,7 +309,7 @@ public class HapMapImport extends AbstractGenotypeImport<FileImportParameters> {
                                         break;
                                 }
 
-                                if (variantId == null && params.isfSkipMonomorphic()) {
+                                if (variantId == null && params.isSkipMonomorphic()) {
                                     String[] distinctGTs = Arrays.stream(hmFeature.getGenotypes()).filter(gt -> !"NA".equals(gt) && !"NN".equals(gt)).distinct().toArray(String[]::new);
                                     if (distinctGTs.length == 0 || (distinctGTs.length == 1 && Arrays.stream(distinctGTs[0].split(variantType.equals(Type.SNP) ? "" : "/")).distinct().count() < 2))
                                         continue; // skip non-variant positions that are not already known
@@ -328,7 +328,7 @@ public class HapMapImport extends AbstractGenotypeImport<FileImportParameters> {
                                     totalProcessedVariantCount.getAndIncrement();
 
                                 //update variant runs
-                                variant.getRuns().add(new Run(finalProject.getId(), params.getsRun()));
+                                variant.getRuns().add(new Run(finalProject.getId(), params.getRun()));
 
                                 AtomicInteger allIdx = new AtomicInteger(0);
                                 Map<String, Integer> alleleIndexMap = variant.getKnownAlleles().stream().collect(Collectors.toMap(Function.identity(), t -> allIdx.getAndIncrement()));  // should be more efficient not to call indexOf too often...
@@ -342,7 +342,7 @@ public class HapMapImport extends AbstractGenotypeImport<FileImportParameters> {
                                     }
                                 }
 
-                                VariantRunData runToSave = addHapMapDataToVariant(finalMongoTemplate, variant, finalAssembly == null ? null : finalAssembly.getId(), variantType, alleleIndexMap, hmFeature, finalProject, params.getsRun(), sampleIds);
+                                VariantRunData runToSave = addHapMapDataToVariant(finalMongoTemplate, variant, finalAssembly == null ? null : finalAssembly.getId(), variantType, alleleIndexMap, hmFeature, finalProject, params.getRun(), sampleIds);
 
                                 for (Integer asmId : assemblyIDs) {
                                     ReferencePosition rp = variant.getReferencePosition(asmId);

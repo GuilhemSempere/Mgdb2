@@ -46,7 +46,6 @@ import org.brapi.v2.model.Sample;
 import org.brapi.v2.model.SampleListResponse;
 import org.brapi.v2.model.SuccessfulSearchResponse;
 import org.brapi.v2.model.SuccessfulSearchResponseResult;
-import org.springframework.context.support.GenericXmlApplicationContext;
 import org.springframework.data.mongodb.core.BulkOperations;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.query.Criteria;
@@ -137,17 +136,7 @@ public class IndividualMetadataImport {
     }
 
     public static int importIndividualOrSampleMetadataByFile(String sModule, HttpSession session, URL metadataFileURL, String targetTypeColName, String csvFieldListToImport, String username) throws Exception {
-        GenericXmlApplicationContext ctx = null;
         MongoTemplate mongoTemplate = MongoTemplateManager.get(sModule);
-        if (mongoTemplate == null) { // we are probably being invoked offline
-            ctx = new GenericXmlApplicationContext("applicationContext-data.xml");
-
-            MongoTemplateManager.initialize(ctx);
-            mongoTemplate = MongoTemplateManager.get(sModule);
-            if (mongoTemplate == null) {
-                throw new Exception("DATASOURCE '" + sModule + "' is not supported!");
-            }
-        }
 
         boolean fIsAnonymous = "anonymousUser".equals(username);
         boolean fGrabSessionAttributesFromThread = SessionAttributeAwareThread.class.isAssignableFrom(Thread.currentThread().getClass());
@@ -281,8 +270,7 @@ public class IndividualMetadataImport {
             }
         } finally {
             scanner.close();
-            if (ctx != null)
-                ctx.close();
+            MongoTemplateManager.closeApplicationContextIfOffline();
         }
     }
 
@@ -291,18 +279,6 @@ public class IndividualMetadataImport {
         try {
 	        if (externalToInternalIdMap != null && externalToInternalIdMap.isEmpty())
 	            return 0;    // we must know which individuals to update
-
-	        GenericXmlApplicationContext ctx = null;
-	        MongoTemplate mongoTemplate = MongoTemplateManager.get(sModule);
-	        if (mongoTemplate == null) { // we are probably being invoked offline
-	            ctx = new GenericXmlApplicationContext("applicationContext-data.xml");
-	
-	            MongoTemplateManager.initialize(ctx);
-	            mongoTemplate = MongoTemplateManager.get(sModule);
-	            if (mongoTemplate == null) {
-	                throw new Exception("DATASOURCE '" + sModule + "' is not supported!");
-	            }
-	        }
 
 	        String fixedEndpointUrl = !brapiEndpointUrl.endsWith("/") ? brapiEndpointUrl + "/" : brapiEndpointUrl;
 	        if (fixedEndpointUrl.endsWith("/brapi/v1/")) {

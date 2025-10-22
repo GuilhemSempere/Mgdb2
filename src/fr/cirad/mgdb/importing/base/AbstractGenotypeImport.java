@@ -19,18 +19,22 @@ package fr.cirad.mgdb.importing.base;
 import java.io.File;
 import java.io.IOException;
 import java.net.URL;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Scanner;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 
-import fr.cirad.mgdb.importing.parameters.ImportParameters;
-import fr.cirad.mgdb.model.mongo.maintypes.*;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.log4j.Logger;
+import org.brapi.v2.model.Sample;
 import org.bson.Document;
-import org.springframework.beans.factory.BeanDefinitionStoreException;
-import org.springframework.context.support.GenericXmlApplicationContext;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.data.domain.Sort;
@@ -41,6 +45,13 @@ import org.springframework.data.mongodb.core.query.Query;
 import com.mongodb.client.MongoCursor;
 
 import fr.cirad.mgdb.importing.IndividualMetadataImport;
+import fr.cirad.mgdb.importing.parameters.ImportParameters;
+import fr.cirad.mgdb.model.mongo.maintypes.Assembly;
+import fr.cirad.mgdb.model.mongo.maintypes.GenotypingProject;
+import fr.cirad.mgdb.model.mongo.maintypes.GenotypingSample;
+import fr.cirad.mgdb.model.mongo.maintypes.Individual;
+import fr.cirad.mgdb.model.mongo.maintypes.VariantData;
+import fr.cirad.mgdb.model.mongo.maintypes.VariantRunData;
 import fr.cirad.mgdb.model.mongo.subtypes.Callset;
 import fr.cirad.mgdb.model.mongo.subtypes.ReferencePosition;
 import fr.cirad.mgdb.model.mongodao.MgdbDao;
@@ -48,16 +59,11 @@ import fr.cirad.tools.Helper;
 import fr.cirad.tools.ProgressIndicator;
 import fr.cirad.tools.mongo.AutoIncrementCounter;
 import fr.cirad.tools.mongo.MongoTemplateManager;
-
-import org.brapi.v2.model.Sample;
-
 import htsjdk.variant.variantcontext.Allele;
 import htsjdk.variant.variantcontext.VariantContext.Type;
 import jhi.brapi.api.samples.BrapiSample;
 
 public abstract class AbstractGenotypeImport<T extends ImportParameters> {
-
-    private GenericXmlApplicationContext ctx;
     protected String m_processID;
 
 	private static final Logger LOG = Logger.getLogger(AbstractGenotypeImport.class);
@@ -65,10 +71,8 @@ public abstract class AbstractGenotypeImport<T extends ImportParameters> {
 	protected static final int nMaxChunkSize = 20000;
 
 	private boolean m_fAllowDbDropIfNoGenotypingData = true;
-
-    public boolean m_fCloseContextAfterImport = false;
+	public boolean m_fCloseContextAfterImport = false;
     public boolean m_fAllowNewAssembly = true;
-
 	private boolean m_fSamplesPersisted = false;
 
 	protected Map<String /* individual or sample name */, GenotypingSample> m_providedIdToSampleMap = null;
@@ -466,40 +470,27 @@ public abstract class AbstractGenotypeImport<T extends ImportParameters> {
 
         Integer createdProject = null;
         try {
-            MongoTemplate mongoTemplate = MongoTemplateManager.get(params.getsModule());
-            if (mongoTemplate == null) {    // we are probably being invoked offline
-                try {
-                    ctx = new GenericXmlApplicationContext("applicationContext-data.xml");
-                } catch (BeanDefinitionStoreException fnfe) {
-                    LOG.warn("Unable to find applicationContext-data.xml. Now looking for applicationContext.xml", fnfe);
-                    ctx = new GenericXmlApplicationContext("applicationContext.xml");
-                }
-
-                MongoTemplateManager.initialize(ctx);
-                mongoTemplate = MongoTemplateManager.get(params.getsModule());
-                if (mongoTemplate == null)
-                    throw new Exception("DATASOURCE '" + params.getsModule() + "' is not supported!");
-            }
+            MongoTemplate mongoTemplate = MongoTemplateManager.get(params.getModule());
 
             if (m_processID == null)
-                m_processID = "IMPORT__" + params.getsModule() + "__" + params.getsProject() + "__" + params.getsRun() + "__" + System.currentTimeMillis();
+                m_processID = "IMPORT__" + params.getModule() + "__" + params.getProject() + "__" + params.getRun() + "__" + System.currentTimeMillis();
 
-            GenotypingProject project = mongoTemplate.findOne(new Query(Criteria.where(GenotypingProject.FIELDNAME_NAME).is(params.getsProject())), GenotypingProject.class);
+            GenotypingProject project = mongoTemplate.findOne(new Query(Criteria.where(GenotypingProject.FIELDNAME_NAME).is(params.getProject())), GenotypingProject.class);
 
             initReader(params);
 
             //The ploidy level can be given by the user or guessed from the data file
-            Integer nPloidy = findPloidyLevel(mongoTemplate, params.getnPloidy(), progress);
+            Integer nPloidy = findPloidyLevel(mongoTemplate, params.getPloidy(), progress);
 
             if (params.getImportMode() == 0 && project != null && nPloidy != null && project.getPloidyLevel() != nPloidy)
-                throw new Exception("Ploidy levels differ between existing (" + project.getPloidyLevel() + ") and provided (" + params.getnPloidy() + ") data!");
+                throw new Exception("Ploidy levels differ between existing (" + project.getPloidyLevel() + ") and provided (" + params.getPloidy() + ") data!");
 
-            MongoTemplateManager.lockProjectForWriting(params.getsModule(), params.getsProject());
+            MongoTemplateManager.lockProjectForWriting(params.getModule(), params.getProject());
 
-            cleanupBeforeImport(mongoTemplate, params.getsModule(), project, params.getImportMode(), params.getsRun());
+            cleanupBeforeImport(mongoTemplate, params.getModule(), project, params.getImportMode(), params.getRun());
 
             if (project == null || params.getImportMode() > 0) {   // create it
-                project = createProject(mongoTemplate, params.getsProject(), params.getsTechnology(), nPloidy == null ? 0 : nPloidy, progress);
+                project = createProject(mongoTemplate, params.getProject(), params.getTechnology(), nPloidy == null ? 0 : nPloidy, progress);
                 if (params.getImportMode() != 1)
                     createdProject = project.getId();
             }
@@ -507,8 +498,8 @@ public abstract class AbstractGenotypeImport<T extends ImportParameters> {
             // specific part
             long count = doImport(params, mongoTemplate, project, progress, createdProject);
 
-            if (!project.getRuns().contains(params.getsRun()))
-                project.getRuns().add(params.getsRun());
+            if (!project.getRuns().contains(params.getRun()))
+                project.getRuns().add(params.getRun());
             mongoTemplate.save(project);
 
             String importType = params.getClass().getSimpleName();
@@ -525,13 +516,13 @@ public abstract class AbstractGenotypeImport<T extends ImportParameters> {
             return createdProject;
         } finally {
             closeResource();
-            if (m_fCloseContextAfterImport && ctx != null)
-                ctx.close();
-            MongoTemplateManager.unlockProjectForWriting(params.getsModule(), params.getsProject());
+            if (m_fCloseContextAfterImport)
+            	MongoTemplateManager.closeApplicationContextIfOffline();
+            MongoTemplateManager.unlockProjectForWriting(params.getModule(), params.getProject());
             if (progress.getError() == null && !progress.isAborted()) {
                 progress.addStep("Preparing database for searches");
                 progress.moveToNextStep();
-                MgdbDao.prepareDatabaseForSearches(params.getsModule());
+                MgdbDao.prepareDatabaseForSearches(params.getModule());
             }
         }
     }
