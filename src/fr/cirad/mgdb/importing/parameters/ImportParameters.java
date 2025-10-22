@@ -3,7 +3,7 @@ package fr.cirad.mgdb.importing.parameters;
 import java.util.Map;
 
 public class ImportParameters {
-    private String sModule;
+    private String module;
     private String sProject;
     private String sRun;
     private String sTechnology;
@@ -13,8 +13,8 @@ public class ImportParameters {
     private boolean fSkipMonomorphic;
     private int importMode;
 
-    public ImportParameters(String sModule, String sProject, String sRun, String sTechnology, Integer nPloidy, String assemblyName, Map<String, String> sampleToIndividualMap, boolean fSkipMonomorphic, int importMode) {
-        this.sModule = sModule;
+    public ImportParameters(String module, String sProject, String sRun, String sTechnology, Integer nPloidy, String assemblyName, Map<String, String> sampleToIndividualMap, boolean fSkipMonomorphic, int importMode) {
+        this.module = module;
         this.sProject = sProject;
         this.sRun = sRun;
         this.sTechnology = sTechnology;
@@ -25,43 +25,43 @@ public class ImportParameters {
         this.importMode = importMode;
     }
 
-    public String getsModule() {
-        return sModule;
+    public String getModule() {
+        return module;
     }
 
-    public void setsModule(String sModule) {
-        this.sModule = sModule;
+    public void setModule(String module) {
+        this.module = module;
     }
 
-    public String getsProject() {
+    public String getProject() {
         return sProject;
     }
 
-    public void setsProject(String sProject) {
+    public void setProject(String sProject) {
         this.sProject = sProject;
     }
 
-    public String getsRun() {
+    public String getRun() {
         return sRun;
     }
 
-    public void setsRun(String sRun) {
+    public void setRun(String sRun) {
         this.sRun = sRun;
     }
 
-    public String getsTechnology() {
+    public String getTechnology() {
         return sTechnology;
     }
 
-    public void setsTechnology(String sTechnology) {
+    public void setTechnology(String sTechnology) {
         this.sTechnology = sTechnology;
     }
 
-    public Integer getnPloidy() {
+    public Integer getPloidy() {
         return nPloidy;
     }
 
-    public void setnPloidy(Integer nPloidy) {
+    public void setPloidy(Integer nPloidy) {
         this.nPloidy = nPloidy;
     }
 
@@ -81,11 +81,11 @@ public class ImportParameters {
         this.sampleToIndividualMap = sampleToIndividualMap;
     }
 
-    public boolean isfSkipMonomorphic() {
+    public boolean isSkipMonomorphic() {
         return fSkipMonomorphic;
     }
 
-    public void setfSkipMonomorphic(boolean fSkipMonomorphic) {
+    public void setSkipMonomorphic(boolean fSkipMonomorphic) {
         this.fSkipMonomorphic = fSkipMonomorphic;
     }
 
