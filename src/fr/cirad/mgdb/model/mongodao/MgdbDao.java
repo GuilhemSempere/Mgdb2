@@ -626,10 +626,6 @@ public class MgdbDao {
         return result;
     }
 
-    public static TreeMap<String /*individual*/, ArrayList<GenotypingSample>> getSamplesByIndividualForProject(final String sModule, final Collection<Integer> projIDs, final Collection<String> individuals) throws ObjectNotFoundException {
-    	return getSamplesByIndividualForProjects(sModule, projIDs, individuals);
-    }
-    
     public static TreeMap<String /*individual*/, ArrayList<GenotypingSample>> getSamplesByIndividualForProjects(final String sModule, final Collection<Integer> projIDs, final Collection<String> individuals) throws ObjectNotFoundException {
         TreeMap<String /*individual*/, ArrayList<GenotypingSample>> result = new TreeMap<>();
         MongoTemplate mongoTemplate = MongoTemplateManager.get(sModule);
@@ -721,17 +717,17 @@ public class MgdbDao {
     }
 
     /**
-     * Gets individuals' populations.
+     * Finds individuals' populations.
      *
      * @param sModule the module
      * @param individuals the individual IDs
      * @return the individual ID to population map
      */
-    public static Map<String, String> getIndividualPopulations(final String sModule, final Collection<String> individuals) {
-        return getIndividualPopulations(sModule, individuals, null);
+    public static Map<String, String> findIndividualPopulations(final String sModule, final Collection<String> individuals) {
+        return findIndividualPopulations(sModule, individuals, null);
     }
 
-    public static Map<String, String> getIndividualPopulations(final String sModule, final Collection<String> individuals, final String metadataFielToUseAsPop) {
+    public static Map<String, String> findIndividualPopulations(final String sModule, final Collection<String> individuals, final String metadataFielToUseAsPop) {
     	String targetedField = metadataFielToUseAsPop == null ? Individual.FIELDNAME_POPULATION : (Individual.SECTION_ADDITIONAL_INFO + "." + metadataFielToUseAsPop);
         Query query = new Query(new Criteria().andOperator(Criteria.where("_id").in(individuals), Criteria.where(targetedField).ne(null)));
         query.fields().include(targetedField);
