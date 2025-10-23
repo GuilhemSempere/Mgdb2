@@ -1206,14 +1206,14 @@ public class MgdbDao {
     /**
      * @param module the database name (mandatory)
      * @param sCurrentUser username for whom to get custom metadata (optional)
-     * @param projID a project ID (optional)
+     * @param projIDs a collection of project IDs (optional)
      * @param spIDs a list of sample IDs (optional)
      * @return LinkedHashMap which contains all different metadata of the project
      */
-	public LinkedHashMap<String, Set<String>> distinctSampleMetadata(String module, String sCurrentUser, Integer projID, Collection<String> spIDs) {
+	public LinkedHashMap<String, Set<String>> distinctSampleMetadata(String module, String sCurrentUser, Collection<Integer> projIDs, Collection<String> spIDs) {
         LinkedHashMap<String, Set<String>> result = new LinkedHashMap<>();	// this one will be sorted according to the provided list
         HashSet<String> wrongFormatFields = new HashSet<>();
-        MgdbDao.getInstance().loadSamplesWithAllMetadata(module, sCurrentUser, Arrays.asList(projID), spIDs, null).values().stream().filter(ind -> ind.getAdditionalInfo() != null).map(sp -> {
+        MgdbDao.getInstance().loadSamplesWithAllMetadata(module, sCurrentUser, projIDs, spIDs, null).values().stream().filter(ind -> ind.getAdditionalInfo() != null).map(sp -> {
         	for (String fieldName : sp.getAdditionalInfo().keySet()) {
         		Object val = sp.getAdditionalInfo().get(fieldName);
         		if (val instanceof String)
