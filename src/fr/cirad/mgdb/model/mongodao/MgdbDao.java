@@ -1338,21 +1338,21 @@ public class MgdbDao {
 			AggregationExpression csExpression = context ->
 		    new Document("$concatArrays", Collections.singletonList(
 		        Collections.singletonList(
-		            new Document("pj", "$pj")
-		                .append("rn", "$rn")
+		            new Document(Callset.FIELDNAME_PROJECT_ID, "$" + Callset.FIELDNAME_PROJECT_ID)
+		                .append(Callset.FIELDNAME_RUN, "$" + Callset.FIELDNAME_RUN)
 		                .append("_id", "$_id")
 		        )
 		    ));
 
 			ProjectionOperation projectStage = Aggregation.project()
-			    .and("nm").as("_id")
-			    .andInclude("in", "ai")
-			    .and(csExpression).as("cs")
+			    .and("nm" /* used to be GenotypingSample.FIELDNAME_NAME */).as("_id")
+			    .andInclude(GenotypingSample.FIELDNAME_INDIVIDUAL, GenotypingSample.SECTION_ADDITIONAL_INFO)
+			    .and(csExpression).as(GenotypingSample.FIELDNAME_CALLSETS)
 			    .andExpression("'SC'").as("_class");
 	
 			Aggregation aggregation = Aggregation.newAggregation(
 			    projectStage,
-			    Aggregation.out("samplesAndCallSets")
+			    Aggregation.out(mongoTemplate.getCollectionName(GenotypingSample.class))
 			);
 	        
 	        mongoTemplate.aggregate(aggregation, "samples", Document.class);
