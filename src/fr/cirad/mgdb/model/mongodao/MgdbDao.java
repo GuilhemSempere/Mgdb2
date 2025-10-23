@@ -1335,6 +1335,8 @@ public class MgdbDao {
 	public static void createCallsetsFromSamplesIfNecessary(MongoTemplate mongoTemplate) {
 		MongoCollection<Document> coll = mongoTemplate.getCollection(mongoTemplate.getCollectionName(GenotypingSample.class));
 		if (mongoTemplate.count(new Query(), "samples") > mongoTemplate.count(new Query(), GenotypingSample.class)) {
+			mongoTemplate.getCollection(mongoTemplate.getCollectionName(CachedCount.class)).drop();	// also do this because we are obviously migrating to v2.10 from which we support filtering on multiple projects at once, which involves changes in queryKey objects 
+
 			AggregationExpression csExpression = context ->
 		    new Document("$concatArrays", Collections.singletonList(
 		        Collections.singletonList(
