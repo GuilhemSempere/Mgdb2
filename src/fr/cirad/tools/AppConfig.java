@@ -114,20 +114,44 @@ public class AppConfig {
     synchronized public String getInstanceUUID() throws IOException {
         String instanceUUID = get("instanceUUID");
         if (instanceUUID == null) { // generate it
-        	instanceUUID = UUID.randomUUID().toString();
-        	FileOutputStream fos = null;
-            File f = new ClassPathResource("/" + CONFIG_FILE + ".properties").getFile();
-        	FileReader fileReader = new FileReader(f);
-            Properties properties = new Properties();
-            properties.load(fileReader);
-            properties.put("instanceUUID", instanceUUID);
-            fos = new FileOutputStream(f);
-            properties.store(fos, null);
-            props = ResourceBundle.getBundle(CONFIG_FILE, resourceControl);
-            LOG.info("instanceUUID generated as " + instanceUUID);
+        	String generatedInstanceUUID = UUID.randomUUID().toString();
+        	saveProperties(new HashMap<>() {{ put("instanceUUID", generatedInstanceUUID); }});
+        	instanceUUID = generatedInstanceUUID;
         }
         return instanceUUID;
     }
+    
+    synchronized public void saveProperties(Map<String, String> propsToSet) throws IOException {
+    	FileOutputStream fos = null;
+        File f = new ClassPathResource("/" + CONFIG_FILE + ".properties").getFile();
+    	FileReader fileReader = new FileReader(f);
+        Properties properties = new Properties();
+        properties.load(fileReader);
+        for (String key : propsToSet.keySet()) {
+        	String value = propsToSet.get(key);
+	        if (value == null) {
+	        	properties.remove(key);
+	        	LOG.info("Removing " + key + " config-property");
+	        }
+	        else {
+	        	properties.put(key, value);
+	        	LOG.info("Saving " + key + " config-property as " + value);
+	        }
+        }
+        fos = new FileOutputStream(f);
+        properties.store(fos, null);
+        props = new ResourceBundle() {
+	        @Override
+	        protected Object handleGetObject(String key) {
+	            return properties.getProperty(key);
+	        }
+	
+	        @Override
+	        public Enumeration<String> getKeys() {
+	            return Collections.enumeration(properties.stringPropertyNames());
+	        }
+	    };
+	}
     
     public Map<String, String> getPrefixed(String sPrefix) {
         Map<String, String> result = new HashMap<>();
