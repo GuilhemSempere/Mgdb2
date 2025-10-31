@@ -864,30 +864,75 @@ public class MgdbDao {
      * restricted by it, otherwise if projIDs is specified the list is
      * restricted by it, otherwise all database samples are returned
      */
-    public LinkedHashMap<String, GenotypingSample> loadSamplesWithAllMetadata(String module, String sCurrentUser, Collection<Integer> projIDs, Collection<String> spIDs, LinkedHashMap<String, Set<String>> filters) {
+    public LinkedHashMap<String, GenotypingSample> loadSamplesWithAllMetadata(String module, String sCurrentUser, Collection<Integer> projIDs, Collection<String> spIDs, LinkedHashMap<String, LinkedHashMap<String, Set<String>>> filters, boolean getIndMetadata) {
         MongoTemplate mongoTemplate = MongoTemplateManager.get(module);
+        LinkedHashMap<String, GenotypingSample> result = new LinkedHashMap<>();	// this one will be sorted according to the provided list
 
         // build the initial list of Sample objects
         if (spIDs == null)
         	spIDs = mongoTemplate.findDistinct(projIDs == null || projIDs.isEmpty() ? new Query() : new Query(Criteria.where(GenotypingSample.FIELDNAME_CALLSETS + "." + Callset.FIELDNAME_PROJECT_ID).in(projIDs)), "_id", GenotypingSample.class, String.class);
-        
+
+        // build query to filter samples on metadata
         List<Criteria> crits = new ArrayList<>();
        	crits.add(Criteria.where("_id").in(spIDs));
-       	
-        if (filters != null)
-	        for (Entry<String, Set<String>> filterEntry : filters.entrySet()) {
-	            Set<String> filterValues = filterEntry.getValue();
-	            if (!filterValues.isEmpty())
-	            	crits.add(Criteria.where(Individual.SECTION_ADDITIONAL_INFO + "." + filterEntry.getKey()).in(filterValues));
-	        }
-        
-        LinkedHashMap<String, GenotypingSample> result = new LinkedHashMap<>();	// this one will be sorted according to the provided list
+        List<String> indIds = new ArrayList<>();
+        if (filters != null) {
+            if (filters.get("sample") != null) {
+                for (Entry<String, Set<String>> filterEntry : filters.get("sample").entrySet()) {
+                    Set<String> filterValues = filterEntry.getValue();
+                    if (!filterValues.isEmpty())
+                        crits.add(Criteria.where(GenotypingSample.SECTION_ADDITIONAL_INFO + "." + filterEntry.getKey()).in(filterValues));
+                }
+            }
+            if (filters.get("individual") != null) {
+                List<Criteria> indCrits = new ArrayList<>();
+                for (Entry<String, Set<String>> filterEntry : filters.get("individual").entrySet()) {
+                    Set<String> filterValues = filterEntry.getValue();
+                    if (!filterValues.isEmpty())
+                        indCrits.add(Criteria.where(Individual.SECTION_ADDITIONAL_INFO + "." + filterEntry.getKey()).in(filterValues));
+                }
+                if (!indCrits.isEmpty()) {
+                    Query q = new Query(new Criteria().andOperator(indCrits.toArray(new Criteria[indCrits.size()])));
+                    indIds = mongoTemplate.findDistinct(q, "_id", Individual.class, String.class);
+                    if (indIds.isEmpty()) { //couldn't find any individual corresponding to this query, so no sample to return
+                        return result;
+                    }
+                }
+            }
+        }
 
+        if (!indIds.isEmpty()) {
+            crits.add(Criteria.where(GenotypingSample.FIELDNAME_INDIVIDUAL).in(indIds));
+        }
+
+        // Get samples with metadata
         Query q = new Query(new Criteria().andOperator(crits.toArray(new Criteria[crits.size()])));
         q.with(Sort.by(Sort.Direction.ASC, "_id"));
         Map<String, GenotypingSample> spMap = mongoTemplate.find(q, GenotypingSample.class).stream().collect(Collectors.toMap(GenotypingSample::getId, sp -> sp));
-        for (String spId : spIDs)
+        for (String spId : spMap.keySet())
             result.put(spId, spMap.get(spId));
+
+        if (getIndMetadata) {
+            // Get individuals metadata and add them to samples metadata
+            Set<String> individualIds = spMap.values().stream()
+                    .map(GenotypingSample::getIndividual)
+                    .collect(Collectors.toSet());
+            Query indQuery = new Query(Criteria.where("_id").in(individualIds));
+            Map<String, Individual> indMap = mongoTemplate.find(indQuery, Individual.class)
+                    .stream()
+                    .collect(Collectors.toMap(Individual::getId, ind -> ind));
+
+            for (GenotypingSample sample : result.values()) {
+                if (sample != null) {
+                    Individual ind = indMap.get(sample.getIndividual());
+                    if (ind != null && ind.getAdditionalInfo() != null && !ind.getAdditionalInfo().isEmpty()) {
+                        ind.getAdditionalInfo().forEach((k, v) ->
+                                sample.getAdditionalInfo().put("ind." + k, v)
+                        );
+                    }
+                }
+            }
+        }
 
         boolean fGrabSessionAttributesFromThread = SessionAttributeAwareThread.class.isAssignableFrom(Thread.currentThread().getClass());
         LinkedHashMap<String, LinkedHashMap<String, Object>> sessionMetaData = (LinkedHashMap<String, LinkedHashMap<String, Object>>) (fGrabSessionAttributesFromThread ? ((SessionAttributeAwareThread) Thread.currentThread()).getSessionAttributes().get("samples_metadata_" + module) : httpSessionFactory.getObject().getAttribute("samples_metadata_" + module));
@@ -1213,7 +1258,7 @@ public class MgdbDao {
 	public LinkedHashMap<String, Set<String>> distinctSampleMetadata(String module, String sCurrentUser, Collection<Integer> projIDs, Collection<String> spIDs) {
         LinkedHashMap<String, Set<String>> result = new LinkedHashMap<>();	// this one will be sorted according to the provided list
         HashSet<String> wrongFormatFields = new HashSet<>();
-        MgdbDao.getInstance().loadSamplesWithAllMetadata(module, sCurrentUser, projIDs, spIDs, null).values().stream().filter(ind -> ind.getAdditionalInfo() != null).map(sp -> {
+        MgdbDao.getInstance().loadSamplesWithAllMetadata(module, sCurrentUser, projIDs, spIDs, null, true).values().stream().filter(ind -> ind.getAdditionalInfo() != null).map(sp -> {
         	for (String fieldName : sp.getAdditionalInfo().keySet()) {
         		Object val = sp.getAdditionalInfo().get(fieldName);
         		if (val instanceof String)
