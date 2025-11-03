@@ -139,8 +139,6 @@ public interface IExportHandler
         	return false;
 
     	zos.putNextEntry(new ZipEntry(fileName));
-    	if (initialContents != null)
-    		zos.write(initialContents.getBytes());
     	byte[] byteArray = baos.toByteArray();
     	zos.write(byteArray, 0, byteArray.length);
     	zos.closeEntry();
