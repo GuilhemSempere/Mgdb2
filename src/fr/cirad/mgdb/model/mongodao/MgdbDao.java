@@ -866,61 +866,119 @@ public class MgdbDao {
      */
     public LinkedHashMap<String, GenotypingSample> loadSamplesWithAllMetadata(String module, String sCurrentUser, Collection<Integer> projIDs, Collection<String> spIDs, LinkedHashMap<String, LinkedHashMap<String, Set<String>>> filters, boolean getIndMetadata) {
         MongoTemplate mongoTemplate = MongoTemplateManager.get(module);
-        LinkedHashMap<String, GenotypingSample> result = new LinkedHashMap<>();	// this one will be sorted according to the provided list
 
-        // build the initial list of Sample objects
-        if (spIDs == null)
-        	spIDs = mongoTemplate.findDistinct(projIDs == null || projIDs.isEmpty() ? new Query() : new Query(Criteria.where(GenotypingSample.FIELDNAME_CALLSETS + "." + Callset.FIELDNAME_PROJECT_ID).in(projIDs)), "_id", GenotypingSample.class, String.class);
+        List<String> indIds = new ArrayList<>();
+        Map<String, Individual> indMap = null;
+        if (filters != null && filters.get("individual") != null) {
+            indMap = loadIndividualsWithAllMetadata(module, sCurrentUser, projIDs, null, filters.get("individual"));
+            indIds = indMap.keySet().stream().toList();
+            if (indMap.isEmpty()) {
+                return new LinkedHashMap<>();
+            }
+        }
+
+        // Get initial list of sample ids filtering on projects and individuals metadata
+        if (spIDs == null) {
+            List<Criteria> criteriaList = new ArrayList<>();
+            if (projIDs != null) {
+                criteriaList.add(Criteria.where(GenotypingSample.FIELDNAME_CALLSETS + "." + Callset.FIELDNAME_PROJECT_ID).in(projIDs));
+            }
+            if (!indIds.isEmpty()) {
+                criteriaList.add(Criteria.where(GenotypingSample.FIELDNAME_INDIVIDUAL).in(indIds));
+            }
+            Criteria crit = new Criteria();
+            if (!criteriaList.isEmpty()) {
+                crit.andOperator(criteriaList.toArray(new Criteria[0]));
+            }
+            spIDs = mongoTemplate.findDistinct(new Query(crit), "_id", GenotypingSample.class, String.class);
+        }
 
         // build query to filter samples on metadata
         List<Criteria> crits = new ArrayList<>();
-       	crits.add(Criteria.where("_id").in(spIDs));
-        List<String> indIds = new ArrayList<>();
-        if (filters != null) {
-            if (filters.get("sample") != null) {
+        crits.add(Criteria.where("_id").in(spIDs));
+
+        LinkedHashMap<String, GenotypingSample> result;
+        if (sCurrentUser != null && !"anonymousUser".equals(sCurrentUser)) {
+            result = new LinkedHashMap<>();    // merge with custom metadata if available
+            //LinkedHashMap<String, GenotypingSample> result = new LinkedHashMap<>();
+            List<AggregationOperation> pipeline = new ArrayList<>();
+
+            if (!crits.isEmpty())
+                pipeline.add(Aggregation.match(new Criteria().andOperator(crits.toArray(new Criteria[crits.size()]))));
+
+            pipeline.add(LookupOperation.newLookup()
+                    .from(MongoTemplateManager.getMongoCollectionName(CustomSampleMetadata.class))
+                    .let(ExpressionVariable.newVariable("id").forField("$_id"))
+                    .pipeline(context -> {
+                        return new Document("$match",
+                                new Document("$expr",
+                                        new Document("$and", Arrays.asList(
+                                                new Document("$eq", Arrays.asList("$$id", "$_id." + CustomSampleMetadataId.FIELDNAME_SAMPLE_ID)),
+                                                new Document("$eq", Arrays.asList("$_id." + CustomSampleMetadataId.FIELDNAME_USER, sCurrentUser))
+                                        ))
+                                ));
+                    })
+                    .as("csmd"));
+
+            pipeline.add(Aggregation.unwind("$csmd", true));
+            pipeline.add(Aggregation.project()
+                    .andInclude(GenotypingSample.FIELDNAME_INDIVIDUAL)
+                    .and(MergeObjects.mergeValuesOf("$" + GenotypingSample.SECTION_ADDITIONAL_INFO, "$csmd." + GenotypingSample.SECTION_ADDITIONAL_INFO))
+                    .as(GenotypingSample.SECTION_ADDITIONAL_INFO));
+
+            if (filters != null)
+                for (Entry<String, Set<String>> filterEntry : filters.get("sample").entrySet()) {
+                    Set<String> filterValues = filterEntry.getValue();
+                    if (!filterValues.isEmpty())
+                        pipeline.add(Aggregation.match(Criteria.where(GenotypingSample.SECTION_ADDITIONAL_INFO + "." + filterEntry.getKey()).in(filterValues)));
+                }
+
+            AggregationResults<GenotypingSample> aggregationResults = mongoTemplate.aggregate(Aggregation.newAggregation(pipeline), MongoTemplateManager.getMongoCollectionName(GenotypingSample.class), GenotypingSample.class);
+            for (GenotypingSample sp : aggregationResults.getMappedResults())
+                result.put(sp.getId(), sp);
+
+        } else {
+            boolean fGrabSessionAttributesFromThread = SessionAttributeAwareThread.class.isAssignableFrom(Thread.currentThread().getClass());
+            LinkedHashMap<String, LinkedHashMap<String, Object>> sessionMetaData = (LinkedHashMap<String, LinkedHashMap<String, Object>>) (fGrabSessionAttributesFromThread ? ((SessionAttributeAwareThread) Thread.currentThread()).getSessionAttributes().get("samples_metadata_" + module) : httpSessionFactory.getObject().getAttribute("samples_metadata_" + module));
+            boolean fMergeSessionData = sCurrentUser != null && sessionMetaData != null;
+
+            if (filters != null && !fMergeSessionData)
                 for (Entry<String, Set<String>> filterEntry : filters.get("sample").entrySet()) {
                     Set<String> filterValues = filterEntry.getValue();
                     if (!filterValues.isEmpty())
                         crits.add(Criteria.where(GenotypingSample.SECTION_ADDITIONAL_INFO + "." + filterEntry.getKey()).in(filterValues));
                 }
-            }
-            if (filters.get("individual") != null) {
-                List<Criteria> indCrits = new ArrayList<>();
-                for (Entry<String, Set<String>> filterEntry : filters.get("individual").entrySet()) {
-                    Set<String> filterValues = filterEntry.getValue();
-                    if (!filterValues.isEmpty())
-                        indCrits.add(Criteria.where(Individual.SECTION_ADDITIONAL_INFO + "." + filterEntry.getKey()).in(filterValues));
-                }
-                if (!indCrits.isEmpty()) {
-                    Query q = new Query(new Criteria().andOperator(indCrits.toArray(new Criteria[indCrits.size()])));
-                    indIds = mongoTemplate.findDistinct(q, "_id", Individual.class, String.class);
-                    if (indIds.isEmpty()) { //couldn't find any individual corresponding to this query, so no sample to return
-                        return result;
-                    }
-                }
+
+            // load "official" metadata (that is, those attached to Sample objects)
+            Query q = crits.size() == 0 ? new Query() : new Query(new Criteria().andOperator(crits.toArray(new Criteria[crits.size()])));
+            q.with(Sort.by(Sort.Direction.ASC, "_id"));
+            result = mongoTemplate.find(q, GenotypingSample.class).stream().collect(Collectors.toMap(GenotypingSample::getId, Function.identity(), (u, v) -> u, LinkedHashMap::new));
+
+            if (fMergeSessionData) {    // filters will be applied "by hand" after merging
+                sessionMetaData.entrySet().stream().forEach(indEntry -> {
+                    LinkedHashMap<String, Object> indSessionMetadata = sessionMetaData.get(indEntry.getKey());
+                    GenotypingSample sample = result.computeIfAbsent(indEntry.getKey(), k -> new GenotypingSample(indEntry.getKey(), null));
+                    sample.getAdditionalInfo().putAll(indSessionMetadata);
+
+                    if (filters != null)
+                        for (Entry<String, Set<String>> filterEntry : filters.get("sample").entrySet()) {
+                            if (!filterEntry.getValue().isEmpty() && !filterEntry.getValue().contains(sample.getAdditionalInfo().get(filterEntry.getKey()))) {
+                                result.remove(indEntry.getKey());
+                                return;
+                            }
+                        }
+                });
             }
         }
 
-        if (!indIds.isEmpty()) {
-            crits.add(Criteria.where(GenotypingSample.FIELDNAME_INDIVIDUAL).in(indIds));
-        }
-
-        // Get samples with metadata
-        Query q = new Query(new Criteria().andOperator(crits.toArray(new Criteria[crits.size()])));
-        q.with(Sort.by(Sort.Direction.ASC, "_id"));
-        Map<String, GenotypingSample> spMap = mongoTemplate.find(q, GenotypingSample.class).stream().collect(Collectors.toMap(GenotypingSample::getId, sp -> sp));
-        for (String spId : spMap.keySet())
-            result.put(spId, spMap.get(spId));
-
-        if (getIndMetadata) {
+        if (!result.isEmpty() && getIndMetadata) {
             // Get individuals metadata and add them to samples metadata
-            Set<String> individualIds = spMap.values().stream()
-                    .map(GenotypingSample::getIndividual)
-                    .collect(Collectors.toSet());
-            Query indQuery = new Query(Criteria.where("_id").in(individualIds));
-            Map<String, Individual> indMap = mongoTemplate.find(indQuery, Individual.class)
-                    .stream()
-                    .collect(Collectors.toMap(Individual::getId, ind -> ind));
+            if (indMap == null) {
+                Set<String> individualIds = result.values().stream()
+                        .map(GenotypingSample::getIndividual)
+                        .collect(Collectors.toSet());
+                indMap = loadIndividualsWithAllMetadata(module, sCurrentUser, projIDs, individualIds, null);
+            }
 
             for (GenotypingSample sample : result.values()) {
                 if (sample != null) {
@@ -934,48 +992,8 @@ public class MgdbDao {
             }
         }
 
-        boolean fGrabSessionAttributesFromThread = SessionAttributeAwareThread.class.isAssignableFrom(Thread.currentThread().getClass());
-        LinkedHashMap<String, LinkedHashMap<String, Object>> sessionMetaData = (LinkedHashMap<String, LinkedHashMap<String, Object>>) (fGrabSessionAttributesFromThread ? ((SessionAttributeAwareThread) Thread.currentThread()).getSessionAttributes().get("samples_metadata_" + module) : httpSessionFactory.getObject().getAttribute("samples_metadata_" + module));
-        if (sCurrentUser != null) {	// merge with custom metadata if available
-            if ("anonymousUser".equals(sCurrentUser)) {
-            	if (sessionMetaData != null)
-	                for (String spID : spIDs) {
-	                    LinkedHashMap<String, Object> spSessionMetadata = sessionMetaData.get(spID);
-	                    if (spSessionMetadata != null && !spSessionMetadata.isEmpty())
-	                        result.get(spID).getAdditionalInfo().putAll(spSessionMetadata);
-	                }
-            } else
-                for (CustomSampleMetadata cimd : mongoTemplate.find(new Query(new Criteria().andOperator(Criteria.where("_id." + CustomSampleMetadataId.FIELDNAME_USER).is(sCurrentUser), Criteria.where("_id." + CustomSampleMetadataId.FIELDNAME_SAMPLE_ID).in(spIDs))), CustomSampleMetadata.class))
-                    if (cimd.getAdditionalInfo() != null && !cimd.getAdditionalInfo().isEmpty())
-                        result.get(cimd.getId().getSampleId()).getAdditionalInfo().putAll(cimd.getAdditionalInfo());
-        }
         return result;
     }
-//    
-//    public static List<Integer> getUserReadableProjectsIds(AbstractTokenManager tokenManager, String token, String sModule, boolean getReadable) throws ObjectNotFoundException {
-//        boolean fGotDBRights = tokenManager.canUserReadDB(token, sModule);
-//        if (fGotDBRights) {
-//            Query q = new Query();
-//            q.fields().include(GenotypingProject.FIELDNAME_NAME);
-//            List<GenotypingProject> listProj = MongoTemplateManager.get(sModule).find(q, GenotypingProject.class);
-//            List<Integer> projIds = listProj.stream().map(p -> p.getId()).collect(Collectors.toList());
-//            List<Integer> readableProjIds = new ArrayList<>();
-//            for (Integer id : projIds) {
-//                if (tokenManager.canUserReadProject(token, sModule, id)) {
-//                    readableProjIds.add(id);
-//                }
-//            }
-//            if (getReadable) {
-//                return readableProjIds;
-//            } else {
-//                projIds.removeAll(readableProjIds);
-//                return projIds;
-//            }
-//           
-//        } else {
-//            throw new ObjectNotFoundException(sModule);
-//        }
-//    }
     
     public static List<Integer> getUserReadableProjectsIds(AbstractTokenManager tokenManager, Collection<? extends GrantedAuthority> authorities, String sModule, boolean getReadable) throws ObjectNotFoundException {
         boolean fGotDBRights = tokenManager.canUserReadDB(authorities, sModule);
