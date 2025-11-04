@@ -25,6 +25,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -120,18 +121,26 @@ public class IndividualMetadataImport {
         importIndividualOrSampleMetadataByFile(args[0], null, new File(args[1]).toURI().toURL(), args[2], args.length > 3 ? args[3] : null, null);
     }
     
-    public static HashMap<Integer, String> readMetadataFileHeader(String headerLine, Collection<String> fieldsToImport) {
+    public static HashMap<Integer, String> readMetadataFileHeader(String headerLine, Collection<String> fieldsToImport,  Collection<String> mandatoryFields) throws Exception {
     	HashMap<Integer, String> columnLabels = new HashMap<Integer, String>();
         if (columnLabels.isEmpty() && headerLine.startsWith("\uFEFF"))
         	headerLine = headerLine.substring(1);
 
         List<String> cells = Helper.split(headerLine, "\t");
 
+        HashSet<String> mandatoryFieldsStillToBeFound = mandatoryFields == null ? new HashSet<>() : new HashSet<>(mandatoryFields);
         for (int i = 0; i < cells.size(); i++) {
             String cell = cells.get(i);
-            if (!cell.isEmpty() && (fieldsToImport == null || fieldsToImport.contains(cell.toLowerCase())))
-                columnLabels.put(i, cell.replaceAll("\\.", "_"));
+            if (!cell.isEmpty() && (fieldsToImport == null || fieldsToImport.contains(cell.toLowerCase()))) {
+            	String sNormalizedFIeldName = cell.replaceAll("\\.", "_");
+                columnLabels.put(i, sNormalizedFIeldName);
+                mandatoryFieldsStillToBeFound.remove(cell);
+                mandatoryFieldsStillToBeFound.remove(sNormalizedFIeldName);
+            }
         }
+        if (!mandatoryFieldsStillToBeFound.isEmpty())
+        	throw new Exception("You must provide the following field(s) '" + StringUtils.join(mandatoryFieldsStillToBeFound, "', '") + "' in your metadata:");
+        	
     	return columnLabels;
     }
 
@@ -156,7 +165,7 @@ public class IndividualMetadataImport {
                 bulkOperations = mongoTemplate.bulkOps(BulkOperations.BulkMode.ORDERED, username == null ? Individual.class : CustomIndividualMetadata.class);
             else
                 bulkOperations = mongoTemplate.bulkOps(BulkOperations.BulkMode.ORDERED, username == null ? GenotypingSample.class : CustomSampleMetadata.class);
-            
+
             HashMap<Integer, String> columnLabels = null;
             Integer idColumn = null;
             List<String> targetEntityList = new ArrayList<>();
@@ -170,7 +179,7 @@ public class IndividualMetadataImport {
                 }
 
             	if (columnLabels == null) {
-            		columnLabels = readMetadataFileHeader(sLine, csvFieldListToImport != null ? Arrays.asList(csvFieldListToImport.toLowerCase().split(",")) : null);
+            		columnLabels = readMetadataFileHeader(sLine, csvFieldListToImport != null ? Arrays.asList(csvFieldListToImport.toLowerCase().split(",")) : null, null);
 	                idColumn = columnLabels.entrySet().stream().filter(e -> e.getValue().equals(targetTypeColName)).map(Map.Entry::getKey).findFirst().orElse(null);
 	                if (idColumn == null) {
 	                	if (!fFlapjackFormat || columnLabels.containsKey(0))
