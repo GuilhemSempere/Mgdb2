@@ -859,6 +859,7 @@ public class MgdbDao {
      * @param projIDs a list of project IDs (optional)
      * @param spIDs a list of sample IDs (optional)
      * @param filters the filters to apply (optional)
+     * @getIndMetadata flag telling whether or not to include metadata tied to each sample's parent individual
      * @return sample IDs mapped to sample objects with static metada +
      * custom metadata (if available). If spIDs is specified the list is
      * restricted by it, otherwise if projIDs is specified the list is
@@ -974,22 +975,16 @@ public class MgdbDao {
         if (!result.isEmpty() && getIndMetadata) {
             // Get individuals metadata and add them to samples metadata
             if (indMap == null) {
-                Set<String> individualIds = result.values().stream()
-                        .map(GenotypingSample::getIndividual)
-                        .collect(Collectors.toSet());
+                Set<String> individualIds = result.values().stream().map(GenotypingSample::getIndividual).collect(Collectors.toSet());
                 indMap = loadIndividualsWithAllMetadata(module, sCurrentUser, projIDs, individualIds, null);
             }
 
-            for (GenotypingSample sample : result.values()) {
+            for (GenotypingSample sample : result.values())
                 if (sample != null) {
                     Individual ind = indMap.get(sample.getIndividual());
-                    if (ind != null && ind.getAdditionalInfo() != null && !ind.getAdditionalInfo().isEmpty()) {
-                        ind.getAdditionalInfo().forEach((k, v) ->
-                                sample.getAdditionalInfo().put("ind." + k, v)
-                        );
-                    }
+                    if (ind != null && ind.getAdditionalInfo() != null && !ind.getAdditionalInfo().isEmpty())
+                        ind.getAdditionalInfo().forEach((k, v) -> sample.getAdditionalInfo().put("ind." + k, v));
                 }
-            }
         }
 
         return result;
