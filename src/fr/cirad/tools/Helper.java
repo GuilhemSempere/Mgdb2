@@ -159,11 +159,10 @@ public class Helper {
             return new int[0];
         }
 
-        String[] splittedString = csvString.split(",");
-        int[] result = new int[splittedString.length];
-        for (int i = 0; i < result.length; i++) {
-            result[i] = Integer.parseInt(splittedString[i]);
-        }
+        String[] splitString = csvString.split(",");
+        int[] result = new int[splitString.length];
+        for (int i = 0; i < result.length; i++)
+            result[i] = Integer.parseInt(splitString[i]);
         return result;
     }
 
@@ -175,16 +174,16 @@ public class Helper {
      * @return the list
      */
     public static List<String> split(String stringToSplit, String delimiter) {
-        List<String> splittedString = new ArrayList<>();
+        List<String> splitString = new ArrayList<>();
         if (stringToSplit != null) {
             int pos = 0, end;
             while ((end = stringToSplit.indexOf(delimiter, pos)) >= 0) {
-                splittedString.add(stringToSplit.substring(pos, end));
+                splitString.add(stringToSplit.substring(pos, end));
                 pos = end + delimiter.length();
             }
-            splittedString.add(stringToSplit.substring(pos));
+            splitString.add(stringToSplit.substring(pos));
         }
-        return splittedString;
+        return splitString;
     }
 
     /**
