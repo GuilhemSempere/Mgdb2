@@ -172,8 +172,9 @@ public class IndividualMetadataImport {
             int nProcessedEntityCount = 0;
             while (scanner.hasNextLine()) {
                 sLine = scanner.nextLine();
-                if (sLine.isEmpty() || sLine.replaceAll("\\s+", "").equals("#fjFile=PHENOTYPE")) {
-                	if (!sLine.isEmpty())
+                String sCleanLine = sLine.replaceAll("\\s+", "");
+                if (sLine.isEmpty() || sCleanLine.startsWith("#")) {
+                	if (sCleanLine.equals("#fjFile=PHENOTYPE"))
                 		fFlapjackFormat = true;
                 	continue;
                 }
