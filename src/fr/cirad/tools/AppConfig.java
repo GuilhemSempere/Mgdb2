@@ -20,10 +20,12 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.io.FileReader;
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Enumeration;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Properties;
 import java.util.ResourceBundle;
@@ -109,6 +111,13 @@ public class AppConfig {
     
     public Set<String> keySet() {
         return props.keySet();
+    }
+    
+    public List<String> getMandatoryMetadataFields(String sModule, boolean fForSamples /* otherwise, for individuals */) {
+		String configInfo = get("mandatory" + (fForSamples ? "Sample" : "Individual") + "Metadata-" + sModule);
+		if (configInfo == null)
+			configInfo = get("mandatory" + (fForSamples ? "Sample" : "Individual") + "Metadata");
+		return configInfo != null ? Helper.split(configInfo, ",").stream().map(f -> f.trim()).toList() : new ArrayList<>();
     }
     
     synchronized public String getInstanceUUID() throws IOException {
