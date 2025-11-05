@@ -114,7 +114,9 @@ public class AppConfig {
     }
     
     public List<String> getMandatoryMetadataFields(String sModule, boolean fForSamples /* otherwise, for individuals */) {
-		String configInfo = get("mandatory" + (fForSamples ? "Sample" : "Individual") + "Metadata-" + sModule);
+		String configInfo = null;
+		if (sModule != null && !sModule.isEmpty())
+			configInfo = get("mandatory" + (fForSamples ? "Sample" : "Individual") + "Metadata-" + sModule);
 		if (configInfo == null)
 			configInfo = get("mandatory" + (fForSamples ? "Sample" : "Individual") + "Metadata");
 		return configInfo != null ? Helper.split(configInfo, ",").stream().map(f -> f.trim()).toList() : new ArrayList<>();
