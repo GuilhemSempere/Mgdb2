@@ -870,7 +870,7 @@ public class MgdbDao {
 
         List<String> indIds = new ArrayList<>();
         Map<String, Individual> indMap = null;
-        if (filters != null && filters.get("individual") != null) {
+        if (filters != null && filters.containsKey("individual")) {
             indMap = loadIndividualsWithAllMetadata(module, sCurrentUser, projIDs, null, filters.get("individual"));
             indIds = indMap.keySet().stream().toList();
             if (indMap.isEmpty()) {
@@ -943,7 +943,7 @@ public class MgdbDao {
             LinkedHashMap<String, LinkedHashMap<String, Object>> sessionMetaData = (LinkedHashMap<String, LinkedHashMap<String, Object>>) (fGrabSessionAttributesFromThread ? ((SessionAttributeAwareThread) Thread.currentThread()).getSessionAttributes().get("samples_metadata_" + module) : httpSessionFactory.getObject().getAttribute("samples_metadata_" + module));
             boolean fMergeSessionData = sCurrentUser != null && sessionMetaData != null;
 
-            if (filters != null && !fMergeSessionData)
+            if (filters != null && !fMergeSessionData && filters.containsKey("sample"))
                 for (Entry<String, Set<String>> filterEntry : filters.get("sample").entrySet()) {
                     Set<String> filterValues = filterEntry.getValue();
                     if (!filterValues.isEmpty())
