@@ -20,12 +20,11 @@ import java.io.File;
 import java.io.FileOutputStream;
 import java.io.FileReader;
 import java.io.IOException;
-import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Enumeration;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.List;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Properties;
 import java.util.ResourceBundle;
@@ -108,20 +107,42 @@ public class AppConfig {
     public String get(String sPropertyName) {
         return props.containsKey(sPropertyName) ? props.getString(sPropertyName) : null;
     }
-    
+
     public Set<String> keySet() {
         return props.keySet();
     }
-    
-    public List<String> getMandatoryMetadataFields(String sModule, boolean fForSamples /* otherwise, for individuals */) {
-		String configInfo = null;
-		if (sModule != null && !sModule.isEmpty())
-			configInfo = get("mandatory" + (fForSamples ? "Sample" : "Individual") + "Metadata-" + sModule);
-		if (configInfo == null)
-			configInfo = get("mandatory" + (fForSamples ? "Sample" : "Individual") + "Metadata");
-		return configInfo != null ? Helper.split(configInfo, ",").stream().map(f -> f.trim()).toList() : new ArrayList<>();
+
+    public LinkedHashMap<String, String> getMandatoryMetadataFields(String sModule, boolean fForSamples) {
+        String configInfo = null;
+        String mdType = fForSamples ? "Sample" : "Individual";
+        if (sModule != null && !sModule.isEmpty())
+            configInfo = get("mandatory" + mdType + "Metadata-" + sModule);
+        if (configInfo == null)
+            configInfo = get("mandatory" + mdType + "Metadata");
+
+        LinkedHashMap<String, String> result = new LinkedHashMap<>() {{ put(mdType.toLowerCase(), "Must match the values provided with the genotyping data");}} ;
+        if (configInfo != null) {
+            String[] pairs = configInfo.split(";(?![^\\[\\]]*\\])");
+            for (String pair : pairs) {
+                pair = pair.trim();
+                int openBracket = pair.indexOf('[');
+                if (openBracket == -1)
+                    result.put(pair, "");
+                else {
+                    String fieldName = pair.substring(0, openBracket).trim();
+                    int closeBracket = pair.lastIndexOf(']');
+                    if (closeBracket == -1)
+                        result.put(fieldName, pair.substring(openBracket + 1).trim());
+                    else {
+                        String description = pair.substring(openBracket + 1, closeBracket).trim();
+                        result.put(fieldName, description.isEmpty() ? null : description);
+                    }
+                }
+            }
+        }
+        return result;
     }
-    
+
     synchronized public String getInstanceUUID() throws IOException {
         String instanceUUID = get("instanceUUID");
         if (instanceUUID == null) { // generate it
