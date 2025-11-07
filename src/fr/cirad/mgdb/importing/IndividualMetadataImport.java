@@ -838,17 +838,17 @@ public class IndividualMetadataImport {
 	            
 	            //aiMap.put(BrapiService.BRAPI_FIELD_extSampleDbId, aiMap.remove(BrapiService.BRAPI_FIELD_sampleDbId));		// use a dedicated field name to avoid confusion
 	            
-	            Integer spId = null;
+	            String spId = null;
 	        	try {
-	        		spId = mongoTemplate.findDistinct(new Query(Criteria.where("_id").is(internalId)), "_id",  GenotypingSample.class, Integer.class).get(0);
+	        		spId = mongoTemplate.findDistinct(new Query(Criteria.where("_id").is(internalId)), "_id",  GenotypingSample.class, String.class).get(0);
 	        	}
 	        	catch (IndexOutOfBoundsException ioobe) {
 	        		throw new Exception("Unexisting sample: " + internalId);
 	        	}
                     
-                    ExternalReferencesInner extRef = new ExternalReferencesInner();
-                    extRef.setReferenceId(sample.getSampleDbId());
-                    extRef.setReferenceSource(endpointUrl);
+                ExternalReferencesInner extRef = new ExternalReferencesInner();
+                extRef.setReferenceId(sample.getSampleDbId());
+                extRef.setReferenceSource(endpointUrl);
 	
 	            Update update = new Update();
 	            if (username == null) { // global metadata

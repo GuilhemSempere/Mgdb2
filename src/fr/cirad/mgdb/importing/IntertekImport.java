@@ -331,10 +331,12 @@ public class IntertekImport extends AbstractGenotypeImport<FileImportParameters>
                             indsToAdd.add(new Individual(sample.getIndividual()));
 
                         m_providedIdToSampleMap.put(bioEntityID, sample);  // add a sample for this individual to the project
-                        int callsetId = AutoIncrementCounter.getNextSequence(mongoTemplate, MongoTemplateManager.getMongoCollectionName(Callset.class));
-                        Callset cs = new Callset(callsetId, sample, project.getId(), sRun);
-                        sample.getCallSets().add(cs);
-                        m_providedIdToCallsetMap.put(bioEntityID, cs);
+                        if (m_providedIdToCallsetMap.get(bioEntityID) == null) {
+	                        int callsetId = AutoIncrementCounter.getNextSequence(mongoTemplate, MongoTemplateManager.getMongoCollectionName(Callset.class));
+	                        Callset cs = new Callset(callsetId, sample, project.getId(), sRun);
+	                        sample.getCallSets().add(cs);
+	                        m_providedIdToCallsetMap.put(bioEntityID, cs);
+                        }
 
                         SampleGenotype sampleGt = new SampleGenotype(gtCode);
                         sampleGt.getAdditionalInfo().put(AbstractVariantData.GT_FIELD_FI, FI);	//TODO - Check how the fluorescence indexes X et Y should be stored
