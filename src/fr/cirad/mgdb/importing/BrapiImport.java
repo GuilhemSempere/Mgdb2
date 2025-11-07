@@ -30,6 +30,7 @@ import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -62,6 +63,7 @@ import fr.cirad.io.brapi.BrapiService;
 import fr.cirad.io.brapi.CallsUtils;
 import fr.cirad.mgdb.model.mongo.subtypes.Callset;
 import fr.cirad.mgdb.model.mongo.subtypes.ReferencePosition;
+import fr.cirad.mgdb.model.mongo.subtypes.Run;
 import fr.cirad.mgdb.model.mongo.subtypes.SampleGenotype;
 import fr.cirad.mgdb.model.mongo.subtypes.VariantRunDataId;
 import fr.cirad.mgdb.model.mongodao.MgdbDao;
@@ -223,7 +225,8 @@ public class BrapiImport extends STDVariantImport {
 			progress.moveToNextStep();
 			ArrayList<String> variantsToQueryGenotypesFor = new ArrayList<>();
 			Boolean fGotKnownAllelesWhenImportingVariants = null;	// value will be determined below
-			
+
+			HashSet<String> variantsToUpdateRunsFor = new HashSet<>();
 			while (markerPager.isPaging()) {
                 if (progress.getError() != null || progress.isAborted())
                     return createdProject;
@@ -238,12 +241,15 @@ public class BrapiImport extends STDVariantImport {
 				}
 				BrapiListResource<BrapiMarkerPosition> positions = response.body();
 		
-				Map<String, VariantData> variantsToCreate = new HashMap<String, VariantData>();
+				Map<String, VariantData> variantsToAdd = new HashMap<String, VariantData>();
 				for (BrapiMarkerPosition bmp : positions.data()) {
 					variantsToQueryGenotypesFor.add(bmp.getMarkerDbId());
-						
-					if (existingVariantIDs.get(bmp.getMarkerDbId().toUpperCase()) != null)
-						continue;	// we already have this one
+					
+					String existingVariantId = existingVariantIDs.get(bmp.getMarkerDbId().toUpperCase());
+					if (existingVariantId != null) {
+						variantsToUpdateRunsFor.add(existingVariantId);	// we already have this one, keep a reference so we can update its run list
+						continue;
+					}
 
 					VariantData variant = new VariantData((ObjectId.isValid(bmp.getMarkerDbId()) ? "_" : "") + bmp.getMarkerDbId());	// prevent use of ObjectId class
 					try {
@@ -252,27 +258,28 @@ public class BrapiImport extends STDVariantImport {
 					catch (NumberFormatException | NullPointerException e) {
 					    LOG.info("No location for marker " + bmp.getMarkerDbId());
 					}
-					variantsToCreate.put(bmp.getMarkerDbId(), variant);
+					variantsToAdd.put(bmp.getMarkerDbId(), variant);
+					variantsToUpdateRunsFor.add(bmp.getMarkerDbId());
 				}
 
-				if (variantsToCreate.size() > 0) {	// get variant types for new variants
+				if (variantsToAdd.size() > 0) {	// get variant types for new variants
 					Pager subPager = new Pager();
-					subPager.setPageSize("" + variantsToCreate.size());
+					subPager.setPageSize("" + variantsToAdd.size());
 
 					while (!fMustGuessVariantTypes && subPager.isPaging()) {
 						Response markerReponse = null;
 						if (fMayPostMarkersSearch)
 						{
 							HashMap<String, Object> body = new HashMap<>();
-							body.put("markerDbIds", variantsToCreate.keySet());
+							body.put("markerDbIds", variantsToAdd.keySet());
 							body.put("pageSize", Integer.parseInt(subPager.getPageSize()));
 							body.put("page", Integer.parseInt(subPager.getPage()));
 							markerReponse = service.getMarkerInfo_byPost(body).execute();
 						}
 						else if (fMayGetMarkersSearch) // try and remain compatible with older implementations of this call
-							markerReponse = service.getMarkerInfo(variantsToCreate.keySet(), null, null, null, null, subPager.getPageSize(), subPager.getPage()).execute();	// try with GET
+							markerReponse = service.getMarkerInfo(variantsToAdd.keySet(), null, null, null, null, subPager.getPageSize(), subPager.getPage()).execute();	// try with GET
 						else if (fMayGetMarkerDetails)	// worst solution: get them one by one
-							markerReponse = service.getMarkerDetails(variantsToCreate.keySet().iterator().next()).execute();	// try in v1.0 mode ("markers" instead of "markers-search");
+							markerReponse = service.getMarkerDetails(variantsToAdd.keySet().iterator().next()).execute();	// try in v1.0 mode ("markers" instead of "markers-search");
 						if (!markerReponse.isSuccessful()) {
 							ResponseBody errorBody = response.errorBody();
 							byte[] sExceptionMsg = errorBody.bytes();
@@ -289,7 +296,7 @@ public class BrapiImport extends STDVariantImport {
 						}
 
 						for (BrapiMarker marker : markerInfo.data()) {
-							VariantData variant = variantsToCreate.get(marker.getMarkerDbId());
+							VariantData variant = variantsToAdd.get(marker.getMarkerDbId());
 							if (variant == null) {
 								progress.setError("Marker details call returned different list from the requested one");
 								return createdProject;
@@ -322,13 +329,13 @@ public class BrapiImport extends STDVariantImport {
 						subPager.paginate(markerInfo.getMetadata());
 					}
 					try {
-					    LOG.info("Inserting " + variantsToCreate.size() + " variants from BrAPI source");
-						mongoTemplate.insertAll(variantsToCreate.values());
+					    LOG.info("Inserting " + variantsToAdd.size() + " variants from BrAPI source");
+						mongoTemplate.insertAll(variantsToAdd.values());
 					}
 					catch (DuplicateKeyException dke) {
 						throw new Exception("Dataset contains duplicate markers - " + dke.getMessage());
 					}
-					createdVariantCount += variantsToCreate.size();
+					createdVariantCount += variantsToAdd.size();
 				}
 				
 				markerPager.paginate(positions.getMetadata());
@@ -370,8 +377,9 @@ public class BrapiImport extends STDVariantImport {
 			LOG.debug("Importing from " + endpointUrl + " using " + (fMayUseTsv ? "TSV" : "JSON") + " format");
 
 			final String unknownString = "";
+			GenotypingProject project;
 			if (fMayUseTsv) {
-				GenotypingProject project = mongoTemplate.findOne(new Query(Criteria.where(GenotypingProject.FIELDNAME_NAME).is(sProject)), GenotypingProject.class);
+				project = mongoTemplate.findOne(new Query(Criteria.where(GenotypingProject.FIELDNAME_NAME).is(sProject)), GenotypingProject.class);
 				MongoTemplateManager.lockProjectForWriting(sModule, sProject);
 				
 				cleanupBeforeImport(mongoTemplate, sModule, project, importMode, sRun);
@@ -386,74 +394,38 @@ public class BrapiImport extends STDVariantImport {
 				m_providedIdToSampleMap = new TreeMap<>();
 				m_providedIdToCallsetMap = new TreeMap<>();
 				for (String markerProfile : sampleToGermplasmMap.keySet()) {
-					String sIndividual = sampleToGermplasmMap.get(markerProfile);
-//
-					if (!m_providedIdToSampleMap.containsKey(sIndividual)) {	// we don't want to persist each sample several times
-		                Individual ind = mongoTemplate.findById(sIndividual, Individual.class);
+					String sProvidedIndividualForThisSample = sampleToGermplasmMap.get(markerProfile);
+
+					if (!m_providedIdToSampleMap.containsKey(sProvidedIndividualForThisSample)) {	// we don't want to persist each sample several times
+		                Individual ind = mongoTemplate.findById(sProvidedIndividualForThisSample, Individual.class);
 		                if (ind == null) {	// we don't have any population data so we don't need to update the Individual if it already exists
-		                    ind = new Individual(sIndividual);
+		                    ind = new Individual(sProvidedIndividualForThisSample);
 		                    mongoTemplate.save(ind);
 		                }
-//
-//		                GenotypingSample sample = new GenotypingSample(markerProfile, sIndividual);
-//                        m_providedIdToSampleMap.put(sIndividual, sample);  // add a sample for this individual to the project
-//
-//                        int callsetId = AutoIncrementCounter.getNextSequence(mongoTemplate, MongoTemplateManager.getMongoCollectionName(CallSet.class));
-//                        sample.getCallSets().add(new CallSet(callsetId, sample/*, sIndividual*/, project.getId(), sRun));
-						
-						
-						
-	                    GenotypingSample sample = m_providedIdToSampleMap.get(sIndividual);
+				
+	                    GenotypingSample sample = m_providedIdToSampleMap.get(sProvidedIndividualForThisSample);
 	                    if (sample == null) {
-//	                        Individual ind = mongoTemplate.findById(sIndividual, Individual.class);
-//	                        if (ind == null)
-//	                            indsToCreate.add(new Individual(sIndividual));
-
-//	                        String sampleId = sampleToIndividualMap == null ? sIndividual + "-" + project.getId() + "-" + sRun : sIndividual;
 	                        sample = mongoTemplate.findById(markerProfile, GenotypingSample.class);
 	                        if (sample == null)
-	                            sample = new GenotypingSample(markerProfile, sIndividual);
+	                            sample = new GenotypingSample(markerProfile, sProvidedIndividualForThisSample);
 
-	                        m_providedIdToSampleMap.put(sIndividual, sample);
+	                        m_providedIdToSampleMap.put(sProvidedIndividualForThisSample, sample);
 	                    }
-	                    else {
-	                    	if (!sIndividual.equals(sample.getIndividual()))
-	        	                throw new Exception("Sample " + markerProfile + " already exists and is attached to individual " + sample.getIndividual() + ", not " + sIndividual);
-//	                    	samplesToUpdate.add(sample);
-	                    }
+	                    else if (!sProvidedIndividualForThisSample.equals(sample.getIndividual()))
+	       	                throw new Exception("Sample " + markerProfile + " already exists and is attached to individual " + sample.getIndividual() + ", not " + sProvidedIndividualForThisSample);
 
-	                    if (m_providedIdToCallsetMap.get(sIndividual) == null) {
+	                    if (m_providedIdToCallsetMap.get(sProvidedIndividualForThisSample) == null) {
 	                        int callsetId = AutoIncrementCounter.getNextSequence(mongoTemplate, MongoTemplateManager.getMongoCollectionName(Callset.class));
 	                        Callset cs = new Callset(callsetId, sample, project.getId(), sRun);
-	                        m_providedIdToCallsetMap.put(sIndividual, cs);
+	                        m_providedIdToCallsetMap.put(sProvidedIndividualForThisSample, cs);
 	                        sample.getCallSets().add(cs);
 	                    }
-
-//	                    SampleGenotype sampleGt = new SampleGenotype(gtCode);
-//	                    sampleGt.getAdditionalInfo().put(AbstractVariantData.GT_FIELD_FI, FI);	//TODO - Check how the fluorescence indexes X et Y should be stored
-//
-//	                    sampleGenotypes.put(m_providedIdToCallsetMap.get(sIndOrSpId).getId(), sampleGt);
 		            }
-					
-//                    String sIndividual = determineIndividualName(sampleToIndividualMap, sIndOrSpId, progress);
-//                    if (sIndividual == null) {
-//                        progress.setError("Unable to determine individual for sample " + sIndOrSpId);
-//                        break;
-//                    }
-//                    if (!fDbAlreadyContainedIndividuals || mongoTemplate.findById(sIndividual, Individual.class) == null)  // we don't have any population data so we don't need to update the Individual if it already exists
-//                        indsToCreate.add(new Individual(sIndividual));
-
-
 				}
-//                mongoTemplate.insert(m_providedIdToCallsetMap.values(), CallSet.class);
 				
 		        //Insert new callsets, samples and individuals
 		        insertNewCallSetsSamplesIndividuals(mongoTemplate, new ArrayList<>(), new ArrayList<>(), m_providedIdToSampleMap.values());
 		        setSamplesPersisted(true);
-				
-//                for (GenotypingSample sample : m_providedIdToSampleMap.values())	// don't use insert in case some samples already exist
-//                	mongoTemplate.save(sample);
-//				setSamplesPersisted(true);
 				
 				// Initiate data export on server-side
 				Pager genotypePager = new Pager();
@@ -643,9 +615,14 @@ public class BrapiImport extends STDVariantImport {
 				setPloidy(maxPloidyFound);
 				allowDbDropIfNoGenotypingData(false);
 				tryAndMatchRandomObjectIDs(true);
-				importToMongo(sModule, sProject, sRun, sTechnology, sampleToGermplasmMap, false, tempFile.getAbsolutePath(), assemblyName, importMode);
+				int newProjId = importToMongo(sModule, sProject, sRun, sTechnology, sampleToGermplasmMap, false, tempFile.getAbsolutePath(), assemblyName, importMode);
+				
+				project = mongoTemplate.findById(newProjId, GenotypingProject.class);
 			}
 
+			long nUpdatedVariants = mongoTemplate.updateMulti(new Query(Criteria.where("_id").in(variantsToUpdateRunsFor)), new Update().addToSet(VariantData.FIELDNAME_RUNS, new Run(project.getId(), sRun)), VariantData.class).getModifiedCount();
+			LOG.debug("Imported run was attached to " + nUpdatedVariants + " variants");
+			
             if (progress.getError() == null && !progress.isAborted())
             	LOG.info("BrapiImport took " + (System.currentTimeMillis() - before) / 1000 + "s for " + createdVariantCount + " records");
 			return createdProject;
