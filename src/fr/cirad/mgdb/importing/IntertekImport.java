@@ -304,13 +304,13 @@ public class IntertekImport extends AbstractGenotypeImport<FileImportParameters>
                     		if (fDbAlreadyContainedSamples) {
                     			sample = mongoTemplate.findById(bioEntityID, GenotypingSample.class);
                     			if (sample != null && !sampleToIndividualMap.isEmpty()) {	// the sample already exists in the DB, and a sample-to-individual mapping was provided for import: let's make sure individuals match
-                    				String sProvidedIndividualForThisSample = sampleToIndividualMap.get(bioEntityID);
-                                	if (!sample.getIndividual().equals(sProvidedIndividualForThisSample))
+                    				String sProvidedIndividualForThisSample = determineIndividualNameAccountingForBrapiRelationships(sampleToIndividualMap, bioEntityID, progress);
+                                	if (sProvidedIndividualForThisSample != null && !sample.getIndividual().equals(sProvidedIndividualForThisSample))
                                 		throw new Exception("Sample " + bioEntityID + " already exists and is attached to individual " + sample.getIndividual() + ", not " + sProvidedIndividualForThisSample);
                     			}
                     		}
                     		if (sample == null) {
-                                String sIndividual = determineIndividualName(sampleToIndividualMap, bioEntityID, progress);
+                                String sIndividual = determineIndividualNameAccountingForBrapiRelationships(sampleToIndividualMap, bioEntityID, progress);
                                 if (sIndividual == null)
                                 	throw new Exception("Unable to determine individual for sample " + bioEntityID);
 
@@ -335,7 +335,6 @@ public class IntertekImport extends AbstractGenotypeImport<FileImportParameters>
                         Callset cs = new Callset(callsetId, sample, project.getId(), sRun);
                         sample.getCallSets().add(cs);
                         m_providedIdToCallsetMap.put(bioEntityID, cs);
-
 
                         SampleGenotype sampleGt = new SampleGenotype(gtCode);
                         sampleGt.getAdditionalInfo().put(AbstractVariantData.GT_FIELD_FI, FI);	//TODO - Check how the fluorescence indexes X et Y should be stored

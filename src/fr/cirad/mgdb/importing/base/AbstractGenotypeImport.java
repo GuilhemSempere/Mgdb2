@@ -115,7 +115,7 @@ public abstract class AbstractGenotypeImport<T extends ImportParameters> {
 		}
 	}
 
-	protected String determineIndividualName(Map<String, String> sampleToIndividualMap, String sampleDbId, ProgressIndicator progress) throws Exception {
+	protected String determineIndividualNameAccountingForBrapiRelationships(Map<String, String> sampleToIndividualMap, String sampleDbId, ProgressIndicator progress) throws Exception {
 		String indName = preloadedSampleToIndividualMap == null ? null : preloadedSampleToIndividualMap.get(sampleDbId);
 		if (indName == null && brapiEndPointUriForNamingIndividuals != null) {
 			if (progress != null)
@@ -134,7 +134,7 @@ public abstract class AbstractGenotypeImport<T extends ImportParameters> {
 						LOG.error("Unable to find individual name from BrAPI endpoint " + brapiEndPointUriForNamingIndividuals + " for sample " + sampleDbId);
 					else
 						indName = samples.get(0).getGermplasmDbId();
-					}
+				}
 			}
 			finally {
 				if (progress != null)
@@ -559,15 +559,15 @@ public abstract class AbstractGenotypeImport<T extends ImportParameters> {
         		if (fDbAlreadyContainedSamples) {
         			sample = mongoTemplate.findById(bioEntityID, GenotypingSample.class);
         			if (sample != null && !sampleToIndividualMap.isEmpty()) {	// the sample already exists in the DB, and a sample-to-individual mapping was provided for import: let's make sure individuals match
-        				String sProvidedIndividualForThisSample = sampleToIndividualMap.get(bioEntityID);
-                    	if (!sample.getIndividual().equals(sProvidedIndividualForThisSample)) {
+        				String sProvidedIndividualForThisSample = determineIndividualNameAccountingForBrapiRelationships(sampleToIndividualMap, bioEntityID, progress);
+                    	if (sProvidedIndividualForThisSample != null && !sample.getIndividual().equals(sProvidedIndividualForThisSample)) {
         	                progress.setError("Sample " + bioEntityID + " already exists and is attached to individual " + sample.getIndividual() + ", not " + sProvidedIndividualForThisSample);
         	                return;
         	            }
         			}
         		}
         		if (sample == null) {
-                    String sIndividual = determineIndividualName(sampleToIndividualMap, bioEntityID, progress);
+                    String sIndividual = determineIndividualNameAccountingForBrapiRelationships(sampleToIndividualMap, bioEntityID, progress);
                     if (sIndividual == null) {
                         progress.setError("Unable to determine individual for sample " + bioEntityID);
                         return;
