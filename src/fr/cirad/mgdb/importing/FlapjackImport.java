@@ -191,6 +191,7 @@ public class FlapjackImport extends RefactoredImport<FlapjackImportParameters> {
 
 
         // Rotate genotype matrix using temporary files
+        progress.setPercentageEnabled(true);
         info = "Reading and reorganizing genotypes";
         LOG.info(info);
         progress.addStep(info);
@@ -216,7 +217,7 @@ public class FlapjackImport extends RefactoredImport<FlapjackImportParameters> {
         LinkedHashMap<String, String> orderedIndOrSpToPopulationMap = new LinkedHashMap<>();
         for (String sInd : individualNames)
             orderedIndOrSpToPopulationMap.put(sInd, null);	// we have no population info
-        //createSamples(mongoTemplate, project.getId(), sRun, sampleToIndividualMap, orderedIndOrSpToPopulationMap, progress);
+        progress.setPercentageEnabled(false);
         createCallSetsSamplesIndividuals(new ArrayList<>(orderedIndOrSpToPopulationMap.keySet()), mongoTemplate, project.getId(), sRun, sampleToIndividualMap, progress);
         if (progress.getError() != null || progress.isAborted())
             return 0;

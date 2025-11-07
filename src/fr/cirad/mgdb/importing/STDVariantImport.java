@@ -153,6 +153,7 @@ public class STDVariantImport extends RefactoredImport<ImportParameters> {
 			
 			try
 			{
+				progress.setPercentageEnabled(true);
 				progress.addStep("Creating temp files to sort in batch");
 				progress.moveToNextStep();			
 				sortedTempFiles = ExternalSort.sortInBatch(in, genotypeFile.length(), comparator, ExternalSort.DEFAULTMAXTEMPFILES, Charset.defaultCharset(), sortedFile.getParentFile(), false, 0, true, progress);
@@ -180,7 +181,7 @@ public class STDVariantImport extends RefactoredImport<ImportParameters> {
 			// group data into one variant per line AND build alphabetically-sorted individual-to-population Map
 			progress.addStep("Grouping genotyping data lines into one per variant");
 			progress.moveToNextStep();
-//			progress.setPercentageEnabled(false);
+			progress.setPercentageEnabled(false);
 			FileWriter fw = new FileWriter(variantOrientedFile);
 			Scanner scanner = new Scanner(sortedFile);
 			String sInputLine;
