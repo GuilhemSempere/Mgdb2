@@ -96,7 +96,7 @@ public abstract class AbstractGenotypeImport<T extends ImportParameters> {
 	protected void attemptPreloadingIndividuals(Collection<String> sampleDbIds, ProgressIndicator progress) throws Exception {
 		if (brapiEndPointUriForNamingIndividuals == null || preloadedSampleToIndividualMap != null)
 			return;
-		
+
 		try {
 			if (progress != null)
 				progress.setProgressDescription("Getting germplasmDbId for " + sampleDbIds.size() + " samples from " + brapiEndPointUriForNamingIndividuals);
@@ -544,44 +544,57 @@ public abstract class AbstractGenotypeImport<T extends ImportParameters> {
     }
 
     protected void createCallSetsSamplesIndividuals(List<String> biologicalMaterialIDs, MongoTemplate mongoTemplate, int projId, String sRun, Map<String, String> sampleToIndividualMap, ProgressIndicator progress) throws Exception {
+    	progress.setProgressDescription("Creating / updating encountered biological entities...");
         m_providedIdToSampleMap = new HashMap<String /*individual*/, GenotypingSample>();
         m_providedIdToCallsetMap = new HashMap<String /*individual*/, Callset>();
         HashSet<Individual> indsToAdd = new HashSet<>();
         HashSet<GenotypingSample> samplesToAdd = new HashSet<>(), samplesToUpdate = new HashSet<>();
         boolean fDbAlreadyContainedIndividuals = mongoTemplate.findOne(new Query(), Individual.class) != null;
-        boolean fDbAlreadyContainedSamples = mongoTemplate.findOne(new Query(), GenotypingSample.class) != null;
+        boolean fDbAlreadyContainedSamples = mongoTemplate.findOne(new Query(), GenotypingSample.class) != null;       
         attemptPreloadingIndividuals(biologicalMaterialIDs, progress);
-        for (String sIndOrSpId : biologicalMaterialIDs) {
-            String sIndividual = determineIndividualName(sampleToIndividualMap, sIndOrSpId, progress);
-            if (sIndividual == null) {
-                progress.setError("Unable to determine individual for sample " + sIndOrSpId);
-                return;
-            }
 
-            if (!fDbAlreadyContainedIndividuals || mongoTemplate.findById(sIndividual, Individual.class) == null)  // we don't have any population data so we don't need to update the Individual if it already exists
-                indsToAdd.add(new Individual(sIndividual));
-
-            String sampleId = sampleToIndividualMap == null ? sIndividual + "-" + projId + "-" + sRun : sIndOrSpId;
-            GenotypingSample sample = fDbAlreadyContainedSamples ? mongoTemplate.findById(sampleId, GenotypingSample.class) : null;
-            if (sample == null) {
-                sample = new GenotypingSample(sampleId, sIndividual);
+        for (String bioEntityID : biologicalMaterialIDs) {
+        	GenotypingSample sample = null;
+        	if (sampleToIndividualMap != null) {	// provided bio-entities are actually samples
+        		if (fDbAlreadyContainedSamples) {
+        			sample = mongoTemplate.findById(bioEntityID, GenotypingSample.class);
+        			if (sample != null && !sampleToIndividualMap.isEmpty()) {	// the sample already exists in the DB, and a sample-to-individual mapping was provided for import: let's make sure individuals match
+        				String sProvidedIndividualForThisSample = sampleToIndividualMap.get(bioEntityID);
+                    	if (!sample.getIndividual().equals(sProvidedIndividualForThisSample)) {
+        	                progress.setError("Sample " + bioEntityID + " already exists and is attached to individual " + sample.getIndividual() + ", not " + sProvidedIndividualForThisSample);
+        	                return;
+        	            }
+        			}
+        		}
+        		if (sample == null) {
+                    String sIndividual = determineIndividualName(sampleToIndividualMap, bioEntityID, progress);
+                    if (sIndividual == null) {
+                        progress.setError("Unable to determine individual for sample " + bioEntityID);
+                        return;
+                    }
+        			sample = new GenotypingSample(bioEntityID, sIndividual);
+                    samplesToAdd.add(sample);
+        		}
+        		else
+        			samplesToUpdate.add(sample);
+        	}
+        	else {		// provided bio-entities are actually individuals
+        		sample = new GenotypingSample(bioEntityID + "-" + projId + "-" + sRun, bioEntityID);
                 samplesToAdd.add(sample);
-            }
-            else {
-            	if (!sIndividual.equals(sample.getIndividual())) {
-	                progress.setError("Sample " + sIndOrSpId + " already exists and is attached to individual " + sample.getIndividual() + ", not " + sIndividual);
-	                return;
-	            }
-            	samplesToUpdate.add(sample);
-            }
-            m_providedIdToSampleMap.put(sIndOrSpId, sample);  // add a sample for this individual to the project
+        	}
+
+            if (!fDbAlreadyContainedIndividuals || mongoTemplate.findById(sample.getIndividual(), Individual.class) == null)  // we don't have any population data so we don't need to update the Individual if it already exists
+                indsToAdd.add(new Individual(sample.getIndividual()));
+
+            m_providedIdToSampleMap.put(bioEntityID, sample);  // add a sample for this individual to the project
             int callsetId = AutoIncrementCounter.getNextSequence(mongoTemplate, MongoTemplateManager.getMongoCollectionName(Callset.class));
             Callset cs = new Callset(callsetId, sample, projId, sRun);
             sample.getCallSets().add(cs);
-            m_providedIdToCallsetMap.put(sIndOrSpId, cs);
+            m_providedIdToCallsetMap.put(bioEntityID, cs);
         }
 
         insertNewCallSetsSamplesIndividuals(mongoTemplate, indsToAdd, samplesToAdd, samplesToUpdate);
+        progress.setProgressDescription(null);
     }
 
     protected void insertNewCallSetsSamplesIndividuals(MongoTemplate mongoTemplate, Collection<Individual> indsToAdd, Collection<GenotypingSample> samplesToAdd, Collection<GenotypingSample> samplesToUpdate) throws InterruptedException {

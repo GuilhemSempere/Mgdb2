@@ -146,8 +146,6 @@ public class IntertekImport extends AbstractGenotypeImport<FileImportParameters>
 
     @Override
     protected long doImport(FileImportParameters params, MongoTemplate mongoTemplate, GenotypingProject project, ProgressIndicator progress, Integer createdProject) throws Exception {
-        String sModule = params.getModule();
-        String sProject = params.getRun();
         String sRun = params.getRun();
         String assemblyName = params.getAssemblyName();
         Map<String, String> sampleToIndividualMap = params.getSampleToIndividualMap();
@@ -174,7 +172,6 @@ public class IntertekImport extends AbstractGenotypeImport<FileImportParameters>
         Set<String> variantIdsToSave = new HashSet<>();
         HashMap<String /*variant ID*/, VariantData> variants= new HashMap<>();
         HashMap<String /*variant ID*/, List<String> /*allelesList*/> variantAllelesMap = new HashMap<>();
-        HashMap<String /*variant ID*/, HashMap<Integer, SampleGenotype>> variantToSampleToGenotypeMap = new HashMap<>();
         m_providedIdToSampleMap = new HashMap<>();
         m_providedIdToCallsetMap = new HashMap<>();
         boolean fDbAlreadyContainedIndividuals = mongoTemplate.findOne(new Query(), Individual.class) != null;
@@ -192,8 +189,8 @@ public class IntertekImport extends AbstractGenotypeImport<FileImportParameters>
             assemblyIDs.add(null);	// old-style, assembly-less DB
 
         int count = 0;
-        Set<Individual> indsToCreate = new HashSet<>();
-        Set<GenotypingSample> samplesToCreate = new HashSet<>(), samplesToUpdate = new HashSet<>();
+        Set<Individual> indsToAdd = new HashSet<>();
+        Set<GenotypingSample> samplesToAdd = new HashSet<>(), samplesToUpdate = new HashSet<>();
 
         // Reading csv file
         // Getting alleleX and alleleY for each SNP by reading lines between lines {"SNPID","SNPNum","AlleleY","AlleleX","Sequence"} and {"Scaling"};
@@ -255,12 +252,12 @@ public class IntertekImport extends AbstractGenotypeImport<FileImportParameters>
                 }
                 if (dataPart) {
                     String variantId = values[variantColIndex];
-                    String sIndOrSpId = values[indColIndex];
+                    String bioEntityID = values[indColIndex];
                     String masterPlate = values[masterPlateColIndex];
                     String call = values[callColIndex];
                     String FI = values[yFIColIndex] + "," + values[xFIColIndex];
 
-                    if (variantId.equals("") || sIndOrSpId.equals(""))
+                    if (variantId.equals("") || bioEntityID.equals(""))
                         continue; //skip line if no variantId or no individualId
 
                     if (currentVariantId == null) {
@@ -293,58 +290,56 @@ public class IntertekImport extends AbstractGenotypeImport<FileImportParameters>
                         if (call.contains(":")) {
                             List<String> alleles = Arrays.asList(call.split(":"));
                             List<String> gt = new ArrayList<>();
-                            for (String al:alleles) {
-                                if (al.equals(refAllele)) {
-                                    gt.add("0");
-                                } else {
-                                    gt.add("1");
-                                }
-                            }
+                            for (String al : alleles)
+                            	gt.add(al.equals(refAllele) ? "0" : "1");
                             gtCode = String.join("/", gt);
                             if (nPloidy == 0)
                                 nPloidy = alleles.size();
                             else if (nPloidy != alleles.size())
                             	throw new Exception("Ploidy levels differ between variants");
                         }
+                        
+                    	GenotypingSample sample = null;
+                    	if (sampleToIndividualMap != null) {	// provided bio-entities are actually samples
+                    		if (fDbAlreadyContainedSamples) {
+                    			sample = mongoTemplate.findById(bioEntityID, GenotypingSample.class);
+                    			if (sample != null && !sampleToIndividualMap.isEmpty()) {	// the sample already exists in the DB, and a sample-to-individual mapping was provided for import: let's make sure individuals match
+                    				String sProvidedIndividualForThisSample = sampleToIndividualMap.get(bioEntityID);
+                                	if (!sample.getIndividual().equals(sProvidedIndividualForThisSample))
+                                		throw new Exception("Sample " + bioEntityID + " already exists and is attached to individual " + sample.getIndividual() + ", not " + sProvidedIndividualForThisSample);
+                    			}
+                    		}
+                    		if (sample == null) {
+                                String sIndividual = determineIndividualName(sampleToIndividualMap, bioEntityID, progress);
+                                if (sIndividual == null)
+                                	throw new Exception("Unable to determine individual for sample " + bioEntityID);
 
-                        String sIndividual = determineIndividualName(sampleToIndividualMap, sIndOrSpId, progress);
-                        if (sIndividual == null) {
-                            progress.setError("Unable to determine individual for sample " + sIndOrSpId);
-                            break;
-                        }
-                        if (!fDbAlreadyContainedIndividuals || mongoTemplate.findById(sIndividual, Individual.class) == null)  // we don't have any population data so we don't need to update the Individual if it already exists
-                            indsToCreate.add(new Individual(sIndividual));
-
-                        GenotypingSample sample = m_providedIdToSampleMap.get(sIndOrSpId);
-                        if (sample == null) {
-                            Individual ind = mongoTemplate.findById(sIndividual, Individual.class);
-                            if (ind == null)
-                                indsToCreate.add(new Individual(sIndividual));
-
-                            String sampleId = sampleToIndividualMap == null ? sIndividual + "-" + project.getId() + "-" + sRun : sIndOrSpId;
-                            sample = mongoTemplate.findById(sampleId, GenotypingSample.class);
-                            if (sample == null) {
-                                sample = new GenotypingSample(sampleId, sIndividual);
+                    			sample = new GenotypingSample(bioEntityID, sIndividual);
                                 sample.getAdditionalInfo().put("masterPlate", masterPlate);
-                                samplesToCreate.add(sample);
-                            }
-                            m_providedIdToSampleMap.put(sIndOrSpId, sample);
-                        }
-                        else {
-                        	if (!sIndividual.equals(sample.getIndividual()))
-            	                throw new Exception("Sample " + sIndOrSpId + " already exists and is attached to individual " + sample.getIndividual() + ", not " + sIndividual);
-                        	samplesToUpdate.add(sample);
-                        }
+                                samplesToAdd.add(sample);
+                    		}
+                    		else
+                    			samplesToUpdate.add(sample);
+                    	}
+                    	else {		// provided bio-entities are actually individuals
+                    		sample = new GenotypingSample(bioEntityID + "-" + project.getId() + "-" + sRun, bioEntityID);
+                            sample.getAdditionalInfo().put("masterPlate", masterPlate);
+                            samplesToAdd.add(sample);
+                    	}
 
-                        if (m_providedIdToCallsetMap.get(sIndOrSpId) == null) {
-                            int callsetId = AutoIncrementCounter.getNextSequence(mongoTemplate, MongoTemplateManager.getMongoCollectionName(Callset.class));
-                            m_providedIdToCallsetMap.put(sIndOrSpId, new Callset(callsetId, sample/*, sIndividual*/, project.getId(), params.getRun()));
-                        }
+                        if (!fDbAlreadyContainedIndividuals || mongoTemplate.findById(sample.getIndividual(), Individual.class) == null)  // we don't have any population data so we don't need to update the Individual if it already exists
+                            indsToAdd.add(new Individual(sample.getIndividual()));
+
+                        m_providedIdToSampleMap.put(bioEntityID, sample);  // add a sample for this individual to the project
+                        int callsetId = AutoIncrementCounter.getNextSequence(mongoTemplate, MongoTemplateManager.getMongoCollectionName(Callset.class));
+                        Callset cs = new Callset(callsetId, sample, project.getId(), sRun);
+                        sample.getCallSets().add(cs);
+                        m_providedIdToCallsetMap.put(bioEntityID, cs);
+
 
                         SampleGenotype sampleGt = new SampleGenotype(gtCode);
                         sampleGt.getAdditionalInfo().put(AbstractVariantData.GT_FIELD_FI, FI);	//TODO - Check how the fluorescence indexes X et Y should be stored
-
-                        sampleGenotypes.put(m_providedIdToCallsetMap.get(sIndOrSpId).getId(), sampleGt);
+                        sampleGenotypes.put(m_providedIdToCallsetMap.get(bioEntityID).getId(), sampleGt);
                     }
                 }
 
@@ -362,7 +357,7 @@ public class IntertekImport extends AbstractGenotypeImport<FileImportParameters>
         }
 
         //Insert new callsets, samples and individuals
-        insertNewCallSetsSamplesIndividuals(mongoTemplate, indsToCreate, samplesToCreate, samplesToUpdate);
+        insertNewCallSetsSamplesIndividuals(mongoTemplate, indsToAdd, samplesToAdd, samplesToUpdate);
         setSamplesPersisted(true);
 
         VCFFormatHeaderLine headerLineGT = new VCFFormatHeaderLine("GT", 1, VCFHeaderLineType.String, "Genotype");
