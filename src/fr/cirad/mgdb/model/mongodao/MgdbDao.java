@@ -44,7 +44,6 @@ import javax.ejb.ObjectNotFoundException;
 import javax.servlet.ServletContext;
 import javax.servlet.http.HttpSession;
 
-import fr.cirad.mgdb.model.mongo.maintypes.*;
 import org.apache.log4j.Level;
 import org.apache.log4j.Logger;
 import org.brapi.v2.model.VariantSet;
@@ -58,11 +57,9 @@ import org.springframework.data.mongodb.core.aggregation.AggregationExpression;
 import org.springframework.data.mongodb.core.aggregation.AggregationOperation;
 import org.springframework.data.mongodb.core.aggregation.AggregationOptions;
 import org.springframework.data.mongodb.core.aggregation.AggregationResults;
-import org.springframework.data.mongodb.core.aggregation.ArrayOperators;
 import org.springframework.data.mongodb.core.aggregation.Fields;
 import org.springframework.data.mongodb.core.aggregation.LookupOperation;
 import org.springframework.data.mongodb.core.aggregation.ObjectOperators.MergeObjects;
-import org.springframework.data.mongodb.core.aggregation.OutOperation;
 import org.springframework.data.mongodb.core.aggregation.ProjectionOperation;
 import org.springframework.data.mongodb.core.aggregation.VariableOperators.Let.ExpressionVariable;
 import org.springframework.data.mongodb.core.query.Criteria;
@@ -81,9 +78,19 @@ import com.mongodb.client.result.DeleteResult;
 import com.mongodb.client.result.UpdateResult;
 
 import fr.cirad.mgdb.exporting.IExportHandler;
+import fr.cirad.mgdb.model.mongo.maintypes.Assembly;
+import fr.cirad.mgdb.model.mongo.maintypes.CachedCount;
+import fr.cirad.mgdb.model.mongo.maintypes.CustomIndividualMetadata;
 import fr.cirad.mgdb.model.mongo.maintypes.CustomIndividualMetadata.CustomIndividualMetadataId;
+import fr.cirad.mgdb.model.mongo.maintypes.CustomSampleMetadata;
 import fr.cirad.mgdb.model.mongo.maintypes.CustomSampleMetadata.CustomSampleMetadataId;
+import fr.cirad.mgdb.model.mongo.maintypes.DBVCFHeader;
 import fr.cirad.mgdb.model.mongo.maintypes.DBVCFHeader.VcfHeaderId;
+import fr.cirad.mgdb.model.mongo.maintypes.GenotypingProject;
+import fr.cirad.mgdb.model.mongo.maintypes.GenotypingSample;
+import fr.cirad.mgdb.model.mongo.maintypes.Individual;
+import fr.cirad.mgdb.model.mongo.maintypes.VariantData;
+import fr.cirad.mgdb.model.mongo.maintypes.VariantRunData;
 import fr.cirad.mgdb.model.mongo.subtypes.AbstractVariantData;
 import fr.cirad.mgdb.model.mongo.subtypes.Callset;
 import fr.cirad.mgdb.model.mongo.subtypes.ReferencePosition;
@@ -760,9 +767,13 @@ public class MgdbDao {
         return result;
     }
     
+    public LinkedHashMap<String, Individual> loadIndividualsForUser(String module, String sUser, Collection<Integer> projIDs, Collection<String> indIDs, LinkedHashMap<String, Set<String>> filters) {
+    	return loadIndividualsForUser(module, sUser, projIDs, indIDs, filters, true);
+    }
+    
     /**
      * @param module the database name (mandatory)
-     * @param sCurrentUser username for whom to get custom metadata (optional)
+     * @param sUser username for whom to get custom metadata (optional)
      * @param projIDs a collection of project IDs (optional)
      * @param indIDs a collection of individual IDs (optional), has priority over projIDs
      * @param filters the filters to apply (optional)
@@ -771,7 +782,7 @@ public class MgdbDao {
      * restricted by it, otherwise if projIDs is specified the list is
      * restricted by it, otherwise all database Individuals are returned
      */
-    public LinkedHashMap<String, Individual> loadIndividualsWithAllMetadata(String module, String sCurrentUser, Collection<Integer> projIDs, Collection<String> indIDs, LinkedHashMap<String, Set<String>> filters) {
+    public LinkedHashMap<String, Individual> loadIndividualsForUser(String module, String sUser, Collection<Integer> projIDs, Collection<String> indIDs, LinkedHashMap<String, Set<String>> filters, boolean fIncludeMetadata) {
         MongoTemplate mongoTemplate = MongoTemplateManager.get(module);
         List<Criteria> crits = new ArrayList<>();
         
@@ -781,7 +792,7 @@ public class MgdbDao {
         if (indIDs != null)
         	crits.add(Criteria.where("_id").in(indIDs));
  
-        if (sCurrentUser != null && !"anonymousUser".equals(sCurrentUser)) {	// merge with custom metadata if available
+        if (sUser != null && !"anonymousUser".equals(sUser)) {	// merge with custom metadata if available
         	LinkedHashMap<String, Individual> result = new LinkedHashMap<>();
             List<AggregationOperation> pipeline = new ArrayList<>();
         	
@@ -796,7 +807,7 @@ public class MgdbDao {
                                 new Document("$expr",
                                         new Document("$and", Arrays.asList(
                                                 new Document("$eq", Arrays.asList("$$id", "$_id." + CustomIndividualMetadataId.FIELDNAME_INDIVIDUAL_ID)),
-                                                new Document("$eq", Arrays.asList("$_id." + CustomIndividualMetadataId.FIELDNAME_USER, sCurrentUser))
+                                                new Document("$eq", Arrays.asList("$_id." + CustomIndividualMetadataId.FIELDNAME_USER, sUser))
                                         ))
                                 ));
                     })
@@ -820,7 +831,7 @@ public class MgdbDao {
         else {
             boolean fGrabSessionAttributesFromThread = SessionAttributeAwareThread.class.isAssignableFrom(Thread.currentThread().getClass());
             LinkedHashMap<String, LinkedHashMap<String, Object>> sessionMetaData = (LinkedHashMap<String, LinkedHashMap<String, Object>>) (fGrabSessionAttributesFromThread ? ((SessionAttributeAwareThread) Thread.currentThread()).getSessionAttributes().get("individuals_metadata_" + module) : httpSessionFactory.getObject().getAttribute("individuals_metadata_" + module));
-            boolean fMergeSessionData = sCurrentUser != null && sessionMetaData != null;
+            boolean fMergeSessionData = sUser != null && sessionMetaData != null;
 
             if (filters != null && !fMergeSessionData)
     	        for (Entry<String, Set<String>> filterEntry : filters.entrySet()) {
@@ -853,44 +864,45 @@ public class MgdbDao {
         }
     }
 
+    public LinkedHashMap<String, GenotypingSample> loadSamplesForUser(String module, String sUser, Collection<Integer> projIDs, Collection<String> spIDs, LinkedHashMap<String, LinkedHashMap<String, Set<String>>> filters, boolean fIncludeIndividualMetadata) {
+    	return loadSamplesForUser(module, sUser, projIDs, spIDs, filters, fIncludeIndividualMetadata, true);
+    }
+    
     /**
      * @param module the database name (mandatory)
-     * @param sCurrentUser username for whom to get custom metadata (optional)
+     * @param sUser username for whom to get custom metadata (optional)
      * @param projIDs a list of project IDs (optional)
      * @param spIDs a list of sample IDs (optional)
      * @param filters the filters to apply (optional)
-     * @getIndMetadata flag telling whether or not to include metadata tied to each sample's parent individual
+     * @param fIncludeIndividualMetadata flag telling whether or not to include metadata tied to each sample's parent individual
+     * @param fIncludeSampleMetadata flag telling whether or not to include metadata tied to each sample
      * @return sample IDs mapped to sample objects with static metada +
      * custom metadata (if available). If spIDs is specified the list is
      * restricted by it, otherwise if projIDs is specified the list is
      * restricted by it, otherwise all database samples are returned
      */
-    public LinkedHashMap<String, GenotypingSample> loadSamplesWithAllMetadata(String module, String sCurrentUser, Collection<Integer> projIDs, Collection<String> spIDs, LinkedHashMap<String, LinkedHashMap<String, Set<String>>> filters, boolean getIndMetadata) {
+    public LinkedHashMap<String, GenotypingSample> loadSamplesForUser(String module, String sUser, Collection<Integer> projIDs, Collection<String> spIDs, LinkedHashMap<String, LinkedHashMap<String, Set<String>>> filters, boolean fIncludeIndividualMetadata, boolean fIncludeSampleMetadata) {
         MongoTemplate mongoTemplate = MongoTemplateManager.get(module);
 
         List<String> indIds = new ArrayList<>();
         Map<String, Individual> indMap = null;
         if (filters != null && filters.containsKey("individual")) {
-            indMap = loadIndividualsWithAllMetadata(module, sCurrentUser, projIDs, null, filters.get("individual"));
+            indMap = loadIndividualsForUser(module, sUser, projIDs, null, filters.get("individual"));
             indIds = indMap.keySet().stream().toList();
-            if (indMap.isEmpty()) {
+            if (indMap.isEmpty())
                 return new LinkedHashMap<>();
-            }
         }
 
         // Get initial list of sample ids filtering on projects and individuals metadata
         if (spIDs == null) {
             List<Criteria> criteriaList = new ArrayList<>();
-            if (projIDs != null) {
+            if (projIDs != null)
                 criteriaList.add(Criteria.where(GenotypingSample.FIELDNAME_CALLSETS + "." + Callset.FIELDNAME_PROJECT_ID).in(projIDs));
-            }
-            if (!indIds.isEmpty()) {
+            if (!indIds.isEmpty())
                 criteriaList.add(Criteria.where(GenotypingSample.FIELDNAME_INDIVIDUAL).in(indIds));
-            }
             Criteria crit = new Criteria();
-            if (!criteriaList.isEmpty()) {
+            if (!criteriaList.isEmpty())
                 crit.andOperator(criteriaList.toArray(new Criteria[0]));
-            }
             spIDs = mongoTemplate.findDistinct(new Query(crit), "_id", GenotypingSample.class, String.class);
         }
 
@@ -899,7 +911,7 @@ public class MgdbDao {
         crits.add(Criteria.where("_id").in(spIDs));
 
         LinkedHashMap<String, GenotypingSample> result;
-        if (sCurrentUser != null && !"anonymousUser".equals(sCurrentUser)) {
+        if (sUser != null && !"anonymousUser".equals(sUser)) {
             result = new LinkedHashMap<>();    // merge with custom metadata if available
             //LinkedHashMap<String, GenotypingSample> result = new LinkedHashMap<>();
             List<AggregationOperation> pipeline = new ArrayList<>();
@@ -912,20 +924,20 @@ public class MgdbDao {
                     .let(ExpressionVariable.newVariable("id").forField("$_id"))
                     .pipeline(context -> {
                         return new Document("$match",
-                                new Document("$expr",
-                                        new Document("$and", Arrays.asList(
-                                                new Document("$eq", Arrays.asList("$$id", "$_id." + CustomSampleMetadataId.FIELDNAME_SAMPLE_ID)),
-                                                new Document("$eq", Arrays.asList("$_id." + CustomSampleMetadataId.FIELDNAME_USER, sCurrentUser))
-                                        ))
-                                ));
+                            new Document("$expr",
+                                new Document("$and", Arrays.asList(
+                                    new Document("$eq", Arrays.asList("$$id", "$_id." + CustomSampleMetadataId.FIELDNAME_SAMPLE_ID)),
+                                    new Document("$eq", Arrays.asList("$_id." + CustomSampleMetadataId.FIELDNAME_USER, sUser))
+                                ))
+                            ));
                     })
                     .as("csmd"));
 
             pipeline.add(Aggregation.unwind("$csmd", true));
             pipeline.add(Aggregation.project()
-                    .andInclude(GenotypingSample.FIELDNAME_INDIVIDUAL)
-                    .and(MergeObjects.mergeValuesOf("$" + GenotypingSample.SECTION_ADDITIONAL_INFO, "$csmd." + GenotypingSample.SECTION_ADDITIONAL_INFO))
-                    .as(GenotypingSample.SECTION_ADDITIONAL_INFO));
+                .andInclude(GenotypingSample.FIELDNAME_INDIVIDUAL)
+                .and(MergeObjects.mergeValuesOf("$" + GenotypingSample.SECTION_ADDITIONAL_INFO, "$csmd." + GenotypingSample.SECTION_ADDITIONAL_INFO))
+                .as(GenotypingSample.SECTION_ADDITIONAL_INFO));
 
             if (filters != null)
                 for (Entry<String, Set<String>> filterEntry : filters.get("sample").entrySet()) {
@@ -941,7 +953,7 @@ public class MgdbDao {
         } else {
             boolean fGrabSessionAttributesFromThread = SessionAttributeAwareThread.class.isAssignableFrom(Thread.currentThread().getClass());
             LinkedHashMap<String, LinkedHashMap<String, Object>> sessionMetaData = (LinkedHashMap<String, LinkedHashMap<String, Object>>) (fGrabSessionAttributesFromThread ? ((SessionAttributeAwareThread) Thread.currentThread()).getSessionAttributes().get("samples_metadata_" + module) : httpSessionFactory.getObject().getAttribute("samples_metadata_" + module));
-            boolean fMergeSessionData = sCurrentUser != null && sessionMetaData != null;
+            boolean fMergeSessionData = sUser != null && sessionMetaData != null;
 
             if (filters != null && !fMergeSessionData && filters.containsKey("sample"))
                 for (Entry<String, Set<String>> filterEntry : filters.get("sample").entrySet()) {
@@ -953,6 +965,8 @@ public class MgdbDao {
             // load "official" metadata (that is, those attached to Sample objects)
             Query q = crits.size() == 0 ? new Query() : new Query(new Criteria().andOperator(crits.toArray(new Criteria[crits.size()])));
             q.with(Sort.by(Sort.Direction.ASC, "_id"));
+            if (!fIncludeSampleMetadata)
+            	q.fields().exclude(GenotypingSample.SECTION_ADDITIONAL_INFO);
             result = mongoTemplate.find(q, GenotypingSample.class).stream().collect(Collectors.toMap(GenotypingSample::getId, Function.identity(), (u, v) -> u, LinkedHashMap::new));
 
             if (fMergeSessionData) {    // filters will be applied "by hand" after merging
@@ -962,21 +976,21 @@ public class MgdbDao {
                     sample.getAdditionalInfo().putAll(indSessionMetadata);
 
                     if (filters != null)
-                        for (Entry<String, Set<String>> filterEntry : filters.get("sample").entrySet()) {
+                        for (Entry<String, Set<String>> filterEntry : filters.get("sample").entrySet())
                             if (!filterEntry.getValue().isEmpty() && !filterEntry.getValue().contains(sample.getAdditionalInfo().get(filterEntry.getKey()))) {
                                 result.remove(indEntry.getKey());
                                 return;
                             }
-                        }
+
                 });
             }
         }
 
-        if (!result.isEmpty() && getIndMetadata) {
+        if (!result.isEmpty() && fIncludeIndividualMetadata) {
             // Get individuals metadata and add them to samples metadata
             if (indMap == null) {
                 Set<String> individualIds = result.values().stream().map(GenotypingSample::getIndividual).collect(Collectors.toSet());
-                indMap = loadIndividualsWithAllMetadata(module, sCurrentUser, projIDs, individualIds, null);
+                indMap = loadIndividualsForUser(module, sUser, projIDs, individualIds, null);
             }
 
             for (GenotypingSample sample : result.values())
@@ -1247,7 +1261,7 @@ public class MgdbDao {
     public LinkedHashMap<String, Set<String>> distinctIndividualMetadata(String module, String sCurrentUser, Collection<Integer> projIDs, Collection<String> indIDs) {
         LinkedHashMap<String, Set<String>> result = new LinkedHashMap<>();	// this one will be sorted according to the provided list
         HashSet<String> wrongFormatFields = new HashSet<>();
-        MgdbDao.getInstance().loadIndividualsWithAllMetadata(module, sCurrentUser, projIDs, indIDs, null).values().stream().filter(ind -> ind.getAdditionalInfo() != null).map(ind -> {
+        MgdbDao.getInstance().loadIndividualsForUser(module, sCurrentUser, projIDs, indIDs, null).values().stream().filter(ind -> ind.getAdditionalInfo() != null).map(ind -> {
         	for (String fieldName : ind.getAdditionalInfo().keySet()) {
         		Object val = ind.getAdditionalInfo().get(fieldName);
         		if (val instanceof String)
@@ -1271,7 +1285,7 @@ public class MgdbDao {
 	public LinkedHashMap<String, Set<String>> distinctSampleMetadata(String module, String sCurrentUser, Collection<Integer> projIDs, Collection<String> spIDs) {
         LinkedHashMap<String, Set<String>> result = new LinkedHashMap<>();	// this one will be sorted according to the provided list
         HashSet<String> wrongFormatFields = new HashSet<>();
-        MgdbDao.getInstance().loadSamplesWithAllMetadata(module, sCurrentUser, projIDs, spIDs, null, true).values().stream().filter(ind -> ind.getAdditionalInfo() != null).map(sp -> {
+        MgdbDao.getInstance().loadSamplesForUser(module, sCurrentUser, projIDs, spIDs, null, true).values().stream().filter(ind -> ind.getAdditionalInfo() != null).map(sp -> {
         	for (String fieldName : sp.getAdditionalInfo().keySet()) {
         		Object val = sp.getAdditionalInfo().get(fieldName);
         		if (val instanceof String)
