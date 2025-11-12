@@ -112,7 +112,7 @@ public class MongoTemplateManager implements ApplicationContextAware {
     /**
      * The hidden databases.
      */
-    static private List<String> hiddenDatabases = new ArrayList<>();
+    static private Set<String> hiddenDatabases = new TreeSet<>();
 
     /**
      * The mongo clients.
