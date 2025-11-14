@@ -104,6 +104,11 @@ public class AppConfig {
 		}
     };
 
+    public String get(String sPropertyName, String defaultValue) {
+        String val = props.containsKey(sPropertyName) ? props.getString(sPropertyName) : null;
+        return val == null ? defaultValue : val;
+    }
+    
     public String get(String sPropertyName) {
         return props.containsKey(sPropertyName) ? props.getString(sPropertyName) : null;
     }
