@@ -25,8 +25,6 @@ import java.util.HashMap;
 import java.util.List;
 
 import org.apache.log4j.Logger;
-import org.springframework.beans.factory.BeanDefinitionStoreException;
-import org.springframework.context.support.GenericXmlApplicationContext;
 import org.springframework.data.mongodb.core.MongoTemplate;
 
 import fr.cirad.mgdb.model.mongo.maintypes.SequenceStats;
@@ -77,45 +75,23 @@ public class SequenceStatImport {
 	 * @param args the arguments
 	 * @throws Exception the exception
 	 */
-	public static void main(String[] args) throws Exception
-	{
+	public static void main(String[] args) throws Exception {
 		if (args.length < 5)
 			throw new Exception("You must pass 5 parameters as arguments: DATASOURCE name, project name, run name, TSV-stats file, 5th parameter only supports values '2' (empty all database's sequence stats before importing), and '0' (no action over existing data)!");
 		
 		String sModule = args[0];
 		
-		GenericXmlApplicationContext ctx = null;
 		MongoTemplate mongoTemplate = MongoTemplateManager.get(sModule);
-		if (mongoTemplate == null)
-		{	// we are probably being invoked offline
-			try
-			{
-				ctx = new GenericXmlApplicationContext("applicationContext-data.xml");
-			}
-			catch (BeanDefinitionStoreException fnfe)
-			{
-				LOG.warn("Unable to find applicationContext-data.xml. Now looking for applicationContext.xml", fnfe);
-				ctx = new GenericXmlApplicationContext("applicationContext.xml");
-			}
-
-			MongoTemplateManager.initialize(ctx);
-			mongoTemplate = MongoTemplateManager.get(sModule);
-			if (mongoTemplate == null)
-				throw new Exception("DATASOURCE '" + sModule + "' is not supported!");
-		}
 		
 		String sequenceStatCollName = MongoTemplateManager.getMongoCollectionName(SequenceStats.class);
 		
-		if ("2".equals(args[4]))
-		{	// empty project's sequence data before importing
-			if (mongoTemplate.collectionExists(sequenceStatCollName))
-			{
+		if ("2".equals(args[4])) {	// empty project's sequence data before importing
+			if (mongoTemplate.collectionExists(sequenceStatCollName)) {
 				mongoTemplate.dropCollection(sequenceStatCollName);
 				LOG.info("Collection " + sequenceStatCollName + " dropped.");
 			}	
 		}	
-		else if ("0".equals(args[4]))
-		{
+		else if ("0".equals(args[4])) {
 			// do nothing
 		}
 		else
@@ -130,13 +106,10 @@ public class SequenceStatImport {
 		
 		HashMap<String, Integer> fieldIndexes = new HashMap<String, Integer>();
 		int rowIndex = 0;
-		try
-		{
-			while ((line = mainFileReader.readLine()) != null /*&& rowIndex < 5*/)
-			{
+		try {
+			while ((line = mainFileReader.readLine()) != null /*&& rowIndex < 5*/) {
 				String[] splittedLine = line.split("\t");
-				if (rowIndex == 0)
-				{
+				if (rowIndex == 0) {
 					for (int i=0; i<splittedLine.length; i++)
 						fieldIndexes.put(splittedLine[i], i);
 					for (String sFieldName : MANDATORY_SEQUENCE_FIELDS)
@@ -145,13 +118,11 @@ public class SequenceStatImport {
 					if (errors.length() > 0)
 						throw new Exception("ERRORS IN FILE STRUCTURE: \n" + errors.toString());
 				}
-				else
-				{
+				else {
 					String name = splittedLine[fieldIndexes.get(SEQUENCE_FIELD_NAME)];
 					Long sequenceLength = null, mappingLength = null, cdsStart = null, cdsEnd = null;
 					Byte frame = null;
-					try
-					{
+					try {
 						sequenceLength = Long.parseLong(splittedLine[fieldIndexes.get(SEQUENCE_FIELD_SEQLENGTH)]);
 					}
 					catch (NumberFormatException nfe)
@@ -159,26 +130,22 @@ public class SequenceStatImport {
 						errors.append("Unable to parse sequence length '" + fieldIndexes.get(SEQUENCE_FIELD_SEQLENGTH) + "' for sequence '" + name + "'");
 						continue;
 					}
-					try
-					{
+					try {
 						mappingLength = Long.parseLong(ignoreSingleDot(splittedLine[fieldIndexes.get(SEQUENCE_FIELD_MAPPINGLENGTH)]));
 					}
 					catch (NumberFormatException ignored)
 					{}
-					try
-					{
+					try {
 						cdsStart = Long.parseLong(ignoreSingleDot(splittedLine[fieldIndexes.get(SEQUENCE_FIELD_CDSSTART)]));
 					}
 					catch (NumberFormatException ignored)
 					{}
-					try
-					{
+					try {
 						cdsEnd = Long.parseLong(ignoreSingleDot(splittedLine[fieldIndexes.get(SEQUENCE_FIELD_CDSEND)]));
 					}
 					catch (NumberFormatException ignored)
 					{}
-					try
-					{
+					try {
 						frame = Byte.parseByte(ignoreSingleDot(splittedLine[fieldIndexes.get(SEQUENCE_FIELD_FRAME)]));
 					}
 					catch (NumberFormatException ignored)
@@ -188,8 +155,7 @@ public class SequenceStatImport {
 					String p4eMethod = ignoreSingleDot(splittedLine[fieldIndexes.get(SEQUENCE_FIELD_P4EMETHOD)]);
 					if (seqStats == null)
 						seqStats = new SequenceStats(name, sequenceLength);
-					else
-					{
+					else {
 						if (cdsStart != null && !cdsStart.equals(seqStats.getCdsStart()))
 							LOG.warn("Sequence '" + name + "': Value provided for '" + SEQUENCE_FIELD_CDSSTART + "' does not match the existing one. Overwriting existing value '" + cdsStart + "'");
 						if (cdsEnd != null && !cdsEnd.equals(seqStats.getCdsEnd()))
@@ -206,21 +172,18 @@ public class SequenceStatImport {
 					
 					HashMap<String, HashMap<String, Comparable>> sampleInfoMap = new HashMap<String, HashMap<String, Comparable>>();
 					List<MappingStats> theProjectData = seqStats.getProjectData().get(args[1]);
-					if (theProjectData == null)
-					{
+					if (theProjectData == null) {
 						theProjectData = new ArrayList<MappingStats>();
 						seqStats.getProjectData().put(args[1], theProjectData);
 					}					
 					MappingStats theMappingStats = null;
 					for (MappingStats mp : theProjectData)
-						if (args[2].equals(mp.getRunName()))
-						{
+						if (args[2].equals(mp.getRunName())) {
 							theMappingStats = mp;
 							theMappingStats.setSampleInfo(sampleInfoMap);
 							break;
 						}
-					if (theMappingStats == null)
-					{
+					if (theMappingStats == null) {
 						theMappingStats = new MappingStats(args[2], sampleInfoMap);
 						theProjectData.add(theMappingStats);
 					}
@@ -228,8 +191,7 @@ public class SequenceStatImport {
 						theMappingStats.setMappingLength(mappingLength);
 
 					for (String sKey : fieldIndexes.keySet())
-						if (sKey.startsWith(SEQUENCE_FIELD_PREFIX_RPKM))
-						{
+						if (sKey.startsWith(SEQUENCE_FIELD_PREFIX_RPKM)) {
 							String rpkmString = splittedLine[fieldIndexes.get(sKey)];
 							Float rpkm = null;
 							try
@@ -260,8 +222,7 @@ public class SequenceStatImport {
 			rowIndex = 0;
 			System.out.println();
 			LOG.info("Writing records to database");
-			for (SequenceStats sequence : sequences)
-			{
+			for (SequenceStats sequence : sequences) {
 				mongoTemplate.save(sequence, sequenceStatCollName);
 				if (++rowIndex%1000 == 0)
 					System.out.print(rowIndex + " ");
@@ -269,12 +230,11 @@ public class SequenceStatImport {
 			System.out.println();
 			LOG.info((rowIndex) + " records added to collection " + sequenceStatCollName);
 		}
-		finally
-		{
+		finally {
 			mainFileReader.close();
 		}
 
-		ctx.close();
+		MongoTemplateManager.closeApplicationContextIfOffline();
 	}
 
 	/**

@@ -24,6 +24,7 @@ import java.util.Collections;
 import java.util.Enumeration;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Properties;
 import java.util.ResourceBundle;
@@ -103,31 +104,106 @@ public class AppConfig {
 		}
     };
 
+    public String get(String sPropertyName, String defaultValue) {
+        String val = get(sPropertyName);
+        return val == null ? defaultValue : val;
+    }
+    
     public String get(String sPropertyName) {
         return props.containsKey(sPropertyName) ? props.getString(sPropertyName) : null;
     }
     
+    public Long getLong(String sPropertyName, Long defaultValue) {
+    	Long val = getLong(sPropertyName);
+    	return val == null ? defaultValue : val;
+    }
+    
+    public Long getLong(String sPropertyName) {
+    	String val = get(sPropertyName);
+    	try {
+    		return Long.parseLong(val);
+    	}
+    	catch (Exception e) {
+    		return null;
+    	}
+    }
+
     public Set<String> keySet() {
         return props.keySet();
     }
-    
+
+    public LinkedHashMap<String, String> getMandatoryMetadataFields(String sModule, boolean fForSamples) {
+        String configInfo = null;
+        String mdType = fForSamples ? "Sample" : "Individual";
+        if (sModule != null && !sModule.isEmpty())
+            configInfo = get("mandatory" + mdType + "Metadata-" + sModule);
+        if (configInfo == null)
+            configInfo = get("mandatory" + mdType + "Metadata");
+
+        LinkedHashMap<String, String> result = new LinkedHashMap<>() {{ put(mdType.toLowerCase(), "Must match the values provided with the genotyping data");}} ;
+        if (configInfo != null) {
+            String[] pairs = configInfo.split(";(?![^\\[\\]]*\\])");
+            for (String pair : pairs) {
+                pair = pair.trim();
+                int openBracket = pair.indexOf('[');
+                if (openBracket == -1)
+                    result.put(pair, "");
+                else {
+                    String fieldName = pair.substring(0, openBracket).trim();
+                    int closeBracket = pair.lastIndexOf(']');
+                    if (closeBracket == -1)
+                        result.put(fieldName, pair.substring(openBracket + 1).trim());
+                    else {
+                        String description = pair.substring(openBracket + 1, closeBracket).trim();
+                        result.put(fieldName, description.isEmpty() ? null : description);
+                    }
+                }
+            }
+        }
+        return result;
+    }
+
     synchronized public String getInstanceUUID() throws IOException {
         String instanceUUID = get("instanceUUID");
         if (instanceUUID == null) { // generate it
-        	instanceUUID = UUID.randomUUID().toString();
-        	FileOutputStream fos = null;
-            File f = new ClassPathResource("/" + CONFIG_FILE + ".properties").getFile();
-        	FileReader fileReader = new FileReader(f);
-            Properties properties = new Properties();
-            properties.load(fileReader);
-            properties.put("instanceUUID", instanceUUID);
-            fos = new FileOutputStream(f);
-            properties.store(fos, null);
-            props = ResourceBundle.getBundle(CONFIG_FILE, resourceControl);
-            LOG.info("instanceUUID generated as " + instanceUUID);
+        	String generatedInstanceUUID = UUID.randomUUID().toString();
+        	saveProperties(new HashMap<>() {{ put("instanceUUID", generatedInstanceUUID); }});
+        	instanceUUID = generatedInstanceUUID;
         }
         return instanceUUID;
     }
+    
+    synchronized public void saveProperties(Map<String, String> propsToSet) throws IOException {
+    	FileOutputStream fos = null;
+        File f = new ClassPathResource("/" + CONFIG_FILE + ".properties").getFile();
+    	FileReader fileReader = new FileReader(f);
+        Properties properties = new Properties();
+        properties.load(fileReader);
+        for (String key : propsToSet.keySet()) {
+        	String value = propsToSet.get(key);
+	        if (value == null) {
+	        	properties.remove(key);
+	        	LOG.info("Removing " + key + " config-property");
+	        }
+	        else {
+	        	properties.put(key, value);
+	        	LOG.info("Saving " + key + " config-property as " + value);
+	        }
+        }
+        fos = new FileOutputStream(f);
+        properties.store(fos, null);
+        props = new ResourceBundle() {
+	        @Override
+	        protected Object handleGetObject(String key) {
+	            return properties.getProperty(key);
+	        }
+	
+	        @Override
+	        public Enumeration<String> getKeys() {
+	            return Collections.enumeration(properties.stringPropertyNames());
+	        }
+	    };
+	}
     
     public Map<String, String> getPrefixed(String sPrefix) {
         Map<String, String> result = new HashMap<>();

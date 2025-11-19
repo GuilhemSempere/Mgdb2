@@ -16,10 +16,7 @@
  *******************************************************************************/
 package fr.cirad.mgdb.importing;
 
-import java.io.BufferedReader;
-import java.io.File;
-import java.io.FileReader;
-import java.io.FileWriter;
+import java.io.*;
 import java.net.URL;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -35,35 +32,29 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
+import fr.cirad.mgdb.importing.parameters.PlinkImportParameters;
 import org.apache.log4j.Logger;
-import org.springframework.beans.factory.BeanDefinitionStoreException;
-import org.springframework.context.support.GenericXmlApplicationContext;
 import org.springframework.data.mongodb.core.MongoTemplate;
-import org.springframework.data.mongodb.core.query.Criteria;
-import org.springframework.data.mongodb.core.query.Query;
 
 import fr.cirad.mgdb.importing.base.AbstractGenotypeImport;
 import fr.cirad.mgdb.importing.base.RefactoredImport;
 import fr.cirad.mgdb.model.mongo.maintypes.Assembly;
 import fr.cirad.mgdb.model.mongo.maintypes.GenotypingProject;
-import fr.cirad.mgdb.model.mongodao.MgdbDao;
 import fr.cirad.tools.ProgressIndicator;
 import fr.cirad.tools.genotypes.PlinkEigenstratTool;
-import fr.cirad.tools.mongo.AutoIncrementCounter;
-import fr.cirad.tools.mongo.MongoTemplateManager;
 import htsjdk.variant.variantcontext.Allele;
 import htsjdk.variant.variantcontext.VariantContext.Type;
 
 /**
  * The Class PlinkImport.
  */
-public class PlinkImport extends RefactoredImport {
+public class PlinkImport extends RefactoredImport<PlinkImportParameters> {
 
     /** The Constant LOG. */
     private static final Logger LOG = Logger.getLogger(PlinkImport.class);
 
     /** The m_process id. */
-    private String m_processID;
+    //private String m_processID;
 
     public boolean m_fCloseContextOpenAfterImport = false;
 
@@ -71,6 +62,9 @@ public class PlinkImport extends RefactoredImport {
     
     private static final Pattern nonWhiteSpaceBlockPattern = Pattern.compile("\\S+");
     private static final Pattern outputFileSeparatorPattern = Pattern.compile("(/|\\t)");
+
+    private BufferedReader reader;
+    File rotatedFile;
 
     /**
      * Instantiates a new PLINK import.
@@ -157,161 +151,117 @@ public class PlinkImport extends RefactoredImport {
             LOG.warn("Unable to parse input mode. Using default (0): overwrite run if exists.");
         }
         PlinkImport instance = new PlinkImport();
-        instance.setMaxExpectedAlleleCount(2);
-        instance.importToMongo(args[0], args[1], args[2], args[3], new File(args[4]).toURI().toURL(), new File(args[5]), null, false, true, args[6], mode);
+        //instance.setMaxExpectedAlleleCount(2);
+        //instance.importToMongo(args[0], args[1], args[2], args[3], new File(args[4]).toURI().toURL(), new File(args[5]), null, false, true, args[6], mode);
+        PlinkImportParameters params = new PlinkImportParameters(
+                args[0], //sModule
+                args[1], //sProject
+                args[2], //sRun
+                args[3], //sTechnology
+                null, // nPloidy
+                args[5], //assemblyName
+                null, //sampleToIndividualMap
+                false,//fSkipMonomorphic
+                mode,//importMode
+                new File(args[4]).toURI().toURL(), //mainFileUrl
+                new File(args[5]).toURI().toURL(),
+                false
+        );
+        new PlinkImport().importToMongo(params);
+
     }
 
-    /**
-     * Import to mongo.
-     *
-     * @param sModule the module
-     * @param sProject the project
-     * @param sRun the run
-     * @param sTechnology the technology
-     * @param mapFileURL the map file URL
-     * @param pedFile the ped file
-	 * @param sampleToIndividualMap the sample-individual mapping
-     * @param fSkipMonomorphic whether or not to skip import of variants that have no polymorphism (where all individuals have the same genotype)
-     * @param fCheckConsistencyBetweenSynonyms if set, will skip genotypes that are not consistent across provided synonyms
-     * @param assemblyName the assembly name
-     * @param importMode the import mode
-     * @return a project ID if it was created by this method, otherwise null
-     * @throws Exception the exception
-     */
-    public Integer importToMongo(String sModule, String sProject, String sRun, String sTechnology, URL mapFileURL, File pedFile, HashMap<String, String> sampleToIndividualMap, boolean fSkipMonomorphic, boolean fCheckConsistencyBetweenSynonyms, String assemblyName, int importMode) throws Exception
-    {
-        if (m_nCurrentlyTransposingMatrixCount > 3) // we allow up to 4 simultaneous matrix rotations
-            throw new Exception("The system is already busy rotating other PLINK datasets, please try again later");
-
-        long before = System.currentTimeMillis();
-        ProgressIndicator progress = ProgressIndicator.get(m_processID) != null ? ProgressIndicator.get(m_processID) : new ProgressIndicator(m_processID, new String[]{"Initializing import"}); // better to add it straight-away so the JSP doesn't get null in return when it checks for it (otherwise it will assume the process has ended)
-
-        GenericXmlApplicationContext ctx = null;
-        MongoTemplate mongoTemplate = MongoTemplateManager.get(sModule);
-        if (mongoTemplate == null)
-        {   // we are probably being invoked offline
-            try
-            {
-                ctx = new GenericXmlApplicationContext("applicationContext-data.xml");
-            }
-            catch (BeanDefinitionStoreException fnfe)
-            {
-                LOG.warn("Unable to find applicationContext-data.xml. Now looking for applicationContext.xml", fnfe);
-                ctx = new GenericXmlApplicationContext("applicationContext.xml");
-            }
-
-            MongoTemplateManager.initialize(ctx);
-            mongoTemplate = MongoTemplateManager.get(sModule);
-            if (mongoTemplate == null)
-                throw new Exception("DATASOURCE '" + sModule + "' is not supported!");
-        }
+    @Override
+    protected long doImport(PlinkImportParameters params, MongoTemplate mongoTemplate, GenotypingProject project, ProgressIndicator progress, Integer createdProject) throws Exception {
+        String sModule = params.getModule();
+        String sProject = params.getRun();
+        String sRun = params.getRun();
+        String assemblyName = params.getAssemblyName();
+        Map<String, String> sampleToIndividualMap = params.getSampleToIndividualMap();
+        boolean fSkipMonomorphic = params.isSkipMonomorphic();
+        boolean fCheckConsistencyBetweenSynonyms = params.isfCheckConsistencyBetweenSynonyms();
+        URL pedFileURL = params.getMainFileUrl();
+        URL mapFileURL = params.getMapFileUrl();
 
         m_fImportUnknownVariants = doesDatabaseSupportImportingUnknownVariants(sModule);
 
-        if (m_processID == null)
-            m_processID = "IMPORT__" + sModule + "__" + sProject + "__" + sRun + "__" + System.currentTimeMillis();
+        progress.addStep("Scanning existing marker IDs");
+        progress.moveToNextStep();
+        Assembly assembly = createAssemblyIfNeeded(mongoTemplate, assemblyName);
+        HashMap<String, String> existingVariantIDs = buildSynonymToIdMapForExistingVariants(mongoTemplate, true, assembly == null ? null : assembly.getId());
 
-        GenotypingProject project = mongoTemplate.findOne(new Query(Criteria.where(GenotypingProject.FIELDNAME_NAME).is(sProject)), GenotypingProject.class);
-        if (importMode == 0 && project != null && project.getPloidyLevel() != 2)
-            throw new Exception("Ploidy levels differ between existing (" + project.getPloidyLevel() + ") and provided (" + 2 + ") data!");
-
-        Integer createdProject = null;
-        
-        File rotatedFile = null;
-        try
-        {
-            MongoTemplateManager.lockProjectForWriting(sModule, sProject);
-
-            cleanupBeforeImport(mongoTemplate, sModule, project, importMode, sRun);
-
-            // create project if necessary
-            if (project == null || importMode > 0) {   // create it
-                project = new GenotypingProject(AutoIncrementCounter.getNextSequence(mongoTemplate, MongoTemplateManager.getMongoCollectionName(GenotypingProject.class)));
-                project.setName(sProject);
-                project.setTechnology(sTechnology);
-                if (importMode != 1)
-                	createdProject = project.getId();
-            }
-            project.setPloidyLevel(2);
-
-			progress.addStep("Scanning existing marker IDs");
-			progress.moveToNextStep();
-			Assembly assembly = createAssemblyIfNeeded(mongoTemplate, assemblyName);
-			HashMap<String, String> existingVariantIDs = buildSynonymToIdMapForExistingVariants(mongoTemplate, true, assembly == null ? null : assembly.getId());
-
-            String info = "Loading variant list from MAP file";
-            LOG.info(info);
-            progress.addStep(info);
-            progress.moveToNextStep();
-            LinkedHashSet<Integer> redundantVariantIndexes = new LinkedHashSet<>();
-            LinkedHashMap<String, String> providedVariantPositions = PlinkEigenstratTool.getVariantsAndPositionsFromPlinkMapFile(mapFileURL, redundantVariantIndexes, "\t");
-            String[] variants = providedVariantPositions.keySet().toArray(new String[providedVariantPositions.size()]);
+        String info = "Loading variant list from MAP file";
+        LOG.info(info);
+        progress.addStep(info);
+        progress.moveToNextStep();
+        LinkedHashSet<Integer> redundantVariantIndexes = new LinkedHashSet<>();
+        LinkedHashMap<String, String> providedVariantPositions = PlinkEigenstratTool.getVariantsAndPositionsFromPlinkMapFile(mapFileURL, redundantVariantIndexes, "\t");
+        String[] variants = providedVariantPositions.keySet().toArray(new String[providedVariantPositions.size()]);
 
 
-            // Rotate matrix using temporary files
-            info = "Reading and reorganizing genotypes";
-            LOG.info(info);
-            progress.addStep(info);
-            progress.moveToNextStep();
-            Map<String, Type> nonSnpVariantTypeMap = new HashMap<>();
-            LinkedHashMap<String, String> orderedIndOrSpToPopulationMap = new LinkedHashMap<>();
-            try {
-                m_nCurrentlyTransposingMatrixCount++;
-                rotatedFile = transposePlinkPedFile(variants, pedFile, orderedIndOrSpToPopulationMap, nonSnpVariantTypeMap, fSkipMonomorphic, progress);
-            }
-            finally {
-                m_nCurrentlyTransposingMatrixCount--;
-            }
-            
-            
-            // Create the necessary samples
-            createSamples(mongoTemplate, project.getId(), sRun, sampleToIndividualMap, orderedIndOrSpToPopulationMap, progress);
-            if (progress.getError() != null || progress.isAborted())
-                return createdProject;
-            
-            
-            // Consistency checking (optional)
-            HashMap<String, ArrayList<String>> inconsistencies = null;
-            HashSet<Integer> indexesOfLinesThatMustBeSkipped = new HashSet<>();
-            if (fCheckConsistencyBetweenSynonyms) {
-                progress.addStep("Checking genotype consistency between synonyms");
-                progress.moveToNextStep();
-                checkSynonymGenotypeConsistency(rotatedFile, existingVariantIDs, orderedIndOrSpToPopulationMap.keySet(), pedFile.getParentFile() + File.separator + sModule + "_" + sProject + "_" + sRun, indexesOfLinesThatMustBeSkipped);
-            }
-            if (progress.getError() != null || progress.isAborted())
-                return createdProject;
+        // Rotate matrix using temporary files
+        progress.setPercentageEnabled(true);
+        info = "Reading and reorganizing genotypes";
+        LOG.info(info);
+        progress.addStep(info);
+        progress.moveToNextStep();
+        Map<String, Type> nonSnpVariantTypeMap = new HashMap<>();
+        LinkedHashMap<String, String> orderedIndOrSpToPopulationMap = new LinkedHashMap<>();
+        try {
+            m_nCurrentlyTransposingMatrixCount++;
+            rotatedFile = transposePlinkPedFile(variants, pedFileURL, orderedIndOrSpToPopulationMap, nonSnpVariantTypeMap, fSkipMonomorphic, progress);
+        }
+        finally {
+            m_nCurrentlyTransposingMatrixCount--;
+        }
 
-            
-            // Rotated file import
-            int nConcurrentThreads = Math.max(1, Runtime.getRuntime().availableProcessors());
-            LOG.debug("Importing project '" + sProject + "' into " + sModule + " using " + nConcurrentThreads + " threads");
 
-            long count = importTempFileContents(progress, nConcurrentThreads, mongoTemplate, assembly == null ? null : assembly.getId(), rotatedFile, providedVariantPositions, existingVariantIDs, project, sRun, inconsistencies, orderedIndOrSpToPopulationMap, nonSnpVariantTypeMap, indexesOfLinesThatMustBeSkipped, fSkipMonomorphic);
+        // Create the necessary samples
+        progress.setPercentageEnabled(false);
+        createCallSetsSamplesIndividuals(new ArrayList<>(orderedIndOrSpToPopulationMap.keySet()), mongoTemplate, project.getId(), sRun, sampleToIndividualMap, progress);
 
-            if (progress.getError() != null)
-                throw new Exception(progress.getError());
-
-            if (!progress.isAborted())
-            	LOG.info("PlinkImport took " + (System.currentTimeMillis() - before) / 1000 + "s for " + count + " records");
+        if (progress.getError() != null || progress.isAborted())
             return createdProject;
+
+
+        // Consistency checking (optional)
+        HashMap<String, ArrayList<String>> inconsistencies = null;
+        HashSet<Integer> indexesOfLinesThatMustBeSkipped = new HashSet<>();
+        if (fCheckConsistencyBetweenSynonyms) {
+            progress.addStep("Checking genotype consistency between synonyms");
+            progress.moveToNextStep();
+            checkSynonymGenotypeConsistency(rotatedFile, existingVariantIDs, orderedIndOrSpToPopulationMap.keySet(), (pedFileURL.getHost().isEmpty() ? new File(pedFileURL.getPath()).getParentFile().getPath() : System.getProperty("java.io.tmpdir")) + File.separator + sModule + "_" + sProject + "_" + sRun, indexesOfLinesThatMustBeSkipped);
         }
-        catch (Exception e) {
-        	LOG.error("Error", e);
-        	progress.setError(e.getMessage());
-        	return createdProject;
-        }
-        finally  {
-            if (m_fCloseContextOpenAfterImport && ctx != null)
-                ctx.close();
-            if (rotatedFile != null)
-            	rotatedFile.delete();
-            MongoTemplateManager.unlockProjectForWriting(sModule, sProject);
-            if (progress.getError() == null && !progress.isAborted()) {
-                progress.addStep("Preparing database for searches");
-                progress.moveToNextStep();
-                MgdbDao.prepareDatabaseForSearches(sModule);
-            }
-        }
+        if (progress.getError() != null || progress.isAborted())
+            return createdProject;
+
+
+        // Rotated file import
+        int nConcurrentThreads = Math.max(1, Runtime.getRuntime().availableProcessors());
+        LOG.debug("Importing project '" + sProject + "' into " + sModule + " using " + nConcurrentThreads + " threads");
+
+        long count = importTempFileContents(progress, nConcurrentThreads, mongoTemplate, assembly == null ? null : assembly.getId(), rotatedFile, providedVariantPositions, existingVariantIDs, project, sRun, inconsistencies, orderedIndOrSpToPopulationMap, nonSnpVariantTypeMap, indexesOfLinesThatMustBeSkipped, fSkipMonomorphic);
+
+        if (progress.getError() != null)
+            throw new Exception(progress.getError());
+
+        return count;
+    }
+
+    @Override
+    protected void initReader(PlinkImportParameters params) throws Exception {
+        reader = new BufferedReader(new InputStreamReader(params.getMainFileUrl().openStream()));
+    }
+
+    @Override
+    protected void closeResource() throws IOException {
+        if (rotatedFile != null)
+            rotatedFile.delete();
+    }
+
+    @Override
+    protected Integer findPloidyLevel(MongoTemplate mongoTemplate, Integer nPloidyParam, ProgressIndicator progress) throws Exception {
+        return 2;
     }
 
     private long getAllocatableMemory(boolean fCalledFromCommandLine) {
@@ -320,7 +270,7 @@ public class PlinkImport extends RefactoredImport {
         return allocatableMemory;
     }
 
-    private File transposePlinkPedFile(String[] variants, File pedFile, Map<String, String> orderedIndOrSpToPopulationMapToFill, Map<String, Type> nonSnpVariantTypeMapToFill, boolean fSkipMonomorphic, ProgressIndicator progress) throws Exception {
+    private File transposePlinkPedFile(String[] variants, URL pedFileUrl, Map<String, String> orderedIndOrSpToPopulationMapToFill, Map<String, Type> nonSnpVariantTypeMapToFill, boolean fSkipMonomorphic, ProgressIndicator progress) throws Exception {
         long before = System.currentTimeMillis();
 
         StackTraceElement[] stacktrace = Thread.currentThread().getStackTrace();
@@ -328,7 +278,8 @@ public class PlinkImport extends RefactoredImport {
 
         int nConcurrentThreads = Math.max(1, Runtime.getRuntime().availableProcessors());
 
-        File outputFile = File.createTempFile("plinkImport-" + pedFile.getName() + "-", ".tsv");
+    	String pedFilePath = pedFileUrl.getPath();
+        File outputFile = File.createTempFile("plinkImport-" + pedFilePath.substring(pedFilePath.lastIndexOf('/') + 1) + "-", ".tsv");
         FileWriter outputWriter = new FileWriter(outputFile);
 
         ArrayList<Integer> blockStartMarkers = new ArrayList<Integer>();  // blockStartMarkers[i] = first marker of block i
@@ -338,7 +289,7 @@ public class PlinkImport extends RefactoredImport {
         blockStartMarkers.add(0);
 
         // Read the line headers, fill the individual map and creates the block positions arrays
-        BufferedReader reader = new BufferedReader(new FileReader(pedFile));
+        BufferedReader reader = new BufferedReader(new InputStreamReader(pedFileUrl.openStream()));
         String initLine;
         int nIndividuals = 0;
         while ((initLine = reader.readLine()) != null) {
@@ -401,7 +352,7 @@ public class PlinkImport extends RefactoredImport {
                         ArrayList<StringBuilder> transposed = new ArrayList<StringBuilder>();
 
                         while (blockStartMarkers.get(blockStartMarkers.size() - 1) < variants.length && progress.getError() == null && !progress.isAborted()) {
-                            FileReader reader = new FileReader(pedFile);
+                        	BufferedReader reader = new BufferedReader(new InputStreamReader(pedFileUrl.openStream()));
                             try {
                                 int blockIndex, blockSize, blockStart;
                                 int bufferPosition = 0, bufferLength = 0;
