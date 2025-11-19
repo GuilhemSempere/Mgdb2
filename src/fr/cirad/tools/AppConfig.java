@@ -105,12 +105,27 @@ public class AppConfig {
     };
 
     public String get(String sPropertyName, String defaultValue) {
-        String val = props.containsKey(sPropertyName) ? props.getString(sPropertyName) : null;
+        String val = get(sPropertyName);
         return val == null ? defaultValue : val;
     }
     
     public String get(String sPropertyName) {
         return props.containsKey(sPropertyName) ? props.getString(sPropertyName) : null;
+    }
+    
+    public Long getLong(String sPropertyName, Long defaultValue) {
+    	Long val = getLong(sPropertyName);
+    	return val == null ? defaultValue : val;
+    }
+    
+    public Long getLong(String sPropertyName) {
+    	String val = get(sPropertyName);
+    	try {
+    		return Long.parseLong(val);
+    	}
+    	catch (Exception e) {
+    		return null;
+    	}
     }
 
     public Set<String> keySet() {
