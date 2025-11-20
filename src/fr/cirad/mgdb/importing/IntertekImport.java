@@ -32,6 +32,7 @@ import java.util.Map;
 import java.util.Scanner;
 import java.util.Set;
 import java.util.concurrent.*;
+import java.util.stream.Collectors;
 
 import fr.cirad.mgdb.importing.parameters.FileImportParameters;
 import fr.cirad.mgdb.model.mongo.maintypes.*;
@@ -75,6 +76,8 @@ public class IntertekImport extends AbstractGenotypeImport<FileImportParameters>
 //    private boolean fImportUnknownVariants = false;
 
     public boolean m_fCloseContextOpenAfterImport = false;
+
+    final static protected String validAlleleRegex = "[\\*ATGC-]+".intern();
 
     /**
      * Instantiates a new Intertek import.
@@ -234,9 +237,28 @@ public class IntertekImport extends AbstractGenotypeImport<FileImportParameters>
                     VariantData variant = variantId == null ? null : mongoTemplate.findById(variantId, VariantData.class);
                     if (variant == null) {
                         variant = new VariantData(variantId);
-                        variant.getKnownAlleles().add(values[yColIndex]);
-                        variant.getKnownAlleles().add(values[xColIndex]);
+                        String ref = values[xColIndex];
+                        String alt = values[yColIndex];
+                        if (!ref.matches(validAlleleRegex)) {
+                            throw new Exception("Invalid ref allele '" + ref + "' provided for variant" + variantId);
+                        }
+                        if (!alt.matches(validAlleleRegex)) {
+                            throw new Exception("Invalid ref allele '" + alt + "' provided for variant" + variantId);
+                        }
+
                         variant.setType(Type.SNP.toString());
+                        //INDEL
+                        if (ref.equals("-")) {
+                            ref = "N";
+                            alt = "NN";
+                            variant.setType(Type.INDEL.toString());
+                        } else if (alt.equals("-")) {
+                            ref = "NN";
+                            alt = "N";
+                            variant.setType(Type.INDEL.toString());
+                        }
+                        variant.getKnownAlleles().add(ref);
+                        variant.getKnownAlleles().add(alt);
                         variantIdsToSave.add(variantId);
                     }
                     variants.put(variantId, variant);
@@ -289,10 +311,17 @@ public class IntertekImport extends AbstractGenotypeImport<FileImportParameters>
                         //if genotype is ?, gtCode = null
                         if (call.contains(":")) {
                             List<String> alleles = Arrays.asList(call.split(":"));
-                            List<String> gt = new ArrayList<>();
-                            for (String al : alleles)
-                            	gt.add(al.equals(refAllele) ? "0" : "1");
-                            gtCode = String.join("/", gt);
+                            gtCode = alleles.stream()
+                                    .map(al -> {
+                                        if (refAllele.equals("N")) {
+                                            return al.equals("-") ? "0" : "1";
+                                        } else if (refAllele.equals("NN")) {
+                                            return al.equals("-") ? "1" : "0";
+                                        } else {
+                                            return al.equals(refAllele) ? "0" : "1";
+                                        }
+                                    })
+                                    .collect(Collectors.joining("/"));
                             if (nPloidy == 0)
                                 nPloidy = alleles.size();
                             else if (nPloidy != alleles.size())
