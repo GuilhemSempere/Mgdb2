@@ -694,6 +694,7 @@ abstract public class AbstractVariantData
                 }
             }
         
+        List<String> aiExhaustiveList = sampleGenotypes.values().stream().map(sg -> sg.getAdditionalInfo().keySet()).flatMap(Collection::stream).distinct().toList();     
         LinkedHashSet<Allele> variantAlleles = new LinkedHashSet<>(knownAlleleCount == null ? 4 : getKnownAlleles().size());
         variantAlleles.add(Allele.create(sRefAllele, true));
         HashMap<String, List<String>> genotypeStringCache = new HashMap<>(variantAlleles.size() * 2);
@@ -773,7 +774,7 @@ abstract public class AbstractVariantData
                     gb.filter(genotypeFilters);
                                 
                 List<String> alleleListAtImportTimeIfDifferentFromNow = null;
-                for (String key : sampleGenotype.getAdditionalInfo().keySet())
+                for (String key : aiExhaustiveList)
                 {
                     if (VCFConstants.GENOTYPE_ALLELE_DEPTHS.equals(key))
                     {
@@ -813,7 +814,7 @@ abstract public class AbstractVariantData
                     }
                     else if (!key.equals(VariantData.GT_FIELD_PHASED_GT) && !key.equals(VariantData.GT_FIELD_PHASED_ID) && !key.equals(VariantRunData.FIELDNAME_ADDITIONAL_INFO_EFFECT_GENE) && !key.equals(VariantRunData.FIELDNAME_ADDITIONAL_INFO_EFFECT_NAME)) // exclude some internally created fields that we don't want to export
                         gb.attribute(key, sampleGenotype.getAdditionalInfo().get(key)); // looks like we have an extended attribute
-                }                    
+                }
             }
             genotypes.add(gb.make());
         }
