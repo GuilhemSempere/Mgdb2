@@ -543,7 +543,7 @@ public abstract class AbstractGenotypeImport<T extends ImportParameters> {
         return project;
     }
 
-    protected void createCallSetsSamplesIndividuals(List<String> biologicalMaterialIDs, MongoTemplate mongoTemplate, int projId, String sRun, Map<String, String> sampleToIndividualMap, ProgressIndicator progress) throws Exception {
+    protected void createCallSetsSamplesIndividuals(Collection<String> biologicalMaterialIDs, MongoTemplate mongoTemplate, int projId, String sRun, Map<String, String> sampleToIndividualMap, ProgressIndicator progress) throws Exception {
     	progress.setProgressDescription("Creating / updating encountered biological entities...");
         m_providedIdToSampleMap = new HashMap<String /*individual*/, GenotypingSample>();
         m_providedIdToCallsetMap = new HashMap<String /*individual*/, Callset>();
