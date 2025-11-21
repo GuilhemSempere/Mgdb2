@@ -121,7 +121,7 @@ public class AppConfig {
     public Long getLong(String sPropertyName) {
     	String val = get(sPropertyName);
     	try {
-    		return Long.parseLong(val);
+    		return Double.valueOf(val).longValue();
     	}
     	catch (Exception e) {
     		return null;
