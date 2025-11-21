@@ -174,7 +174,7 @@ public class IntertekImport extends AbstractGenotypeImport<FileImportParameters>
 
         Set<String> variantIdsToSave = new HashSet<>();
         HashMap<String /*variant ID*/, VariantData> variants= new HashMap<>();
-        HashMap<String /*variant ID*/, List<String> /*allelesList*/> variantAllelesMap = new HashMap<>();
+        HashMap<String /*variant ID*/, Map<String, String> /*allelesMap*/> variantAllelesMap = new HashMap<>();
         m_providedIdToSampleMap = new HashMap<>();
         m_providedIdToCallsetMap = new HashMap<>();
         boolean fDbAlreadyContainedIndividuals = mongoTemplate.findOne(new Query(), Individual.class) != null;
@@ -210,6 +210,8 @@ public class IntertekImport extends AbstractGenotypeImport<FileImportParameters>
             HashSet<VariantRunData> variantRunsChunk = new HashSet<>();
             HashSet<VariantData> variantsChunk = new HashSet<>();
 
+            List<String> ambiguousVariants = new ArrayList<>();
+
             int nNConcurrentThreads = Math.max(1, Runtime.getRuntime().availableProcessors());
             BlockingQueue<Runnable> saveServiceQueue = new LinkedBlockingQueue<Runnable>(saveServiceQueueLength(nNConcurrentThreads));
             ExecutorService saveService = new ThreadPoolExecutor(1, saveServiceThreads(nNConcurrentThreads), 30, TimeUnit.SECONDS, saveServiceQueue, new ThreadPoolExecutor.CallerRunsPolicy());
@@ -235,6 +237,7 @@ public class IntertekImport extends AbstractGenotypeImport<FileImportParameters>
 
                     //check if variantId already exists in DB
                     VariantData variant = variantId == null ? null : mongoTemplate.findById(variantId, VariantData.class);
+                    Map<String, String> allelesMap = new HashMap<>();
                     if (variant == null) {
                         variant = new VariantData(variantId);
                         String ref = values[xColIndex];
@@ -247,11 +250,13 @@ public class IntertekImport extends AbstractGenotypeImport<FileImportParameters>
                         }
 
                         variant.setType(Type.SNP.toString());
+
                         //INDEL
                         if (ref.equals("-")) {
                             ref = "N";
                             alt = "NN";
                             variant.setType(Type.INDEL.toString());
+
                         } else if (alt.equals("-")) {
                             ref = "NN";
                             alt = "N";
@@ -259,10 +264,92 @@ public class IntertekImport extends AbstractGenotypeImport<FileImportParameters>
                         }
                         variant.getKnownAlleles().add(ref);
                         variant.getKnownAlleles().add(alt);
+                        allelesMap.put(values[xColIndex], ref);
+                        allelesMap.put(values[yColIndex], alt);
                         variantIdsToSave.add(variantId);
+
+
+                    } else {
+                        //Match Intertek alleles to VCF format
+                        String ref = variant.getKnownAlleles().get(0);
+                        List<String> altList = variant.getKnownAlleles().subList(1, variant.getKnownAlleles().size());
+                        String alleleX = values[xColIndex];
+                        String alleleY = values[yColIndex];
+                        if (variant.getType().equals(Type.SNP.toString())) {
+                            if (reverseComplement(alleleX).equals(alleleY)) {
+                                //ambiguity, can't know which one is ref. So arbitrary, X=ref and Y=alt
+                                int posX = altList.indexOf(alleleX);
+                                int posY = altList.indexOf(alleleY);
+                                if ((alleleX.equals(ref) && posY != -1) || (posX != -1 && alleleY.equals(ref))) {
+                                    String alt = posY != -1 ? altList.get(posY) : altList.get(posX);
+                                    allelesMap.put(alleleX, "0");
+                                    allelesMap.put(alleleY, posY != -1 ? String.valueOf(posY + 1) : String.valueOf(posX + 1));
+                                    ambiguousVariants.add(variantId);
+                                } else {
+                                    throw new Exception("Given alleleX/alleleY (" + alleleX + "/" + alleleY + ") for variant " + variantId + " don't match with stored REF/ALT alleles " + ref + "/" + String.join("/", altList));
+                                }
+                            } else { //see if ref is equals to X or Y or their reverse-complement
+                                int posX = altList.indexOf(alleleX);
+                                int posY = altList.indexOf(alleleY);
+                                int posRCX = altList.indexOf(reverseComplement(alleleX));
+                                int posRCY = altList.indexOf(reverseComplement(alleleY));
+
+                                if (alleleX.equals(ref) && posY != -1 || reverseComplement(alleleX).equals(ref) && posRCY != -1) {
+                                    allelesMap.put(alleleX, "0");
+                                    allelesMap.put(alleleY, posY != -1 ? String.valueOf(posY + 1 ): String.valueOf(posRCY + 1));
+                                } else if (posX != -1 && alleleY.equals(ref) || posRCX != -1 && reverseComplement(alleleY).equals(ref) ) {
+                                    allelesMap.put(alleleX, posX != -1 ? String.valueOf(posX): String.valueOf(posRCX + 1 ));
+                                    allelesMap.put(alleleY, "0");
+                                } else {
+                                    throw new Exception("Given alleleX/alleleY (" + alleleX + "/" + alleleY + ") for variant " + variantId + " don't match with stored REF/ALT alleles " + ref + "/" + String.join("/", altList));
+                                }
+                            }
+
+                        } else if (variant.getType().equals(Type.INDEL.toString())) {
+
+                            String indelPart = null;
+                            // Get inserted or deleted part
+                            for (int a = 0; a < altList.size(); a++) {
+                                String alt = altList.get(a);
+                                if (alt.startsWith(ref)) { // insertion after
+                                    indelPart = alt.substring(ref.length());
+                                } else if (alt.endsWith(ref)) {// insertion before
+                                    indelPart = alt.substring(0, alt.length() - ref.length());
+                                }
+
+                                if (indelPart != null) { //insertion
+                                    if (alleleY.equals("-") && (indelPart.equals(alleleX) || reverseComplement(indelPart).equals(alleleX))) {
+                                        allelesMap.put(alleleX, String.valueOf(a+1));
+                                        allelesMap.put(alleleY, "0");
+                                        break;
+                                    } else if (alleleX.equals("-") && (indelPart.equals(alleleY) || reverseComplement(indelPart).equals(alleleY))) {
+                                        allelesMap.put(alleleX, "0");
+                                        allelesMap.put(alleleY, String.valueOf(a+1));
+                                        break;
+                                    }
+                                } else if (ref.startsWith(alt)) { // deletion after
+                                    indelPart = ref.substring(alt.length());
+                                } else if (ref.endsWith(alt)) { // deletion before
+                                    indelPart = ref.substring(0, ref.length() - alt.length());
+                                }
+
+                                if (indelPart != null) { //deletion
+                                    if (values[yColIndex].equals("-")) {
+                                        allelesMap.put(alleleX, "0");
+                                        allelesMap.put(alleleY, String.valueOf(a+1));
+                                    } else if (values[xColIndex].equals("-")) {
+                                        allelesMap.put(alleleX, String.valueOf(a+1));
+                                        allelesMap.put(alleleY, "0");
+                                    }
+                                }
+                            }
+                            if (indelPart == null){
+                                throw new Exception("Given alleleX/alleleY (" + alleleX + "/" + alleleY + ") for variant " + variantId + " don't match with stored REF/ALT alleles " + ref + "/" + String.join("/", altList));
+                            }
+                        }
                     }
                     variants.put(variantId, variant);
-                    variantAllelesMap.put(variantId, variant.getKnownAlleles());
+                    variantAllelesMap.put(variantId, allelesMap);
                     project.getAlleleCounts().add(variant.getKnownAlleles().size());
                     continue;
                 }
@@ -304,7 +391,7 @@ public class IntertekImport extends AbstractGenotypeImport<FileImportParameters>
                     currentVariantId = variantId;
 
                     String gtCode = null;
-                    List<String> variantAlleles = variantAllelesMap.get(variantId);
+                    Map<String, String> variantAlleles = variantAllelesMap.get(variantId);
                     String refAllele = variantAlleles.get(0);
                     if (!call.equals("NTC")) {
                         //NTC lines are not imported (control)
@@ -312,15 +399,7 @@ public class IntertekImport extends AbstractGenotypeImport<FileImportParameters>
                         if (call.contains(":")) {
                             List<String> alleles = Arrays.asList(call.split(":"));
                             gtCode = alleles.stream()
-                                    .map(al -> {
-                                        if (refAllele.equals("N")) {
-                                            return al.equals("-") ? "0" : "1";
-                                        } else if (refAllele.equals("NN")) {
-                                            return al.equals("-") ? "1" : "0";
-                                        } else {
-                                            return al.equals(refAllele) ? "0" : "1";
-                                        }
-                                    })
+                                    .map(al -> variantAlleles.get(al))
                                     .collect(Collectors.joining("/"));
                             if (nPloidy == 0)
                                 nPloidy = alleles.size();
@@ -372,7 +451,6 @@ public class IntertekImport extends AbstractGenotypeImport<FileImportParameters>
                         sampleGenotypes.put(m_providedIdToCallsetMap.get(bioEntityID).getId(), sampleGt);
                     }
                 }
-
             }
             csvReader.close();
 
@@ -384,7 +462,13 @@ public class IntertekImport extends AbstractGenotypeImport<FileImportParameters>
             if (!variantRunsChunk.isEmpty())
                 saveChunk(variantsChunk, variantRunsChunk, existingVariantIDs, mongoTemplate, progress, saveService);
 
+            if (!ambiguousVariants.isEmpty()) {
+                progress.markAsComplete("WARNING : Ambiguous matching between alleleX/alleleY and existing variant REF/ALT alleles for variants : " + String.join(",", ambiguousVariants));
+            }
+
         }
+
+
 
         //Insert new callsets, samples and individuals
         insertNewCallSetsSamplesIndividuals(mongoTemplate, indsToAdd, samplesToAdd, samplesToUpdate);
@@ -460,4 +544,19 @@ public class IntertekImport extends AbstractGenotypeImport<FileImportParameters>
 		scanner.close();
 		attemptPreloadingIndividuals(sampleIDs, progress);
 	}
+
+    public static String reverseComplement(String seq) {
+        StringBuilder sb = new StringBuilder(seq.length());
+        for (int i = seq.length() - 1; i >= 0; i--) {
+            char c = Character.toUpperCase(seq.charAt(i));
+            switch (c) {
+                case 'A': sb.append('T'); break;
+                case 'T': sb.append('A'); break;
+                case 'C': sb.append('G'); break;
+                case 'G': sb.append('C'); break;
+                default:  sb.append('N');
+            }
+        }
+        return sb.toString();
+    }
 }
