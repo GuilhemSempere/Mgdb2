@@ -249,27 +249,28 @@ public class IntertekImport extends AbstractGenotypeImport<FileImportParameters>
                             throw new Exception("Invalid ref allele '" + alt + "' provided for variant" + variantId);
                         }
 
-                        variant.setType(Type.SNP.toString());
-
-                        //INDEL
+                        // handle INDEL case
                         if (ref.equals("-")) {
                             ref = "N";
                             alt = "NN";
                             variant.setType(Type.INDEL.toString());
 
-                        } else if (alt.equals("-")) {
+                        }
+                        else if (alt.equals("-")) {
                             ref = "NN";
                             alt = "N";
                             variant.setType(Type.INDEL.toString());
                         }
+                        else
+                        	variant.setType(Type.SNP.toString());
+                        
                         variant.getKnownAlleles().add(ref);
                         variant.getKnownAlleles().add(alt);
                         allelesMap.put(values[xColIndex], ref);
                         allelesMap.put(values[yColIndex], alt);
                         variantIdsToSave.add(variantId);
-
-
-                    } else {
+                    }
+                    else {
                         //Match Intertek alleles to VCF format
                         String ref = variant.getKnownAlleles().get(0);
                         List<String> altList = variant.getKnownAlleles().subList(1, variant.getKnownAlleles().size());
@@ -348,6 +349,7 @@ public class IntertekImport extends AbstractGenotypeImport<FileImportParameters>
                             }
                         }
                     }
+                    project.getVariantTypes().add(variant.getType());
                     variants.put(variantId, variant);
                     variantAllelesMap.put(variantId, allelesMap);
                     project.getAlleleCounts().add(variant.getKnownAlleles().size());
