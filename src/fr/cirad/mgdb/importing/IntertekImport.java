@@ -401,10 +401,12 @@ public class IntertekImport extends AbstractGenotypeImport<FileImportParameters>
                             gtCode = alleles.stream()
                                     .map(al -> variantAlleles.get(al))
                                     .collect(Collectors.joining("/"));
-                            if (nPloidy == 0)
+                            if (nPloidy == 0) {
                                 nPloidy = alleles.size();
-                            else if (nPloidy != alleles.size())
-                            	throw new Exception("Ploidy levels differ between variants");
+                                project.setPloidyLevel(nPloidy);
+                            } else if (nPloidy != alleles.size()) {
+                                throw new Exception("Ploidy levels differ between variants");
+                            }
                         }
                         
                     	GenotypingSample sample = null;
