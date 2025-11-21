@@ -98,6 +98,7 @@ import fr.cirad.mgdb.model.mongo.subtypes.Run;
 import fr.cirad.mgdb.model.mongo.subtypes.VariantRunDataId;
 import fr.cirad.tools.Helper;
 import fr.cirad.tools.SessionAttributeAwareThread;
+import fr.cirad.tools.mongo.AutoIncrementCounter;
 import fr.cirad.tools.mongo.MongoTemplateManager;
 import fr.cirad.tools.security.base.AbstractTokenManager;
 import htsjdk.variant.variantcontext.VariantContext.Type;
@@ -1405,8 +1406,10 @@ public class MgdbDao {
 	}
 
 	public static void createCallsetsFromSamplesIfNecessary(MongoTemplate mongoTemplate) {
+		final String oldSampleCollName = "samples";
+		
 		MongoCollection<Document> coll = mongoTemplate.getCollection(mongoTemplate.getCollectionName(GenotypingSample.class));
-		if (mongoTemplate.count(new Query(), "samples") > mongoTemplate.count(new Query(), GenotypingSample.class)) {
+		if (mongoTemplate.count(new Query(), oldSampleCollName) > mongoTemplate.count(new Query(), GenotypingSample.class)) {
 			mongoTemplate.getCollection(mongoTemplate.getCollectionName(CachedCount.class)).drop();	// also do this because we are obviously migrating to v2.10 from which we support filtering on multiple projects at once, which involves changes in queryKey objects 
 
 			AggregationExpression csExpression = context ->
@@ -1429,10 +1432,26 @@ public class MgdbDao {
 			    Aggregation.out(mongoTemplate.getCollectionName(GenotypingSample.class))
 			);
 	        
-	        mongoTemplate.aggregate(aggregation, "samples", Document.class);
-	        LOG.info("Migrated sample documents to include callsets into " + coll.getNamespace());
+	        mongoTemplate.aggregate(aggregation, oldSampleCollName, Document.class);
+	        LOG.info("Migrated sample documents to include callsets into " + coll.getNamespace());	        
+	        MongoTemplateManager.updateDatabaseLastModification(mongoTemplate);
 		}
 		else
 			LOG.debug("Sample documents already up to date in " + coll.getNamespace());
+		
+		// Make sure the ID counter is up to date
+        AggregationResults<Document> maxResult = mongoTemplate.aggregate(Aggregation.newAggregation(
+                Aggregation.unwind(GenotypingSample.FIELDNAME_CALLSETS),
+                Aggregation.group().max(GenotypingSample.FIELDNAME_CALLSETS + "._id").as("maxCallsetId")
+            ), 
+            mongoTemplate.getCollectionName(GenotypingSample.class),  Document.class
+        );
+        int maxCallsetId = maxResult.getMappedResults().isEmpty() ? 0 : maxResult.getMappedResults().get(0).getInteger("maxCallsetId");
+        AutoIncrementCounter callsetCounter = mongoTemplate.findById(MongoTemplateManager.getMongoCollectionName(Callset.class), AutoIncrementCounter.class);
+        int callsetCounterValue = callsetCounter == null ? 0 : callsetCounter.getSeq();
+        if (maxCallsetId != callsetCounterValue) {
+        	AutoIncrementCounter.setCounter(mongoTemplate, Callset.class, maxCallsetId);
+        	LOG.info("Database " + coll.getNamespace().getDatabaseName() + ": Updated ID counter value for callsets (set to " + maxCallsetId + ")");
+        }
 	}
 }

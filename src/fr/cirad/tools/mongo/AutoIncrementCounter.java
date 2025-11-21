@@ -100,4 +100,46 @@ public class AutoIncrementCounter
     {
         return getNextSequence(mongo, MongoTemplateManager.getMongoCollectionName(documentClass));
     }
+    
+    /**
+     * Sets the counter for the given collection to the specified value.
+     * If no counter exists for this collection, it will be created.
+     *
+     * @param mongo the mongo operations
+     * @param collectionName the collection name
+     * @param value the value to set the counter to
+     * @return the previous counter value, or -1 if no counter existed
+     */
+    static synchronized public int setCounter(MongoOperations mongo, String collectionName, int value)
+    {
+        AutoIncrementCounter counter = mongo.findAndModify(
+            new Query(Criteria.where("_id").is(collectionName)),
+            new Update().set("seq", value),
+            FindAndModifyOptions.options().returnNew(true),
+            AutoIncrementCounter.class
+        );
+        
+        if (counter != null) {
+            return counter.getSeq();
+        }
+        
+        // Counter doesn't exist, create new one
+        counter = new AutoIncrementCounter(collectionName, value);
+        mongo.save(counter);
+        return value;
+    }
+
+    /**
+     * Sets the counter for the given document class to the specified value.
+     * If no counter exists for this collection, it will be created.
+     *
+     * @param mongo the mongo operations
+     * @param documentClass the document class
+     * @param value the value to set the counter to
+     * @return the previous counter value, or -1 if no counter existed
+     */
+    static synchronized public int setCounter(MongoOperations mongo, Class documentClass, int value)
+    {
+        return setCounter(mongo, MongoTemplateManager.getMongoCollectionName(documentClass), value);
+    }
 }

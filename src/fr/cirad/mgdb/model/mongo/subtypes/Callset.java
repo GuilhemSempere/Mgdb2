@@ -9,7 +9,7 @@ import org.springframework.data.mongodb.core.mapping.Field;
 
 import fr.cirad.mgdb.model.mongo.maintypes.GenotypingSample;
 
-@Document(collection = "callsets")
+@Document(collection = "callsets" /* only used for ID counter, because this is actually a subtype, embedded in GenotypingSample */)
 //@TypeAlias("CS")
 public class Callset {
     public final static String FIELDNAME_PROJECT_ID = "pj";
