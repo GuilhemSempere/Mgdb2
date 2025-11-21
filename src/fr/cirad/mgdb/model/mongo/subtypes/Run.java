@@ -21,7 +21,7 @@ import org.springframework.data.mongodb.core.mapping.Field;
 
 /**
  *
- * @author boizet
+ * @author boizet, sempere
  */
 public class Run {
 
@@ -73,4 +73,15 @@ public class Run {
         this.runName = runName;
     }
     
+    @Override
+	public boolean equals(Object o)
+	{
+		if (this == o)
+			return true;
+		
+		if (o == null || !(o instanceof Run))
+			return false;
+		
+		return getProjectId() == ((Run) o).getProjectId() && getRunName() != null && getRunName().equals(((Run) o).getRunName());
+	}
 }

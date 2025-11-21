@@ -19,6 +19,7 @@ package fr.cirad.mgdb.importing;
 
 import java.io.BufferedReader;
 import java.io.File;
+import java.io.IOException;
 import java.io.InputStreamReader;
 import java.net.URL;
 import java.util.ArrayList;
@@ -30,35 +31,24 @@ import java.util.List;
 import java.util.Map;
 import java.util.Scanner;
 import java.util.Set;
-import java.util.concurrent.BlockingQueue;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.LinkedBlockingQueue;
-import java.util.concurrent.ThreadPoolExecutor;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.*;
+import java.util.stream.Collectors;
 
+import fr.cirad.mgdb.importing.parameters.FileImportParameters;
+import fr.cirad.mgdb.model.mongo.maintypes.*;
 import org.apache.log4j.Logger;
-import org.springframework.beans.factory.BeanDefinitionStoreException;
-import org.springframework.context.support.GenericXmlApplicationContext;
 import org.springframework.data.mongodb.core.MongoTemplate;
-import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
 
 import com.opencsv.CSVReader;
 
 import fr.cirad.mgdb.importing.base.AbstractGenotypeImport;
-import fr.cirad.mgdb.model.mongo.maintypes.Assembly;
-import fr.cirad.mgdb.model.mongo.maintypes.DBVCFHeader;
-import fr.cirad.mgdb.model.mongo.maintypes.GenotypingProject;
-import fr.cirad.mgdb.model.mongo.maintypes.GenotypingSample;
-import fr.cirad.mgdb.model.mongo.maintypes.Individual;
-import fr.cirad.mgdb.model.mongo.maintypes.VariantData;
-import fr.cirad.mgdb.model.mongo.maintypes.VariantRunData;
 import fr.cirad.mgdb.model.mongo.subtypes.AbstractVariantData;
+import fr.cirad.mgdb.model.mongo.subtypes.Callset;
 import fr.cirad.mgdb.model.mongo.subtypes.ReferencePosition;
 import fr.cirad.mgdb.model.mongo.subtypes.Run;
 import fr.cirad.mgdb.model.mongo.subtypes.SampleGenotype;
 import fr.cirad.mgdb.model.mongo.subtypes.VariantRunDataId;
-import fr.cirad.mgdb.model.mongodao.MgdbDao;
 import fr.cirad.tools.Helper;
 import fr.cirad.tools.ProgressIndicator;
 import fr.cirad.tools.mongo.AutoIncrementCounter;
@@ -71,7 +61,7 @@ import htsjdk.variant.vcf.VCFHeaderLineType;
 /**
  * The Class IntertekImport.
  */
-public class IntertekImport extends AbstractGenotypeImport {
+public class IntertekImport extends AbstractGenotypeImport<FileImportParameters> {
 
     /**
      * The Constant LOG.
@@ -81,14 +71,16 @@ public class IntertekImport extends AbstractGenotypeImport {
     /**
      * The m_process id.
      */
-    private String m_processID;
+    //private String m_processID;
 
 //    private boolean fImportUnknownVariants = false;
 
     public boolean m_fCloseContextOpenAfterImport = false;
 
+    final static protected String validAlleleRegex = "[\\*ATGC-]+".intern();
+
     /**
-     * Instantiates a new PLINK import.
+     * Instantiates a new Intertek import.
      */
     public IntertekImport() {
     }
@@ -140,313 +132,401 @@ public class IntertekImport extends AbstractGenotypeImport {
         } catch (Exception e) {
             LOG.warn("Unable to parse input mode. Using default (0): overwrite run if exists.");
         }
-        new IntertekImport().importToMongo(args[0], args[1], args[2], args[3], new File(args[4]).toURI().toURL(), args[5], null, false, mode);
+        FileImportParameters params = new FileImportParameters(
+                args[0], //sModule
+                args[1], //sProject
+                args[2], //sRun
+                args[3], //sTechnology
+                null, // nPloidy
+                args[5], //assemblyName
+                null, //sampleToIndividualMap
+                false,//fSkipMonomorphic
+                mode,//importMode
+                new File(args[4]).toURI().toURL()//mainFileUrl
+        );
+        new IntertekImport().importToMongo(params);
     }
 
-    /**
-     * Import to mongo.
-     *
-     * @param sModule the module
-     * @param sProject the project
-     * @param sRun the run
-     * @param sTechnology the technology
-     * @param fileURL
-     * @param sampleToIndividualMap the sample-individual mapping
-     * @param importMode the import mode
-     * @param fSkipMonomorphic whether or not to skip import of variants that have no polymorphism (where all individuals have the same genotype)
-     * @return a project ID if it was created by this method, otherwise null
-     * @throws Exception the exception
-     */
-    public Integer importToMongo(String sModule, String sProject, String sRun, String sTechnology, URL fileURL, String assemblyName, Map<String, String> sampleToIndividualMap, boolean fSkipMonomorphic, int importMode) throws Exception {
-        long before = System.currentTimeMillis();
-        ProgressIndicator progress = ProgressIndicator.get(m_processID) != null ? ProgressIndicator.get(m_processID) : new ProgressIndicator(m_processID, new String[]{"Initializing import"});	// better to add it straight-away so the JSP doesn't get null in return when it checks for it (otherwise it will assume the process has ended)
-        progress.setPercentageEnabled(false);        
-        
-        Integer createdProject = null;
-        
-        // not compatible java 1.8 ? 
-        // FeatureReader<VariantContext> reader = AbstractFeatureReader.getFeatureReader(mainFilePath, fIsBCF ? new BCF2Codec() : new VCFCodec(), false);
-        GenericXmlApplicationContext ctx = null;
-        try {
-            MongoTemplate mongoTemplate = MongoTemplateManager.get(sModule);
-            if (mongoTemplate == null) {	// we are probably being invoked offline
-                try {
-                    ctx = new GenericXmlApplicationContext("applicationContext-data.xml");
-                } catch (BeanDefinitionStoreException fnfe) {
-                    LOG.warn("Unable to find applicationContext-data.xml. Now looking for applicationContext.xml", fnfe);
-                    ctx = new GenericXmlApplicationContext("applicationContext.xml");
+    @Override
+    protected long doImport(FileImportParameters params, MongoTemplate mongoTemplate, GenotypingProject project, ProgressIndicator progress, Integer createdProject) throws Exception {
+        String sRun = params.getRun();
+        String assemblyName = params.getAssemblyName();
+        Map<String, String> sampleToIndividualMap = params.getSampleToIndividualMap();
+        boolean fSkipMonomorphic = params.isSkipMonomorphic();
+        URL fileURL = params.getMainFileUrl();
+
+        final String[] snpHeader = {"SNPID","SNPNum","AlleleY","AlleleX","Sequence"};
+        int snpColIndex = Arrays.asList(snpHeader).indexOf("SNPID");
+        int yColIndex = Arrays.asList(snpHeader).indexOf("AlleleY");
+        int xColIndex = Arrays.asList(snpHeader).indexOf("AlleleX");
+        String[] limit = {"Scaling"};
+
+        List<String> dataHeaderList = Arrays.asList(new String[]{"DaughterPlate","MasterPlate","MasterWell","Call","X","Y","SNPID","SubjectID","Norm","Carrier","DaughterWell","LongID"});
+
+        int variantColIndex = dataHeaderList.indexOf("SNPID");
+        int indColIndex = dataHeaderList.indexOf("SubjectID");
+        int callColIndex = dataHeaderList.indexOf("Call");
+        int xFIColIndex = dataHeaderList.indexOf("X");
+        int yFIColIndex = dataHeaderList.indexOf("Y");
+        int masterPlateColIndex = dataHeaderList.indexOf("MasterPlate");
+
+        readAllSampleIDsToPreloadIndividuals(fileURL, dataHeaderList, indColIndex, progress);
+
+        Set<String> variantIdsToSave = new HashSet<>();
+        HashMap<String /*variant ID*/, VariantData> variants= new HashMap<>();
+        HashMap<String /*variant ID*/, Map<String, String> /*allelesMap*/> variantAllelesMap = new HashMap<>();
+        m_providedIdToSampleMap = new HashMap<>();
+        m_providedIdToCallsetMap = new HashMap<>();
+        boolean fDbAlreadyContainedIndividuals = mongoTemplate.findOne(new Query(), Individual.class) != null;
+        boolean fDbAlreadyContainedSamples = mongoTemplate.findOne(new Query(), GenotypingSample.class) != null;
+
+        progress.addStep("Scanning existing marker IDs");
+        progress.moveToNextStep();
+        Assembly assembly = createAssemblyIfNeeded(mongoTemplate, assemblyName);
+        HashMap<String, String> existingVariantIDs = buildSynonymToIdMapForExistingVariants(mongoTemplate, true, assembly == null ? null : assembly.getId());
+        Set<String> existingIds = ConcurrentHashMap.newKeySet(); //necessary to avoid ConcurrentModificationException when removing variants
+        existingIds.addAll(existingVariantIDs.values());
+
+        final Collection<Integer> assemblyIDs = mongoTemplate.findDistinct(new Query(), "_id", Assembly.class, Integer.class);
+        if (assemblyIDs.isEmpty())
+            assemblyIDs.add(null);	// old-style, assembly-less DB
+
+        int count = 0;
+        Set<Individual> indsToAdd = new HashSet<>();
+        Set<GenotypingSample> samplesToAdd = new HashSet<>(), samplesToUpdate = new HashSet<>();
+
+        // Reading csv file
+        // Getting alleleX and alleleY for each SNP by reading lines between lines {"SNPID","SNPNum","AlleleY","AlleleX","Sequence"} and {"Scaling"};
+        // Then getting genotypes for each individual by reading lines after line {"DaughterPlate","MasterPlate","MasterWell","Call","X","Y","SNPID","SubjectID","Norm","Carrier","DaughterWell","LongID"}
+        try (BufferedReader in = new BufferedReader(new InputStreamReader(fileURL.openStream())); CSVReader csvReader = new CSVReader(in)) {
+            boolean snpPart = false;
+            boolean dataPart = false;
+            String[] values;
+            int i = 0;
+            int nPloidy = 0;
+
+            String currentVariantId = null;
+            HashMap<Integer, SampleGenotype> sampleGenotypes = new HashMap<>();
+            HashSet<VariantRunData> variantRunsChunk = new HashSet<>();
+            HashSet<VariantData> variantsChunk = new HashSet<>();
+
+            List<String> ambiguousVariants = new ArrayList<>();
+
+            int nNConcurrentThreads = Math.max(1, Runtime.getRuntime().availableProcessors());
+            BlockingQueue<Runnable> saveServiceQueue = new LinkedBlockingQueue<Runnable>(saveServiceQueueLength(nNConcurrentThreads));
+            ExecutorService saveService = new ThreadPoolExecutor(1, saveServiceThreads(nNConcurrentThreads), 30, TimeUnit.SECONDS, saveServiceQueue, new ThreadPoolExecutor.CallerRunsPolicy());
+            int nNumberOfVariantRunsToSaveAtOnce = 0;
+
+            while ((values = csvReader.readNext()) != null) {
+                if (progress.getError() != null || progress.isAborted())
+                    return 0;
+
+                i = i+1;
+                if (Arrays.asList(values).containsAll(Arrays.asList(snpHeader))) {
+                    snpPart = true;
+                    continue;
+                }
+                if (Arrays.asList(values).containsAll(Arrays.asList(limit))) {
+                    snpPart = false;
+                    continue;
                 }
 
-                MongoTemplateManager.initialize(ctx);
-                mongoTemplate = MongoTemplateManager.get(sModule);
-                if (mongoTemplate == null)
-                    throw new Exception("DATASOURCE '" + sModule + "' is not supported!");
-            }
+                // Reading Variants Part
+                if (snpPart && !dataPart && !values[0].equals("")) {
+                    String variantId = values[snpColIndex];
 
-            if (m_processID == null) {
-                m_processID = "IMPORT__" + sModule + "__" + sProject + "__" + sRun + "__" + System.currentTimeMillis();
-            }
-
-            final String[] snpHeader = {"SNPID","SNPNum","AlleleY","AlleleX","Sequence"};
-            int snpColIndex = Arrays.asList(snpHeader).indexOf("SNPID");
-            int yColIndex = Arrays.asList(snpHeader).indexOf("AlleleY");
-            int xColIndex = Arrays.asList(snpHeader).indexOf("AlleleX");
-            String[] limit = {"Scaling"};
-
-    		List<String> dataHeaderList = Arrays.asList(new String[]{"DaughterPlate","MasterPlate","MasterWell","Call","X","Y","SNPID","SubjectID","Norm","Carrier","DaughterWell","LongID"});
-
-            int variantColIndex = dataHeaderList.indexOf("SNPID");
-            int indColIndex = dataHeaderList.indexOf("SubjectID");
-            int callColIndex = dataHeaderList.indexOf("Call");
-            int xFIColIndex = dataHeaderList.indexOf("X");
-            int yFIColIndex = dataHeaderList.indexOf("Y");
-            int masterPlateColIndex = dataHeaderList.indexOf("MasterPlate");
-            
-            readAllSampleIDsToPreloadIndividuals(fileURL, dataHeaderList, indColIndex, progress);
-
-            Set<VariantData> variantsToSave = new HashSet<>();
-            HashMap<String /*variant ID*/, List<String> /*allelesList*/> variantAllelesMap = new HashMap<>();
-            HashMap<String /*variant ID*/, HashMap<Integer, SampleGenotype>> variantToSampleToGenotypeMap = new HashMap<>();
-            m_providedIdToSampleMap = new HashMap<>();
-
-            GenotypingProject project = mongoTemplate.findOne(new Query(Criteria.where(GenotypingProject.FIELDNAME_NAME).is(sProject)), GenotypingProject.class);
-            MongoTemplateManager.lockProjectForWriting(sModule, sProject);
-            cleanupBeforeImport(mongoTemplate, sModule, project, importMode, sRun);
-
-            if (project == null || importMode > 0) {	// create it
-                project = new GenotypingProject(AutoIncrementCounter.getNextSequence(mongoTemplate, MongoTemplateManager.getMongoCollectionName(GenotypingProject.class)));
-                project.setName(sProject);
-//                project.setOrigin(2 /* Sequencing */);
-                project.setTechnology(sTechnology);
-                project.getVariantTypes().add(Type.SNP.toString());
-                if (importMode != 1)
-                	createdProject = project.getId();
-            }
-            
-			progress.addStep("Scanning existing marker IDs");
-			progress.moveToNextStep();
-			Assembly assembly = createAssemblyIfNeeded(mongoTemplate, assemblyName);
-			HashMap<String, String> existingVariantIDs = buildSynonymToIdMapForExistingVariants(mongoTemplate, true, assembly == null ? null : assembly.getId());
-
-			
-            final Collection<Integer> assemblyIDs = mongoTemplate.findDistinct(new Query(), "_id", Assembly.class, Integer.class);
-            if (assemblyIDs.isEmpty())
-            	assemblyIDs.add(null);	// old-style, assembly-less DB
-            
-            
-            // Reading csv file
-            // Getting alleleX and alleleY for each SNP by reading lines between lines {"SNPID","SNPNum","AlleleY","AlleleX","Sequence"} and {"Scaling"};
-            // Then getting genotypes for each individual by reading lines after line {"DaughterPlate","MasterPlate","MasterWell","Call","X","Y","SNPID","SubjectID","Norm","Carrier","DaughterWell","LongID"}
-            try (BufferedReader in = new BufferedReader(new InputStreamReader(fileURL.openStream())); CSVReader csvReader = new CSVReader(in)) {
-                boolean snpPart = false;
-                boolean dataPart = false;
-                String[] values;
-                int i = 0;
-                int nPloidy = 0;
-                while ((values = csvReader.readNext()) != null) {
-                    if (progress.getError() != null || progress.isAborted())
-                        return createdProject;
-
-                    i = i+1;
-                    if (Arrays.asList(values).containsAll(Arrays.asList(snpHeader))) {
-                        snpPart = true;
-                    } else if (Arrays.asList(values).containsAll(Arrays.asList(limit))) {
-                        snpPart = false;
-                    } else {
-                        if (snpPart && !dataPart && !values[0].equals("")) {
-                            String variantId = values[snpColIndex];
-                            //check if variantId already exists in DB
-                            VariantData variant = variantId == null ? null : mongoTemplate.findById(variantId, VariantData.class);
-                            if (variant == null) {
-                                variant = new VariantData(variantId);
-                                variant.getKnownAlleles().add(values[yColIndex]);
-                                variant.getKnownAlleles().add(values[xColIndex]);
-                                variant.setType(Type.SNP.toString());                                                               
-                            }                            
-                            variantsToSave.add(variant);
-                            variantAllelesMap.put(variantId, variant.getKnownAlleles());
-                            project.getAlleleCounts().add(variant.getKnownAlleles().size());
+                    //check if variantId already exists in DB
+                    VariantData variant = variantId == null ? null : mongoTemplate.findById(variantId, VariantData.class);
+                    Map<String, String> allelesMap = new HashMap<>();
+                    if (variant == null) {
+                        variant = new VariantData(variantId);
+                        String ref = values[xColIndex];
+                        String alt = values[yColIndex];
+                        if (!ref.matches(validAlleleRegex)) {
+                            throw new Exception("Invalid ref allele '" + ref + "' provided for variant" + variantId);
+                        }
+                        if (!alt.matches(validAlleleRegex)) {
+                            throw new Exception("Invalid ref allele '" + alt + "' provided for variant" + variantId);
                         }
 
-                        if (Arrays.asList(values).containsAll(dataHeaderList)) {
-                            dataPart = true;
-                        } else {
-                            if (dataPart) {
-                                String variantId = values[variantColIndex];
-                                String sIndOrSpId = values[indColIndex];
-                                String masterPlate = values[masterPlateColIndex];
-                                String call = values[callColIndex];
-                                String FI = values[yFIColIndex] + "," + values[xFIColIndex];
-                                
-                                if (variantId.equals("") || sIndOrSpId.equals(""))
-                                    continue; //skip line if no variantId or no individualId
+                        variant.setType(Type.SNP.toString());
 
-                                if (variantToSampleToGenotypeMap.get(variantId) == null)
-                                    variantToSampleToGenotypeMap.put(variantId, new HashMap<>());
+                        //INDEL
+                        if (ref.equals("-")) {
+                            ref = "N";
+                            alt = "NN";
+                            variant.setType(Type.INDEL.toString());
 
-                                String gtCode = null;
-                                List<String> variantAlleles = variantAllelesMap.get(variantId);
-                                String refAllele = variantAlleles.get(0);
-                                if (!call.equals("NTC")) {
-                                    //NTC lines are not imported (control)
-                                    //if genotype is ?, gtCode = null
-                                    if (call.contains(":")) {
-                                        List<String> alleles = Arrays.asList(call.split(":"));
-                                        List<String> gt = new ArrayList<>();
-                                        for (String al:alleles) {
-                                            if (al.equals(refAllele)) {
-                                                gt.add("0");
-                                            } else {
-                                                gt.add("1");
-                                            }
-                                        }
-                                        gtCode = String.join("/", gt);
-                                        if (nPloidy == 0) {
-                                            nPloidy = alleles.size();
-                                        } else {
-                                            if (nPloidy != alleles.size()) {
-                                                throw new Exception("Ploidy levels differ between variants");
-                                            }
-                                        }
-                                    }
-                                    
-                                	String sIndividual = determineIndividualName(sampleToIndividualMap, sIndOrSpId, progress);
-                                	if (sIndividual == null) {
-                                		progress.setError("Unable to determine individual for sample " + sIndOrSpId);
-                                		break;
-                                	}
+                        } else if (alt.equals("-")) {
+                            ref = "NN";
+                            alt = "N";
+                            variant.setType(Type.INDEL.toString());
+                        }
+                        variant.getKnownAlleles().add(ref);
+                        variant.getKnownAlleles().add(alt);
+                        allelesMap.put(values[xColIndex], ref);
+                        allelesMap.put(values[yColIndex], alt);
+                        variantIdsToSave.add(variantId);
 
-                                    GenotypingSample sample = m_providedIdToSampleMap.get(sIndOrSpId);
-                                    if (sample == null) {
-                                        Individual ind = mongoTemplate.findById(sIndividual, Individual.class);
-                                        if (ind == null)
-                                            mongoTemplate.save(new Individual(sIndividual));
 
-                                        int sampleId = AutoIncrementCounter.getNextSequence(mongoTemplate, MongoTemplateManager.getMongoCollectionName(GenotypingSample.class));
-                                        sample = new GenotypingSample(sampleId, project.getId(), sRun, sIndividual, sampleToIndividualMap == null ? null : sIndOrSpId);
-                                        sample.getAdditionalInfo().put("masterPlate", masterPlate);
-                                        m_providedIdToSampleMap.put(sIndOrSpId, sample);
-                                    }
-
-                                    SampleGenotype sampleGt = new SampleGenotype(gtCode);
-                                    sampleGt.getAdditionalInfo().put(AbstractVariantData.GT_FIELD_FI, FI);	//TODO - Check how the fluorescence indexes X et Y should be stored
-
-                                    variantToSampleToGenotypeMap.get(variantId).put(sample.getId(), sampleGt);                                             
+                    } else {
+                        //Match Intertek alleles to VCF format
+                        String ref = variant.getKnownAlleles().get(0);
+                        List<String> altList = variant.getKnownAlleles().subList(1, variant.getKnownAlleles().size());
+                        String alleleX = values[xColIndex];
+                        String alleleY = values[yColIndex];
+                        if (variant.getType().equals(Type.SNP.toString())) {
+                            if (reverseComplement(alleleX).equals(alleleY)) {
+                                //ambiguity, can't know which one is ref. So arbitrary, X=ref and Y=alt
+                                int posX = altList.indexOf(alleleX);
+                                int posY = altList.indexOf(alleleY);
+                                if ((alleleX.equals(ref) && posY != -1) || (posX != -1 && alleleY.equals(ref))) {
+                                    String alt = posY != -1 ? altList.get(posY) : altList.get(posX);
+                                    allelesMap.put(alleleX, "0");
+                                    allelesMap.put(alleleY, posY != -1 ? String.valueOf(posY + 1) : String.valueOf(posX + 1));
+                                    ambiguousVariants.add(variantId);
+                                } else {
+                                    throw new Exception("Given alleleX/alleleY (" + alleleX + "/" + alleleY + ") for variant " + variantId + " don't match with stored REF/ALT alleles " + ref + "/" + String.join("/", altList));
                                 }
+                            } else { //see if ref is equals to X or Y or their reverse-complement
+                                int posX = altList.indexOf(alleleX);
+                                int posY = altList.indexOf(alleleY);
+                                int posRCX = altList.indexOf(reverseComplement(alleleX));
+                                int posRCY = altList.indexOf(reverseComplement(alleleY));
+
+                                if (alleleX.equals(ref) && posY != -1 || reverseComplement(alleleX).equals(ref) && posRCY != -1) {
+                                    allelesMap.put(alleleX, "0");
+                                    allelesMap.put(alleleY, posY != -1 ? String.valueOf(posY + 1 ): String.valueOf(posRCY + 1));
+                                } else if (posX != -1 && alleleY.equals(ref) || posRCX != -1 && reverseComplement(alleleY).equals(ref) ) {
+                                    allelesMap.put(alleleX, posX != -1 ? String.valueOf(posX): String.valueOf(posRCX + 1 ));
+                                    allelesMap.put(alleleY, "0");
+                                } else {
+                                    throw new Exception("Given alleleX/alleleY (" + alleleX + "/" + alleleY + ") for variant " + variantId + " don't match with stored REF/ALT alleles " + ref + "/" + String.join("/", altList));
+                                }
+                            }
+
+                        } else if (variant.getType().equals(Type.INDEL.toString())) {
+
+                            String indelPart = null;
+                            // Get inserted or deleted part
+                            for (int a = 0; a < altList.size(); a++) {
+                                String alt = altList.get(a);
+                                if (alt.startsWith(ref)) { // insertion after
+                                    indelPart = alt.substring(ref.length());
+                                } else if (alt.endsWith(ref)) {// insertion before
+                                    indelPart = alt.substring(0, alt.length() - ref.length());
+                                }
+
+                                if (indelPart != null) { //insertion
+                                    if (alleleY.equals("-") && (indelPart.equals(alleleX) || reverseComplement(indelPart).equals(alleleX))) {
+                                        allelesMap.put(alleleX, String.valueOf(a+1));
+                                        allelesMap.put(alleleY, "0");
+                                        break;
+                                    } else if (alleleX.equals("-") && (indelPart.equals(alleleY) || reverseComplement(indelPart).equals(alleleY))) {
+                                        allelesMap.put(alleleX, "0");
+                                        allelesMap.put(alleleY, String.valueOf(a+1));
+                                        break;
+                                    }
+                                } else if (ref.startsWith(alt)) { // deletion after
+                                    indelPart = ref.substring(alt.length());
+                                } else if (ref.endsWith(alt)) { // deletion before
+                                    indelPart = ref.substring(0, ref.length() - alt.length());
+                                }
+
+                                if (indelPart != null) { //deletion
+                                    if (values[yColIndex].equals("-")) {
+                                        allelesMap.put(alleleX, "0");
+                                        allelesMap.put(alleleY, String.valueOf(a+1));
+                                    } else if (values[xColIndex].equals("-")) {
+                                        allelesMap.put(alleleX, String.valueOf(a+1));
+                                        allelesMap.put(alleleY, "0");
+                                    }
+                                }
+                            }
+                            if (indelPart == null){
+                                throw new Exception("Given alleleX/alleleY (" + alleleX + "/" + alleleY + ") for variant " + variantId + " don't match with stored REF/ALT alleles " + ref + "/" + String.join("/", altList));
                             }
                         }
                     }
+                    variants.put(variantId, variant);
+                    variantAllelesMap.put(variantId, allelesMap);
+                    project.getAlleleCounts().add(variant.getKnownAlleles().size());
+                    continue;
                 }
-                csvReader.close();
-                
-                if (variantsToSave.isEmpty())
-                	progress.setError("Found no variants to import in provided file, please check its contents!");
-                else {
-	                if (importMode == 0 && createdProject == null && project.getPloidyLevel() != nPloidy)
-	                    throw new Exception("Ploidy levels differ between existing (" + project.getPloidyLevel() + ") and provided (" + nPloidy + ") data!");
-	                project.setPloidyLevel(nPloidy);
-                }
-            }
-            
-            // make sure provided sample names do not conflict with existing ones
-            if (mongoTemplate.findOne(new Query(Criteria.where(GenotypingSample.FIELDNAME_NAME).in(m_providedIdToSampleMap.values().stream().map(sp -> sp.getSampleName()).toList())), GenotypingSample.class) != null) {
-    	        progress.setError("Some of the sample IDs provided in the mapping file already exist in this database!");
-    	        return null;
-    		}
 
-            mongoTemplate.insert(m_providedIdToSampleMap.values(), GenotypingSample.class);
-            setSamplesPersisted(true);
+                // data part
+                if (Arrays.asList(values).containsAll(dataHeaderList)) {
+                    dataPart = true;
+                    continue;
+                }
+                if (dataPart) {
+                    String variantId = values[variantColIndex];
+                    String bioEntityID = values[indColIndex];
+                    String masterPlate = values[masterPlateColIndex];
+                    String call = values[callColIndex];
+                    String FI = values[yFIColIndex] + "," + values[xFIColIndex];
+
+                    if (variantId.equals("") || bioEntityID.equals(""))
+                        continue; //skip line if no variantId or no individualId
+
+                    if (currentVariantId == null) {
+                        currentVariantId = variantId;
+                    }
+
+                    if (!variantId.equals(currentVariantId)) {
+                        if (nNumberOfVariantRunsToSaveAtOnce == 0) {
+                            nNumberOfVariantRunsToSaveAtOnce = Math.max(1, nMaxChunkSize / m_providedIdToCallsetMap.size());
+                        }
+
+                        addVariantRunToChunk(currentVariantId, fSkipMonomorphic, existingIds, variantIdsToSave, variantRunsChunk, variantsChunk,
+                                sampleGenotypes, variants, project, sRun, assemblyIDs);
+                        sampleGenotypes = new HashMap<>();
+
+                        if (variantRunsChunk.size() == nNumberOfVariantRunsToSaveAtOnce) {
+                            //save variantRuns
+                            saveChunk(variantsChunk, variantRunsChunk, existingVariantIDs, mongoTemplate, progress, saveService);
+                            variantRunsChunk = new HashSet<>();
+                        }
+                    }
+                    currentVariantId = variantId;
+
+                    String gtCode = null;
+                    Map<String, String> variantAlleles = variantAllelesMap.get(variantId);
+                    String refAllele = variantAlleles.get(0);
+                    if (!call.equals("NTC")) {
+                        //NTC lines are not imported (control)
+                        //if genotype is ?, gtCode = null
+                        if (call.contains(":")) {
+                            List<String> alleles = Arrays.asList(call.split(":"));
+                            gtCode = alleles.stream()
+                                    .map(al -> variantAlleles.get(al))
+                                    .collect(Collectors.joining("/"));
+                            if (nPloidy == 0)
+                                nPloidy = alleles.size();
+                            else if (nPloidy != alleles.size())
+                            	throw new Exception("Ploidy levels differ between variants");
+                        }
                         
-            VCFFormatHeaderLine headerLineGT = new VCFFormatHeaderLine("GT", 1, VCFHeaderLineType.String, "Genotype");
-            VCFFormatHeaderLine headerLineFI = new VCFFormatHeaderLine(AbstractVariantData.GT_FIELD_FI, 2, VCFHeaderLineType.Float, "Fluorescence intensity");
-            VCFHeader header = new VCFHeader(new HashSet<>(Arrays.asList(headerLineGT, headerLineFI)));
-            mongoTemplate.save(new DBVCFHeader(new DBVCFHeader.VcfHeaderId(project.getId(), sRun), header));
-            
-            progress.addStep("Header was written for project " + sProject + " and run " + sRun);
-            progress.moveToNextStep();
-            LOG.info(progress.getProgressDescription());
+                    	GenotypingSample sample = null;
+                    	if (sampleToIndividualMap != null) {	// provided bio-entities are actually samples
+                    		if (fDbAlreadyContainedSamples) {
+                    			sample = mongoTemplate.findById(bioEntityID, GenotypingSample.class);
+                    			if (sample != null && !sampleToIndividualMap.isEmpty()) {	// the sample already exists in the DB, and a sample-to-individual mapping was provided for import: let's make sure individuals match
+                    				String sProvidedIndividualForThisSample = determineIndividualNameAccountingForBrapiRelationships(sampleToIndividualMap, bioEntityID, progress);
+                                	if (sProvidedIndividualForThisSample != null && !sample.getIndividual().equals(sProvidedIndividualForThisSample))
+                                		throw new Exception("Sample " + bioEntityID + " already exists and is attached to individual " + sample.getIndividual() + ", not " + sProvidedIndividualForThisSample);
+                    			}
+                    		}
+                    		if (sample == null) {
+                                String sIndividual = determineIndividualNameAccountingForBrapiRelationships(sampleToIndividualMap, bioEntityID, progress);
+                                if (sIndividual == null)
+                                	throw new Exception("Unable to determine individual for sample " + bioEntityID);
 
-            // Store variants and variantRuns
-            int count = 0;
-            int nNumberOfVariantsToSaveAtOnce = 1;
-            int nNConcurrentThreads = Math.max(1, Runtime.getRuntime().availableProcessors());
-            LOG.debug("Importing project '" + sProject + "' into " + sModule + " using " + nNConcurrentThreads + " threads");
-            
-            /*FIXME : we should parallelize the import file parsing, similarly to what is done in other formats (although this one is not meant to contain much data...)*/
-            BlockingQueue<Runnable> saveServiceQueue = new LinkedBlockingQueue<Runnable>(saveServiceQueueLength(nNConcurrentThreads));
-            ExecutorService saveService = new ThreadPoolExecutor(1, saveServiceThreads(nNConcurrentThreads), 30, TimeUnit.SECONDS, saveServiceQueue, new ThreadPoolExecutor.CallerRunsPolicy());
+                    			sample = new GenotypingSample(bioEntityID, sIndividual);
+                                sample.getAdditionalInfo().put("masterPlate", masterPlate);
+                                samplesToAdd.add(sample);
+                    		}
+                    		else
+                    			samplesToUpdate.add(sample);
+                    	}
+                    	else {		// provided bio-entities are actually individuals
+                    		sample = new GenotypingSample(bioEntityID + "-" + project.getId() + "-" + sRun, bioEntityID);
+                            sample.getAdditionalInfo().put("masterPlate", masterPlate);
+                            samplesToAdd.add(sample);
+                    	}
 
-            HashSet<VariantData> variantsChunk = new HashSet<>();
-            HashSet<VariantRunData> variantRunsChunk = new HashSet<>();
-            Set<String> existingIds = new HashSet<>(existingVariantIDs.values());
-            for (VariantData variant : variantsToSave) {
-                if (progress.getError() != null || progress.isAborted())
-                    break;
-                if (!existingIds.contains(variant.getId()) && fSkipMonomorphic) {
-                	String[] distinctGTs = variantToSampleToGenotypeMap.get(variant.getVariantId()).values().stream().map(sampleGT -> sampleGT.getCode()).filter(gtCode -> gtCode != null).distinct().toArray(String[]::new);
-                	if (distinctGTs.length == 0 || (distinctGTs.length == 1 && Arrays.stream(distinctGTs[0].split("/")).distinct().count() < 2))
-						continue; // skip non-variant positions that are not already known
-                }
-                
-                VariantRunData vrd = new VariantRunData(new VariantRunDataId(project.getId(), sRun, variant.getVariantId()));
-                vrd.setKnownAlleles(variant.getKnownAlleles());
-                vrd.setSampleGenotypes(variantToSampleToGenotypeMap.get(variant.getVariantId()));
-                vrd.setType(variant.getType());
-                vrd.setPositions(variant.getPositions());
-                vrd.setReferencePosition(variant.getReferencePosition());         
-                vrd.setSynonyms(variant.getSynonyms());
-                variant.getRuns().add(new Run(project.getId(), sRun));
-                
-                for (Integer asmId : assemblyIDs) {
-                    ReferencePosition rp = variant.getReferencePosition(asmId);
-                    if (rp != null)
-                    	project.getContigs(asmId).add(rp.getSequence());
-                }
-                
-                variantRunsChunk.add(vrd);
-                variantsChunk.add(variant);
+                        if (!fDbAlreadyContainedIndividuals || mongoTemplate.findById(sample.getIndividual(), Individual.class) == null)  // we don't have any population data so we don't need to update the Individual if it already exists
+                            indsToAdd.add(new Individual(sample.getIndividual()));
 
-                if (count == 0) {
-                    nNumberOfVariantsToSaveAtOnce = Math.max(1, nMaxChunkSize / m_providedIdToSampleMap.size());
-                    LOG.info("Importing by chunks of size " + nNumberOfVariantsToSaveAtOnce);
-                } else if (count % nNumberOfVariantsToSaveAtOnce == 0) {
-                    saveChunk(variantsChunk, variantRunsChunk, existingVariantIDs, mongoTemplate, progress, saveService);
-                    variantRunsChunk = new HashSet<>();
-                    variantsChunk = new HashSet<>();
+                        m_providedIdToSampleMap.put(bioEntityID, sample);  // add a sample for this individual to the project
+                        if (m_providedIdToCallsetMap.get(bioEntityID) == null) {
+	                        int callsetId = AutoIncrementCounter.getNextSequence(mongoTemplate, MongoTemplateManager.getMongoCollectionName(Callset.class));
+	                        Callset cs = new Callset(callsetId, sample, project.getId(), sRun);
+	                        sample.getCallSets().add(cs);
+	                        m_providedIdToCallsetMap.put(bioEntityID, cs);
+                        }
+
+                        SampleGenotype sampleGt = new SampleGenotype(gtCode);
+                        sampleGt.getAdditionalInfo().put(AbstractVariantData.GT_FIELD_FI, FI);	//TODO - Check how the fluorescence indexes X et Y should be stored
+                        sampleGenotypes.put(m_providedIdToCallsetMap.get(bioEntityID).getId(), sampleGt);
+                    }
                 }
-                count++;
             }
-            
+            csvReader.close();
+
+            //Add last variantRun
+            addVariantRunToChunk(currentVariantId, fSkipMonomorphic, existingIds, variantIdsToSave, variantRunsChunk,
+                    variantsChunk, sampleGenotypes, variants, project, sRun, assemblyIDs);
+
             //save last chunk
-            if (!variantsChunk.isEmpty())
-                persistVariantsAndGenotypes(!existingVariantIDs.isEmpty(), mongoTemplate, variantsChunk, variantRunsChunk);
-            
-            // Store the project
-            if (!project.getRuns().contains(sRun))
-                project.getRuns().add(sRun);
-            if (createdProject == null)
-                mongoTemplate.save(project);
-            else
-                mongoTemplate.insert(project);
+            if (!variantRunsChunk.isEmpty())
+                saveChunk(variantsChunk, variantRunsChunk, existingVariantIDs, mongoTemplate, progress, saveService);
 
-            LOG.info("IntertekImport took " + (System.currentTimeMillis() - before) / 1000 + "s for " + count + " records");		
-            return createdProject;
+            if (!ambiguousVariants.isEmpty()) {
+                progress.markAsComplete("WARNING : Ambiguous matching between alleleX/alleleY and existing variant REF/ALT alleles for variants : " + String.join(",", ambiguousVariants));
+            }
+
         }
-        catch (Exception e) {
-        	LOG.error("Error", e);
-        	progress.setError(e.getMessage());
-        	return createdProject;
-        }
-        finally {
-            if (m_fCloseContextOpenAfterImport && ctx != null)
-                ctx.close();
-            MongoTemplateManager.unlockProjectForWriting(sModule, sProject);
-            if (progress.getError() == null && !progress.isAborted()) {
-                progress.addStep("Preparing database for searches");
-                progress.moveToNextStep();
-                MgdbDao.prepareDatabaseForSearches(sModule);
+
+
+
+        //Insert new callsets, samples and individuals
+        insertNewCallSetsSamplesIndividuals(mongoTemplate, indsToAdd, samplesToAdd, samplesToUpdate);
+        setSamplesPersisted(true);
+
+        VCFFormatHeaderLine headerLineGT = new VCFFormatHeaderLine("GT", 1, VCFHeaderLineType.String, "Genotype");
+        VCFFormatHeaderLine headerLineFI = new VCFFormatHeaderLine(AbstractVariantData.GT_FIELD_FI, 2, VCFHeaderLineType.Float, "Fluorescence intensity");
+        VCFHeader header = new VCFHeader(new HashSet<>(Arrays.asList(headerLineGT, headerLineFI)));
+        mongoTemplate.save(new DBVCFHeader(new DBVCFHeader.VcfHeaderId(project.getId(), sRun), header));
+        return count;
+    }
+
+    private void addVariantRunToChunk(String currentVariantId, boolean fSkipMonomorphic, Set<String> existingVariantIds,
+                                      Set<String> variantIdsToSave, HashSet<VariantRunData> variantRunsChunk, HashSet<VariantData> variantsChunk,
+                                      HashMap<Integer, SampleGenotype> sampleGenotypes, Map<String, VariantData> variants,
+                                      GenotypingProject project, String sRun, Collection<Integer> assemblyIDs) {
+
+        if (!existingVariantIds.contains(currentVariantId) && fSkipMonomorphic) {
+            String[] distinctGTs = sampleGenotypes.values().stream().map(sampleGT -> sampleGT.getCode()).filter(gtCode -> gtCode != null).distinct().toArray(String[]::new);
+            if (distinctGTs.length == 0 || (distinctGTs.length == 1 && Arrays.stream(distinctGTs[0].split("/")).distinct().count() < 2)) {
+                variantIdsToSave.remove(currentVariantId);
+                return; // skip non-variant positions that are not already known
             }
         }
+
+        // new variant line
+        VariantData variant = variants.get(currentVariantId);
+        //save previous genotypes
+        VariantRunData vrd = new VariantRunData(new VariantRunDataId(project.getId(), sRun, currentVariantId));
+        vrd.setKnownAlleles(variant.getKnownAlleles());
+        vrd.setSampleGenotypes(sampleGenotypes);
+        vrd.setType(variant.getType());
+        vrd.setPositions(variant.getPositions());
+        vrd.setReferencePosition(variant.getReferencePosition());
+        vrd.setSynonyms(variant.getSynonyms());
+        variant.getRuns().add(new Run(project.getId(), sRun));
+
+        for (Integer asmId : assemblyIDs) {
+            ReferencePosition rp = variant.getReferencePosition(asmId);
+            if (rp != null)
+                project.getContigs(asmId).add(rp.getSequence());
+        }
+
+        vrd.setSampleGenotypes(sampleGenotypes);
+
+        variantRunsChunk.add(vrd);
+        variantsChunk.add(variant);
+
+    }
+
+    @Override
+    protected void initReader(FileImportParameters params) throws Exception {
+
+    }
+
+    @Override
+    protected void closeResource() throws IOException {
+
     }
 
 	private void readAllSampleIDsToPreloadIndividuals(URL fileURL, List<String> dataHeaderList, int subjectColIndex, ProgressIndicator progress) throws Exception {
@@ -464,4 +544,19 @@ public class IntertekImport extends AbstractGenotypeImport {
 		scanner.close();
 		attemptPreloadingIndividuals(sampleIDs, progress);
 	}
+
+    public static String reverseComplement(String seq) {
+        StringBuilder sb = new StringBuilder(seq.length());
+        for (int i = seq.length() - 1; i >= 0; i--) {
+            char c = Character.toUpperCase(seq.charAt(i));
+            switch (c) {
+                case 'A': sb.append('T'); break;
+                case 'T': sb.append('A'); break;
+                case 'C': sb.append('G'); break;
+                case 'G': sb.append('C'); break;
+                default:  sb.append('N');
+            }
+        }
+        return sb.toString();
+    }
 }

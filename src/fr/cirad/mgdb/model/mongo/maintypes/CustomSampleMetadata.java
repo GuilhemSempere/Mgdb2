@@ -27,7 +27,7 @@ public class CustomSampleMetadata {
                 
 		/** The sample id. */
 		@Field(FIELDNAME_SAMPLE_ID)
-		private Integer sampleId;
+		private String sampleId;
 
 		/** The user name. */
 		@Field(FIELDNAME_USER)
@@ -40,7 +40,7 @@ public class CustomSampleMetadata {
 		 * @param sampleId the sample id
 		 * @param user the user's name
 		 */
-		public CustomSampleMetadataId(Integer sampleId, String user) {
+		public CustomSampleMetadataId(String sampleId, String user) {
 			this.sampleId = sampleId;
 			this.user = user;
 		}
@@ -54,7 +54,7 @@ public class CustomSampleMetadata {
 			return user;
 		}
 
-        public Integer getSampleId() {
+        public String getSampleId() {
             return sampleId;
         }  
 	}

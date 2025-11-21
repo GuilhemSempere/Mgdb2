@@ -16,11 +16,7 @@
  *******************************************************************************/
 package fr.cirad.mgdb.importing;
 
-import java.io.BufferedReader;
-import java.io.File;
-import java.io.FileReader;
-import java.io.FileWriter;
-import java.io.InputStreamReader;
+import java.io.*;
 import java.net.URL;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -35,39 +31,37 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
+import fr.cirad.mgdb.importing.parameters.FlapjackImportParameters;
 import org.apache.log4j.Logger;
-import org.springframework.beans.factory.BeanDefinitionStoreException;
-import org.springframework.context.support.GenericXmlApplicationContext;
 import org.springframework.data.mongodb.core.MongoTemplate;
-import org.springframework.data.mongodb.core.query.Criteria;
-import org.springframework.data.mongodb.core.query.Query;
 
 import fr.cirad.mgdb.importing.base.AbstractGenotypeImport;
 import fr.cirad.mgdb.importing.base.RefactoredImport;
 import fr.cirad.mgdb.model.mongo.maintypes.Assembly;
 import fr.cirad.mgdb.model.mongo.maintypes.GenotypingProject;
 import fr.cirad.mgdb.model.mongo.maintypes.VariantData;
-import fr.cirad.mgdb.model.mongodao.MgdbDao;
 import fr.cirad.tools.ProgressIndicator;
-import fr.cirad.tools.mongo.AutoIncrementCounter;
-import fr.cirad.tools.mongo.MongoTemplateManager;
 import htsjdk.variant.variantcontext.Allele;
 import htsjdk.variant.variantcontext.VariantContext.Type;
 
 /**
  * The Class FlapjackImport.
  */
-public class FlapjackImport extends RefactoredImport {
+public class FlapjackImport extends RefactoredImport<FlapjackImportParameters> {
 
     /** The Constant LOG. */
     private static final Logger LOG = Logger.getLogger(VariantData.class);
 
     /** The m_process id. */
-    private String m_processID;
+    //private String m_processID;
 
     public boolean m_fCloseContextOpenAfterImport = false;
 
     private static int m_nCurrentlyTransposingMatrixCount = 0;
+
+    private File rotatedFile;
+
+    ArrayList<String> individualNames = new ArrayList<>();
 
     /**
      * Instantiates a new Flapjack import.
@@ -130,175 +124,127 @@ public class FlapjackImport extends RefactoredImport {
         {
             LOG.warn("Unable to parse input mode. Using default (0): overwrite run if exists.");
         }
-        new FlapjackImport().importToMongo(args[0], args[1], args[2], args[3], null, new File(args[4]).toURI().toURL(), new File(args[5]), args[6], null, false, mode);
+        FlapjackImportParameters params = new FlapjackImportParameters(
+                args[0], //sModule
+                args[1], //sProject
+                args[2], //sRun
+                args[3], //sTechnology
+                null, // nPloidy
+                args[5], //assemblyName
+                null, //sampleToIndividualMap
+                false,//fSkipMonomorphic
+                mode, //importMode
+                (new File(args[4]).toURI().toURL()),
+                (new File(args[5]).toURI().toURL())
+        );
+        new FlapjackImport().importToMongo(params);
     }
 
-    /**
-     * Import to mongo.
-     *
-     * @param sModule the module
-     * @param sProject the project
-     * @param sRun the run
-     * @param sTechnology the technology
-     * @param nPloidy the ploidy level
-     * @param mapFileURL the map file URL
-     * @param genotypeFile the genotype file
-     * @param assemblyName the assembly name
-     * @param sampleToIndividualMap the sample-individual mapping
-     * @param fSkipMonomorphic whether or not to skip import of variants that have no polymorphism (where all individuals have the same genotype)
-     * @param importMode the import mode
-     * @return a project ID if it was created by this method, otherwise null
-     * @throws Exception the exception
-     */
-    public Integer importToMongo(String sModule, String sProject, String sRun, String sTechnology, Integer nPloidy, URL mapFileURL, File genotypeFile, String assemblyName, HashMap<String, String> sampleToIndividualMap, boolean fSkipMonomorphic, int importMode) throws Exception
-    {
-        if (m_nCurrentlyTransposingMatrixCount > 3) // we allow up to 4 simultaneous matrix rotations
-            throw new Exception("The system is already busy rotating other FLAPJACK datasets, please try again later");
-
-        long before = System.currentTimeMillis();
-        ProgressIndicator progress = ProgressIndicator.get(m_processID) != null ? ProgressIndicator.get(m_processID) : new ProgressIndicator(m_processID, new String[]{"Initializing import"}); // better to add it straight-away so the JSP doesn't get null in return when it checks for it (otherwise it will assume the process has ended)
-
-        GenericXmlApplicationContext ctx = null;
-        MongoTemplate mongoTemplate = MongoTemplateManager.get(sModule);
-        if (mongoTemplate == null)
-        {   // we are probably being invoked offline
-            try
-            {
-                ctx = new GenericXmlApplicationContext("applicationContext-data.xml");
-            }
-            catch (BeanDefinitionStoreException fnfe)
-            {
-                LOG.warn("Unable to find applicationContext-data.xml. Now looking for applicationContext.xml", fnfe);
-                ctx = new GenericXmlApplicationContext("applicationContext.xml");
-            }
-
-            MongoTemplateManager.initialize(ctx);
-            mongoTemplate = MongoTemplateManager.get(sModule);
-            if (mongoTemplate == null)
-                throw new Exception("DATASOURCE '" + sModule + "' is not supported!");
-        }
+    @Override
+    protected long doImport(FlapjackImportParameters params, MongoTemplate mongoTemplate, GenotypingProject project, ProgressIndicator progress, Integer createdProject) throws Exception {
+        String sModule = params.getModule();
+        String sProject = params.getRun();
+        String sRun = params.getRun();
+        String assemblyName = params.getAssemblyName();
+        Map<String, String> sampleToIndividualMap = params.getSampleToIndividualMap();
+        boolean fSkipMonomorphic = params.isSkipMonomorphic();
+        URL mapFileURL = params.getMapFileUrl();
+        URL genotypeFileURL = params.getMainFileUrl();
+        Integer nPloidy = params.getPloidy();
+        int importMode = params.getImportMode();
 
         m_fImportUnknownVariants = doesDatabaseSupportImportingUnknownVariants(sModule);
 
-        if (m_processID == null)
-            m_processID = "IMPORT__" + sModule + "__" + sProject + "__" + sRun + "__" + System.currentTimeMillis();
+        progress.addStep("Scanning existing marker IDs");
+        progress.moveToNextStep();
+        Assembly assembly = createAssemblyIfNeeded(mongoTemplate, assemblyName);
+        HashMap<String, String> existingVariantIDs = buildSynonymToIdMapForExistingVariants(mongoTemplate, true, assembly == null ? null : assembly.getId());
 
-        Integer createdProject = null;
-        
-        GenotypingProject project = mongoTemplate.findOne(new Query(Criteria.where(GenotypingProject.FIELDNAME_NAME).is(sProject)), GenotypingProject.class);
-        File rotatedFile = File.createTempFile("fjImport-" + genotypeFile.getName() + "-", ".tsv");
-        try
-        {
-            MongoTemplateManager.lockProjectForWriting(sModule, sProject);
-            cleanupBeforeImport(mongoTemplate, sModule, project, importMode, sRun);
+        String info = "Loading variant list from MAP file";
+        LOG.info(info);
+        progress.addStep(info);
+        progress.moveToNextStep();
+        LinkedHashMap<String, String> variantsAndPositions = new LinkedHashMap<>();
+        try {
+            BufferedReader mapReader = new BufferedReader(new InputStreamReader(mapFileURL.openStream()));
+            int nCurrentLine = -1;
+            String line;
+            while ((line = mapReader.readLine()) != null) {
+                line = line.trim();
+                nCurrentLine++;
 
-            // create project if necessary
-            if (project == null || importMode > 0) {   // create it
-                project = new GenotypingProject(AutoIncrementCounter.getNextSequence(mongoTemplate, MongoTemplateManager.getMongoCollectionName(GenotypingProject.class)));
-                project.setName(sProject);
-//                project.setOrigin(2 /* Sequencing */);
-                project.setTechnology(sTechnology);
-                if (importMode != 1)
-                	createdProject = project.getId();
+                if (line.length() == 0 || line.charAt(0) == '#')
+                    continue;
+
+                String[] tokens = line.split("\\s+");
+                if (tokens.length < 3)
+                    throw new Exception("Line " + nCurrentLine + " : invalid or unsupported data (less than 3 elements)");
+
+                variantsAndPositions.put(tokens[0], tokens[1] + "\t" + tokens[2]);
             }
-            else if (nPloidy != null && importMode == 0 && project.getPloidyLevel() != nPloidy)
-                throw new Exception("Ploidy levels differ between existing (" + project.getPloidyLevel() + ") and provided (" + nPloidy + ") data!");
-
-			progress.addStep("Scanning existing marker IDs");
-			progress.moveToNextStep();
-			Assembly assembly = createAssemblyIfNeeded(mongoTemplate, assemblyName);
-			HashMap<String, String> existingVariantIDs = buildSynonymToIdMapForExistingVariants(mongoTemplate, true, assembly == null ? null : assembly.getId());
-
-            String info = "Loading variant list from MAP file";
-            LOG.info(info);
-            progress.addStep(info);
-            progress.moveToNextStep();
-            LinkedHashMap<String, String> variantsAndPositions = new LinkedHashMap<>();
-            try {
-                BufferedReader mapReader = new BufferedReader(new InputStreamReader(mapFileURL.openStream()));
-                int nCurrentLine = -1;
-                String line;
-                while ((line = mapReader.readLine()) != null) {
-                    line = line.trim();
-                    nCurrentLine++;
-
-                    if (line.length() == 0 || line.charAt(0) == '#')
-                        continue;
-
-                    String[] tokens = line.split("\\s+");
-                    if (tokens.length < 3)
-                        throw new Exception("Line " + nCurrentLine + " : invalid or unsupported data (less than 3 elements)");
-
-                    variantsAndPositions.put(tokens[0], tokens[1] + "\t" + tokens[2]);
-                }
-                mapReader.close();
-            } catch (Exception exc) {
-                LOG.error(exc);
-                progress.setError("Map file parsing failed : " + exc.getMessage());
-                return 0;
-            }
-
-
-            // Rotate genotype matrix using temporary files
-            info = "Reading and reorganizing genotypes";
-            LOG.info(info);
-            progress.addStep(info);
-            progress.moveToNextStep();
-            Map<String, Type> nonSnpVariantTypeMap = new HashMap<>();
-            ArrayList<String> individualNames = new ArrayList<>();
-            try {
-                m_nCurrentlyTransposingMatrixCount++;
-                nPloidy = transposeGenotypeFile(genotypeFile, rotatedFile, nPloidy, nonSnpVariantTypeMap, individualNames, fSkipMonomorphic, progress);
-                if (importMode == 0 && createdProject == null && project.getPloidyLevel() != nPloidy)
-                    throw new Exception("Ploidy levels differ between existing (" + project.getPloidyLevel() + ") and provided (" + nPloidy + ") data!");
-                project.setPloidyLevel(nPloidy);
-            }
-            finally {
-                m_nCurrentlyTransposingMatrixCount--;
-            }
-
-            if (progress.getError() != null && !progress.isAborted())
-                return createdProject;
-            
-            
-            // Create the necessary samples
-            LinkedHashMap<String, String> orderedIndOrSpToPopulationMap = new LinkedHashMap<>();
-            for (String sInd : individualNames)
-            	orderedIndOrSpToPopulationMap.put(sInd, null);	// we have no population info
-            createSamples(mongoTemplate, project.getId(), sRun, sampleToIndividualMap, orderedIndOrSpToPopulationMap, progress);
-            if (progress.getError() != null || progress.isAborted())
-                return createdProject;
-
-            
-            // Rotated file import
-            int nConcurrentThreads = Math.max(1, Runtime.getRuntime().availableProcessors());
-            LOG.debug("Importing project '" + sProject + "' into " + sModule + " using " + nConcurrentThreads + " threads");
-            long count = importTempFileContents(progress, nConcurrentThreads, mongoTemplate, assembly == null ? null : assembly.getId(), rotatedFile, variantsAndPositions, existingVariantIDs, project, sRun, null, orderedIndOrSpToPopulationMap, nonSnpVariantTypeMap, null, fSkipMonomorphic);
-            if (progress.getError() != null)
-                throw new Exception(progress.getError());
-
-            if (progress.isAborted())
-            	return createdProject;
-
-            LOG.info("FlapjackImport took " + (System.currentTimeMillis() - before) / 1000 + "s for " + count + " records");
-            return createdProject;
+            mapReader.close();
+        } catch (Exception exc) {
+            LOG.error(exc);
+            progress.setError("Map file parsing failed : " + exc.getMessage());
+            return 0;
         }
-        catch (Exception e) {
-        	LOG.error("Error", e);
-        	progress.setError(e.getMessage());
-        	return createdProject;
+
+
+        // Rotate genotype matrix using temporary files
+        progress.setPercentageEnabled(true);
+        info = "Reading and reorganizing genotypes";
+        LOG.info(info);
+        progress.addStep(info);
+        progress.moveToNextStep();
+        Map<String, Type> nonSnpVariantTypeMap = new HashMap<>();
+        ArrayList<String> individualNames = new ArrayList<>();
+        try {
+            m_nCurrentlyTransposingMatrixCount++;
+            nPloidy = transposeGenotypeFile(genotypeFileURL, rotatedFile, nPloidy, nonSnpVariantTypeMap, individualNames, fSkipMonomorphic, progress);
+            if (importMode == 0 && createdProject == null && project.getPloidyLevel() != nPloidy)
+                throw new Exception("Ploidy levels differ between existing (" + project.getPloidyLevel() + ") and provided (" + nPloidy + ") data!");
+            project.setPloidyLevel(nPloidy);
         }
         finally {
-        	rotatedFile.delete();
-            if (m_fCloseContextOpenAfterImport && ctx != null)
-                ctx.close();
-            MongoTemplateManager.unlockProjectForWriting(sModule, sProject);
-            if (progress.getError() == null && !progress.isAborted()) {
-                progress.addStep("Preparing database for searches");
-                progress.moveToNextStep();
-                MgdbDao.prepareDatabaseForSearches(sModule);
-            }
+            m_nCurrentlyTransposingMatrixCount--;
         }
+
+        if (progress.getError() != null && !progress.isAborted())
+            return 0;
+
+
+        // Create the necessary samples
+        LinkedHashMap<String, String> orderedIndOrSpToPopulationMap = new LinkedHashMap<>();
+        for (String sInd : individualNames)
+            orderedIndOrSpToPopulationMap.put(sInd, null);	// we have no population info
+        progress.setPercentageEnabled(false);
+        createCallSetsSamplesIndividuals(new ArrayList<>(orderedIndOrSpToPopulationMap.keySet()), mongoTemplate, project.getId(), sRun, sampleToIndividualMap, progress);
+        if (progress.getError() != null || progress.isAborted())
+            return 0;
+
+        // Rotated file import
+        int nConcurrentThreads = Math.max(1, Runtime.getRuntime().availableProcessors());
+        LOG.debug("Importing project '" + sProject + "' into " + sModule + " using " + nConcurrentThreads + " threads");
+        long count = importTempFileContents(progress, nConcurrentThreads, mongoTemplate, assembly == null ? null : assembly.getId(), rotatedFile, variantsAndPositions, existingVariantIDs, project, sRun, null, orderedIndOrSpToPopulationMap, nonSnpVariantTypeMap, null, fSkipMonomorphic);
+        if (progress.getError() != null)
+            throw new Exception(progress.getError());
+
+        if (progress.isAborted())
+            return 0;
+
+        return count;
+    }
+
+
+    @Override
+    protected void initReader(FlapjackImportParameters params) throws Exception {
+    	String path = params.getMainFileUrl().getPath();
+        rotatedFile = File.createTempFile("fjImport-" + path.substring(path.lastIndexOf('/') + 1) + "-", ".tsv");
+    }
+
+    @Override
+    protected void closeResource() throws IOException {
+        rotatedFile.delete();
     }
 
     private long getAllocatableMemory(boolean fCalledFromCommandLine) {
@@ -320,7 +266,7 @@ public class FlapjackImport extends RefactoredImport {
 
     /**
      * 
-     * @param genotypeFile
+     * @param genotypeFileURL
      * @param outputFile
      * @param nProvidedPloidy 
      * @param nonSnpVariantTypeMapToFill
@@ -330,7 +276,7 @@ public class FlapjackImport extends RefactoredImport {
      * @return dataset's ploidy
      * @throws Exception
      */
-    private int transposeGenotypeFile(File genotypeFile, File outputFile, Integer nProvidedPloidy, Map<String, Type> nonSnpVariantTypeMapToFill, ArrayList<String> individualListToFill, boolean fSkipMonomorphic, ProgressIndicator progress) throws Exception {
+    private int transposeGenotypeFile(URL genotypeFileURL, File outputFile, Integer nProvidedPloidy, Map<String, Type> nonSnpVariantTypeMapToFill, ArrayList<String> individualListToFill, boolean fSkipMonomorphic, ProgressIndicator progress) throws Exception {
         long before = System.currentTimeMillis();
 
         StackTraceElement[] stacktrace = Thread.currentThread().getStackTrace();
@@ -352,7 +298,7 @@ public class FlapjackImport extends RefactoredImport {
         blockStartMarkers.add(0);
 
         // Read the line headers, fill the individual map and creates the block positions arrays
-        BufferedReader reader = new BufferedReader(new FileReader(genotypeFile));
+        BufferedReader reader = new BufferedReader(new InputStreamReader(genotypeFileURL.openStream()));
         String initLine;
         int nIndividuals = 0, lineno = -1;
         while ((initLine = reader.readLine()) != null) {
@@ -436,7 +382,7 @@ public class FlapjackImport extends RefactoredImport {
                         ArrayList<StringBuilder> transposed = new ArrayList<StringBuilder>();
 
                         while (blockStartMarkers.get(blockStartMarkers.size() - 1) < cVariants && progress.getError() == null && !progress.isAborted()) {
-                        	FileReader reader = new FileReader(genotypeFile);
+                        	BufferedReader reader = new BufferedReader(new InputStreamReader(genotypeFileURL.openStream()));
                             try {
                                 int blockIndex, blockSize, blockStart;
                                 int bufferPosition = 0, bufferLength = 0;

@@ -17,11 +17,13 @@
 package fr.cirad.mgdb.importing.base;
 
 import java.io.File;
+import java.io.IOException;
 import java.net.URL;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Scanner;
@@ -31,6 +33,7 @@ import java.util.stream.Collectors;
 
 import org.apache.commons.lang3.StringUtils;
 import org.apache.log4j.Logger;
+import org.brapi.v2.model.Sample;
 import org.bson.Document;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.dao.OptimisticLockingFailureException;
@@ -42,38 +45,39 @@ import org.springframework.data.mongodb.core.query.Query;
 import com.mongodb.client.MongoCursor;
 
 import fr.cirad.mgdb.importing.IndividualMetadataImport;
+import fr.cirad.mgdb.importing.parameters.ImportParameters;
 import fr.cirad.mgdb.model.mongo.maintypes.Assembly;
 import fr.cirad.mgdb.model.mongo.maintypes.GenotypingProject;
 import fr.cirad.mgdb.model.mongo.maintypes.GenotypingSample;
+import fr.cirad.mgdb.model.mongo.maintypes.Individual;
 import fr.cirad.mgdb.model.mongo.maintypes.VariantData;
 import fr.cirad.mgdb.model.mongo.maintypes.VariantRunData;
+import fr.cirad.mgdb.model.mongo.subtypes.Callset;
 import fr.cirad.mgdb.model.mongo.subtypes.ReferencePosition;
 import fr.cirad.mgdb.model.mongodao.MgdbDao;
 import fr.cirad.tools.Helper;
 import fr.cirad.tools.ProgressIndicator;
 import fr.cirad.tools.mongo.AutoIncrementCounter;
 import fr.cirad.tools.mongo.MongoTemplateManager;
-
-import org.brapi.v2.model.Sample;
-
 import htsjdk.variant.variantcontext.Allele;
 import htsjdk.variant.variantcontext.VariantContext.Type;
 import jhi.brapi.api.samples.BrapiSample;
 
-public class AbstractGenotypeImport {
+public abstract class AbstractGenotypeImport<T extends ImportParameters> {
+    protected String m_processID;
 
 	private static final Logger LOG = Logger.getLogger(AbstractGenotypeImport.class);
 
 	protected static final int nMaxChunkSize = 20000;
 
 	private boolean m_fAllowDbDropIfNoGenotypingData = true;
-
-    public boolean m_fCloseContextAfterImport = false;
+	public boolean m_fCloseContextAfterImport = false;
     public boolean m_fAllowNewAssembly = true;
-
 	private boolean m_fSamplesPersisted = false;
 
 	protected Map<String /* individual or sample name */, GenotypingSample> m_providedIdToSampleMap = null;
+    protected Map<String /* individual or sample name */, Callset> m_providedIdToCallsetMap = null;
+    protected List<Callset> m_callsets = new ArrayList<>();
 	
 	protected String brapiEndPointUriForNamingIndividuals;
 	protected String brapiEndPointTokenForNamingIndividuals;
@@ -92,7 +96,7 @@ public class AbstractGenotypeImport {
 	protected void attemptPreloadingIndividuals(Collection<String> sampleDbIds, ProgressIndicator progress) throws Exception {
 		if (brapiEndPointUriForNamingIndividuals == null || preloadedSampleToIndividualMap != null)
 			return;
-		
+
 		try {
 			if (progress != null)
 				progress.setProgressDescription("Getting germplasmDbId for " + sampleDbIds.size() + " samples from " + brapiEndPointUriForNamingIndividuals);
@@ -111,7 +115,7 @@ public class AbstractGenotypeImport {
 		}
 	}
 
-	protected String determineIndividualName(Map<String, String> sampleToIndividualMap, String sampleDbId, ProgressIndicator progress) throws Exception {
+	protected String determineIndividualNameAccountingForBrapiRelationships(Map<String, String> sampleToIndividualMap, String sampleDbId, ProgressIndicator progress) throws Exception {
 		String indName = preloadedSampleToIndividualMap == null ? null : preloadedSampleToIndividualMap.get(sampleDbId);
 		if (indName == null && brapiEndPointUriForNamingIndividuals != null) {
 			if (progress != null)
@@ -130,7 +134,7 @@ public class AbstractGenotypeImport {
 						LOG.error("Unable to find individual name from BrAPI endpoint " + brapiEndPointUriForNamingIndividuals + " for sample " + sampleDbId);
 					else
 						indName = samples.get(0).getGermplasmDbId();
-					}
+				}
 			}
 			finally {
 				if (progress != null)
@@ -356,15 +360,19 @@ public class AbstractGenotypeImport {
 //		System.err.println("VD: " + t1 + " / VRD: " + (System.currentTimeMillis() - b4));
     }
 
-    protected void cleanupBeforeImport(MongoTemplate mongoTemplate, String sModule, GenotypingProject project, int importMode, String sRun) throws Exception {	/*FIXME: we don't need MongoTemplate param*/
+    protected void cleanupBeforeImport(MongoTemplate mongoTemplate, String sModule, GenotypingProject project, int importMode, String sRun) throws Exception {
         if (importMode == 2)
             mongoTemplate.getDb().drop(); // drop database before importing
         else if (project != null)
         {
+        	boolean fAnythingChanged = false;
 			if (importMode == 1 || (project.getRuns().size() == 1 && project.getRuns().get(0).equals(sRun)))
-				MgdbDao.removeProjectAndRelatedRecords(sModule, project.getId());	// empty project data before importing
+				fAnythingChanged = MgdbDao.removeProjectAndRelatedRecords(sModule, project.getId());	// empty project data before importing
 			else
-	            MgdbDao.removeRunAndRelatedRecords(sModule, project.getId(), sRun);	// empty run data before importing
+				fAnythingChanged = MgdbDao.removeRunAndRelatedRecords(sModule, project.getId(), sRun, false);	// empty run data before importing
+
+			if (fAnythingChanged)
+				MongoTemplateManager.updateDatabaseLastModification(sModule);
 
 			if (Helper.estimDocCount(mongoTemplate, VariantRunData.class) == 0 && m_fAllowDbDropIfNoGenotypingData && doesDatabaseSupportImportingUnknownVariants(sModule))
                 mongoTemplate.getDb().drop();	// if there is no genotyping data left and we are not working on a fixed list of variants then any other data is irrelevant
@@ -454,5 +462,172 @@ public class AbstractGenotypeImport {
         //     return Type.INDEL;
         // else
         //     return Type.MIXED;
+    }
+
+    public Integer importToMongo(T params) throws Exception {
+        long before = System.currentTimeMillis();
+        ProgressIndicator progress = ProgressIndicator.get(m_processID) != null ? ProgressIndicator.get(m_processID) : new ProgressIndicator(m_processID, new String[]{"Initializing import"}); // better to add it straight-away so the JSP doesn't get null in return when it checks for it (otherwise it will assume the process has ended)
+
+        Integer createdProject = null;
+        try {
+            MongoTemplate mongoTemplate = MongoTemplateManager.get(params.getModule());
+
+            if (m_processID == null)
+                m_processID = "IMPORT__" + params.getModule() + "__" + params.getProject() + "__" + params.getRun() + "__" + System.currentTimeMillis();
+
+            GenotypingProject project = mongoTemplate.findOne(new Query(Criteria.where(GenotypingProject.FIELDNAME_NAME).is(params.getProject())), GenotypingProject.class);
+
+            initReader(params);
+
+            //The ploidy level can be given by the user or guessed from the data file
+            Integer nPloidy = findPloidyLevel(mongoTemplate, params.getPloidy(), progress);
+
+            if (params.getImportMode() == 0 && project != null && nPloidy != null && project.getPloidyLevel() != nPloidy)
+                throw new Exception("Ploidy levels differ between existing (" + project.getPloidyLevel() + ") and provided (" + params.getPloidy() + ") data!");
+
+            MongoTemplateManager.lockProjectForWriting(params.getModule(), params.getProject());
+
+            cleanupBeforeImport(mongoTemplate, params.getModule(), project, params.getImportMode(), params.getRun());
+
+            if (project == null || params.getImportMode() > 0) {   // create it
+                project = createProject(mongoTemplate, params.getProject(), params.getTechnology(), nPloidy == null ? 0 : nPloidy, progress);
+                if (params.getImportMode() != 1)
+                    createdProject = project.getId();
+            }
+
+            // specific part
+            long count = doImport(params, mongoTemplate, project, progress, createdProject);
+
+            if (!project.getRuns().contains(params.getRun()))
+                project.getRuns().add(params.getRun());
+            mongoTemplate.save(project);
+
+            String importType = params.getClass().getSimpleName();
+            if (importType.endsWith("Parameters")) {
+                importType = importType.substring(0, importType.length() - "Parameters".length());
+            }
+            LOG.info(importType + " Import took " + (System.currentTimeMillis() - before) / 1000 + "s for " + count + " records");
+
+            return createdProject;
+
+        } catch (Exception e) {
+            LOG.error("Error", e);
+            progress.setError(e.getMessage());
+            return createdProject;
+        } finally {
+            closeResource();
+            if (m_fCloseContextAfterImport)
+            	MongoTemplateManager.closeApplicationContextIfOffline();
+            MongoTemplateManager.unlockProjectForWriting(params.getModule(), params.getProject());
+            if (progress.getError() == null && !progress.isAborted()) {
+                progress.addStep("Preparing database for searches");
+                progress.moveToNextStep();
+                MgdbDao.prepareDatabaseForSearches(params.getModule());
+            }
+        }
+    }
+
+    protected abstract long doImport(T params, MongoTemplate mongoTemplate, GenotypingProject project, ProgressIndicator progress, Integer createdProject) throws Exception;
+    protected abstract void initReader(T params) throws Exception;
+    protected abstract void closeResource() throws IOException;
+    protected Integer findPloidyLevel(MongoTemplate mongoTemplate, Integer nPloidyParam, ProgressIndicator progress) throws Exception {
+        return nPloidyParam;
+    }
+
+    protected GenotypingProject createProject(MongoTemplate mongoTemplate, String sProject, String sTechnology, Integer nPloidy, ProgressIndicator progress) throws IOException {
+        GenotypingProject project = new GenotypingProject(AutoIncrementCounter.getNextSequence(mongoTemplate, MongoTemplateManager.getMongoCollectionName(GenotypingProject.class)));
+        project.setName(sProject);
+//                project.setOrigin(2 /* Sequencing */);
+        project.setTechnology(sTechnology);
+        project.setPloidyLevel(nPloidy);
+        return project;
+    }
+
+    protected void createCallSetsSamplesIndividuals(Collection<String> biologicalMaterialIDs, MongoTemplate mongoTemplate, int projId, String sRun, Map<String, String> sampleToIndividualMap, ProgressIndicator progress) throws Exception {
+    	progress.setProgressDescription("Creating / updating encountered biological entities...");
+        m_providedIdToSampleMap = new HashMap<String /*individual*/, GenotypingSample>();
+        m_providedIdToCallsetMap = new HashMap<String /*individual*/, Callset>();
+        HashSet<Individual> indsToAdd = new HashSet<>();
+        HashSet<GenotypingSample> samplesToAdd = new HashSet<>(), samplesToUpdate = new HashSet<>();
+        boolean fDbAlreadyContainedIndividuals = mongoTemplate.findOne(new Query(), Individual.class) != null;
+        boolean fDbAlreadyContainedSamples = mongoTemplate.findOne(new Query(), GenotypingSample.class) != null;       
+        attemptPreloadingIndividuals(biologicalMaterialIDs, progress);
+
+        for (String bioEntityID : biologicalMaterialIDs) {
+        	GenotypingSample sample = null;
+        	if (sampleToIndividualMap != null) {	// provided bio-entities are actually samples
+        		if (fDbAlreadyContainedSamples) {
+        			sample = mongoTemplate.findById(bioEntityID, GenotypingSample.class);
+        			if (sample != null && !sampleToIndividualMap.isEmpty()) {	// the sample already exists in the DB, and a sample-to-individual mapping was provided for import: let's make sure individuals match
+        				String sProvidedIndividualForThisSample = determineIndividualNameAccountingForBrapiRelationships(sampleToIndividualMap, bioEntityID, progress);
+                    	if (sProvidedIndividualForThisSample != null && !sample.getIndividual().equals(sProvidedIndividualForThisSample)) {
+        	                progress.setError("Sample " + bioEntityID + " already exists and is attached to individual " + sample.getIndividual() + ", not " + sProvidedIndividualForThisSample);
+        	                return;
+        	            }
+        			}
+        		}
+        		if (sample == null) {
+                    String sIndividual = determineIndividualNameAccountingForBrapiRelationships(sampleToIndividualMap, bioEntityID, progress);
+                    if (sIndividual == null) {
+                        progress.setError("Unable to determine individual for sample " + bioEntityID);
+                        return;
+                    }
+        			sample = new GenotypingSample(bioEntityID, sIndividual);
+                    samplesToAdd.add(sample);
+        		}
+        		else
+        			samplesToUpdate.add(sample);
+        	}
+        	else {		// provided bio-entities are actually individuals
+        		sample = new GenotypingSample(bioEntityID + "-" + projId + "-" + sRun, bioEntityID);
+                samplesToAdd.add(sample);
+        	}
+
+            if (!fDbAlreadyContainedIndividuals || mongoTemplate.findById(sample.getIndividual(), Individual.class) == null)  // we don't have any population data so we don't need to update the Individual if it already exists
+                indsToAdd.add(new Individual(sample.getIndividual()));
+
+            m_providedIdToSampleMap.put(bioEntityID, sample);  // add a sample for this individual to the project
+            int callsetId = AutoIncrementCounter.getNextSequence(mongoTemplate, MongoTemplateManager.getMongoCollectionName(Callset.class));
+            Callset cs = new Callset(callsetId, sample, projId, sRun);
+            sample.getCallSets().add(cs);
+            m_providedIdToCallsetMap.put(bioEntityID, cs);
+        }
+
+        insertNewCallSetsSamplesIndividuals(mongoTemplate, indsToAdd, samplesToAdd, samplesToUpdate);
+        progress.setProgressDescription(null);
+    }
+
+    protected void insertNewCallSetsSamplesIndividuals(MongoTemplate mongoTemplate, Collection<Individual> indsToAdd, Collection<GenotypingSample> samplesToAdd, Collection<GenotypingSample> samplesToUpdate) throws InterruptedException {
+        final int importChunkSize = 1000;
+
+        // Sample update
+        List<Thread> callsetImportThreads = new ArrayList<>();
+        if (!samplesToUpdate.isEmpty()) {
+        	List<GenotypingSample> samplesToSave = new ArrayList<>(samplesToUpdate);
+            for (int j=0; j<Math.ceil((float) samplesToSave.size() / importChunkSize); j++) {
+            	final Collection<GenotypingSample> subList = samplesToSave.subList(j * importChunkSize, Math.min(samplesToSave.size(), (j + 1) * importChunkSize));
+		        Thread callsetImportThread = new Thread() {
+		            public void run() {
+		                for (GenotypingSample sample : subList)
+		                    mongoTemplate.save(sample);
+		            }
+		        };
+		        callsetImportThread.start();
+		        callsetImportThreads.add(callsetImportThread);
+            }
+        }
+
+        // Sample import
+        List<GenotypingSample> samplesToImport = new ArrayList<>(samplesToAdd);
+        for (int j=0; j<Math.ceil((float) samplesToAdd.size() / importChunkSize); j++)
+            mongoTemplate.insert(samplesToImport.subList(j * importChunkSize, Math.min(samplesToImport.size(), (j + 1) * importChunkSize)), GenotypingSample.class);
+        
+        // Individual import
+        List<Individual> individualsToImport = new ArrayList<>(indsToAdd);
+        for (int j=0; j<Math.ceil((float) individualsToImport.size() / importChunkSize); j++)
+            mongoTemplate.insert(individualsToImport.subList(j * importChunkSize, Math.min(individualsToImport.size(), (j + 1) * importChunkSize)), Individual.class);
+
+        for (Thread t : callsetImportThreads)
+        	t.join();
     }
 }

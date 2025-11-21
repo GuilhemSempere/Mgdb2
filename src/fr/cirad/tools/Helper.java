@@ -23,8 +23,10 @@ import java.math.BigInteger;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -38,11 +40,21 @@ import org.apache.log4j.Logger;
 import org.bson.Document;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.mapping.Field;
+import org.springframework.data.mongodb.core.query.Criteria;
+import org.springframework.data.mongodb.core.query.Query;
 
 import com.mongodb.BasicDBList;
 import com.mongodb.BasicDBObject;
+import com.mongodb.client.MongoCollection;
+import com.mongodb.client.MongoCursor;
 
+import fr.cirad.mgdb.exporting.IExportHandler;
+import fr.cirad.mgdb.model.mongo.maintypes.Assembly;
 import fr.cirad.mgdb.model.mongo.maintypes.GenotypingSample;
+import fr.cirad.mgdb.model.mongo.maintypes.VariantData;
+import fr.cirad.mgdb.model.mongo.subtypes.Callset;
+import fr.cirad.mgdb.model.mongo.subtypes.ReferencePosition;
+import fr.cirad.mgdb.model.mongo.subtypes.Run;
 import fr.cirad.mgdb.model.mongo.subtypes.VariantRunDataId;
 import fr.cirad.tools.mongo.MongoTemplateManager;
 
@@ -147,11 +159,10 @@ public class Helper {
             return new int[0];
         }
 
-        String[] splittedString = csvString.split(",");
-        int[] result = new int[splittedString.length];
-        for (int i = 0; i < result.length; i++) {
-            result[i] = Integer.parseInt(splittedString[i]);
-        }
+        String[] splitString = csvString.split(",");
+        int[] result = new int[splitString.length];
+        for (int i = 0; i < result.length; i++)
+            result[i] = Integer.parseInt(splitString[i]);
         return result;
     }
 
@@ -163,16 +174,16 @@ public class Helper {
      * @return the list
      */
     public static List<String> split(String stringToSplit, String delimiter) {
-        List<String> splittedString = new ArrayList<>();
+        List<String> splitString = new ArrayList<>();
         if (stringToSplit != null) {
             int pos = 0, end;
             while ((end = stringToSplit.indexOf(delimiter, pos)) >= 0) {
-                splittedString.add(stringToSplit.substring(pos, end));
+                splitString.add(stringToSplit.substring(pos, end));
                 pos = end + delimiter.length();
             }
-            splittedString.add(stringToSplit.substring(pos));
+            splitString.add(stringToSplit.substring(pos));
         }
-        return splittedString;
+        return splitString;
     }
 
     /**
@@ -374,7 +385,7 @@ public class Helper {
         return t -> map.putIfAbsent(keyExtractor.apply(t), Boolean.TRUE) == null;
     }
 
-    public static HashMap<Integer /*project*/, List<String /*runs*/>> getRunsByProjectInSampleCollection(Collection<GenotypingSample> samples) {
+    public static HashMap<Integer /*project*/, List<String /*runs*/>> getRunsByProjectInCallsetCollection(Collection<Callset> samples) {
 		HashMap<Integer, List<String>> runsByProject = new HashMap<>();
 		for (String projectAndRun : samples.stream().map(sp -> sp.getProjectId() + ID_SEPARATOR + sp.getRun()).distinct().collect(Collectors.toList())) {
 			String[] separateIDs = projectAndRun.split(ID_SEPARATOR);
@@ -417,6 +428,135 @@ public class Helper {
         return splitCollection;
     }
     
+    static private void mergeVariantQueryDBList(BasicDBObject matchStage, BasicDBList variantQueryDBList) {
+        Iterator<Object> queryItems = variantQueryDBList.iterator();
+        while (queryItems.hasNext()) {
+            BasicDBObject queryItem = (BasicDBObject)queryItems.next();
+            for (String key : queryItem.keySet()) {
+                if (queryItem.get(key) instanceof BasicDBObject) {
+                    BasicDBObject queryItemElement = (BasicDBObject)queryItem.get(key);
+                    if (matchStage.containsKey(key)) {
+                        if (matchStage.get(key) instanceof BasicDBObject) {
+                            BasicDBObject matchStageElement = (BasicDBObject)matchStage.get(key);
+                            for (String elementKey : queryItemElement.keySet()) {
+                                if (matchStageElement.containsKey(elementKey)) {
+                                    if (elementKey.equals("$lt") || elementKey.equals("$lte")) {
+                                        matchStageElement.put(elementKey, Math.min(matchStageElement.getLong(elementKey), queryItemElement.getLong(elementKey)));
+                                    } else if (elementKey.equals("$gt") || elementKey.equals("$gte")) {
+                                        matchStageElement.put(elementKey, Math.max(matchStageElement.getLong(elementKey), queryItemElement.getLong(elementKey)));
+                                    } else {
+                                        matchStageElement.put(elementKey, queryItemElement.get(elementKey));
+                                    }
+                                } else {
+                                    matchStageElement.put(elementKey, queryItemElement.get(elementKey));
+                                }
+                            }
+                        } else {
+                            matchStage.put(key, queryItemElement);
+                        }
+                    } else {
+                        matchStage.put(key, queryItemElement);
+                    }
+                } else {
+                    matchStage.put(key, queryItem.get(key));
+                }
+            }
+        }
+    }
+    
+    static public List<BasicDBObject> getIntervalQueries(int nIntervalCount, Collection<String> sequences, String variantType, long rangeMin, long rangeMax, BasicDBList variantQueryDBListToMerge) {
+        String refPosPathWithTrailingDot = Assembly.getThreadBoundVariantRefPosPath() + ".";
+        final int intervalSize = (int) Math.ceil(Math.max(1, ((rangeMax - rangeMin) / (nIntervalCount - 1))));
+
+        List<BasicDBObject> result = new ArrayList<>();
+        for (int i=0; i<nIntervalCount; i++) {
+            BasicDBObject initialMatchStage = new BasicDBObject();
+            if (sequences != null && !sequences.isEmpty())
+                initialMatchStage.put(refPosPathWithTrailingDot + ReferencePosition.FIELDNAME_SEQUENCE, new BasicDBObject("$in", sequences));
+            if (variantType != null)
+                initialMatchStage.put(VariantData.FIELDNAME_TYPE, variantType);
+            BasicDBObject positionSettings = new BasicDBObject();
+            positionSettings.put("$gte", rangeMin + (i*intervalSize));
+            positionSettings.put(i < nIntervalCount - 1 ? "$lt" : "$lte", i < nIntervalCount - 1 ? rangeMin + ((i+1)*intervalSize) : rangeMax);
+            String startSitePath = refPosPathWithTrailingDot + ReferencePosition.FIELDNAME_START_SITE;
+            initialMatchStage.put(startSitePath, positionSettings);
+            if (variantQueryDBListToMerge != null && !variantQueryDBListToMerge.isEmpty())
+                mergeVariantQueryDBList(initialMatchStage, variantQueryDBListToMerge);
+            result.add(initialMatchStage);
+        }
+        return result;
+    }
+    
+    static public boolean findDefaultRangeMinMax(String sModule, Collection<Integer> nProjectIDs, String tmpCollName /* if null, main variant coll is used*/, String variantType, Collection<String> sequences, Long start, Long end, Long minMaxresult[])
+    {
+        final MongoTemplate mongoTemplate = MongoTemplateManager.get(sModule);
+        String refPosPathWithTrailingDot = Assembly.getThreadBoundVariantRefPosPath() + ".";
+        
+        BasicDBList matchAndList = new BasicDBList();
+        if (tmpCollName == null && nProjectIDs != null && nProjectIDs.size() > 0)
+            matchAndList.add(new BasicDBObject(VariantData.FIELDNAME_RUNS + "." + Run.FIELDNAME_PROJECT_ID, new BasicDBObject("$in", nProjectIDs)));
+        if (sequences != null && !sequences.isEmpty())
+            matchAndList.add(new BasicDBObject(refPosPathWithTrailingDot + ReferencePosition.FIELDNAME_SEQUENCE, new BasicDBObject("$in", sequences)));
+        if ((start != null && start != -1) || (end != null && end != -1)) {
+            BasicDBObject posCrit = new BasicDBObject();
+            if (start != null && start != -1)
+                posCrit.put("$gte", start);
+            if (end != null && end != -1)
+                posCrit.put("$lte", end);
+            matchAndList.add(new BasicDBObject(refPosPathWithTrailingDot + ReferencePosition.FIELDNAME_START_SITE, posCrit));
+        }
+        if (variantType != null)
+            matchAndList.add(new BasicDBObject(VariantData.FIELDNAME_TYPE, variantType));
+        BasicDBObject match = new BasicDBObject("$match", new BasicDBObject("$and", matchAndList));
+        
+        BasicDBObject limit = new BasicDBObject("$limit", 1);
+        String startFieldPath = refPosPathWithTrailingDot + ReferencePosition.FIELDNAME_START_SITE;
+
+        MongoCollection<Document> usedVarColl = mongoTemplate.getCollection(tmpCollName == null ? mongoTemplate.getCollectionName(VariantData.class) : tmpCollName); 
+        if (minMaxresult[0] == null) {
+            BasicDBObject sort = new BasicDBObject("$sort", new BasicDBObject(startFieldPath, 1));
+            MongoCursor<Document> cursor = usedVarColl.aggregate(Arrays.asList(match, sort, limit)).iterator();
+            if (!cursor.hasNext())
+                return false;   // no variant found matching filter
+
+            Document aggResult = (Document) cursor.next();
+            minMaxresult[0] = (Long) Helper.readPossiblyNestedField(aggResult, startFieldPath, "; ", null);
+        }
+
+        if (minMaxresult[1] == null) {
+            BasicDBObject sort = new BasicDBObject("$sort", new BasicDBObject(startFieldPath, -1));
+            MongoCursor<Document> cursor = usedVarColl.aggregate(Arrays.asList(match, sort, limit)).collation(IExportHandler.collationObj).iterator();
+            if (!cursor.hasNext())
+                return false;   // no variant found matching filter
+
+            Document aggResult = (Document) cursor.next();
+            minMaxresult[1] = (Long) Helper.readPossiblyNestedField(aggResult, startFieldPath, "; ", null);
+        }
+        return true;
+    }
+    
+    /**
+     * 
+     * @param semiColonSeparatedVariantSetIDs (GA4GH IDs)
+     * @return
+     * @throws Exception
+     */
+    public static String[] extractModuleAndProjectIDsFromVariantSetIds(String semiColonSeparatedVariantSetIDs) throws Exception {
+    	String[] result = new String[2];
+    	for (String variantSetId : semiColonSeparatedVariantSetIDs.split(",")) {
+    		String info[] = Helper.getInfoFromId(variantSetId, 2);
+    		if (result[0] == null)
+    			result[0] = info[0];
+    		else if (!result[0].equals(info[0]))
+    			throw new Exception("Multiple projects are only supported within a single database!");
+    		if (result[1] == null)
+    			result[1] = info[1];
+    		else
+    			result[1] += "," + info[1];
+    	}
+    	return result;
+    }
+
     /**
      * retrieve info from an ID
      *
@@ -450,4 +590,46 @@ public class Helper {
 	    }
 	    return result.substring(0, result.length() - 1);
 	}
+//
+//	public static HashMap<Integer, List<String>> getRunsByProjectFromCallSetIDs(String sModule, Collection<Integer> callSetIDs) {
+////	    List<CallSet> callSets = MongoTemplateManager.get(sModule).findDistinct(new Query(Criteria.where(GenotypingSample.FIELDNAME_CALLSETS + "." + "_id").in(callSetIDs)), GenotypingSample.FIELDNAME_CALLSETS, GenotypingSample.class, CallSet.class);
+////	    return callSets.stream()
+////	        .collect(Collectors.groupingBy(
+////	            CallSet::getProjectId,
+////	            HashMap::new,
+////	            Collectors.mapping(CallSet::getRun,
+////	                Collectors.collectingAndThen(
+////	                    Collectors.toSet(),  // use toSet() to ensure distinct runs
+////	                    set -> new ArrayList<>(set)
+////	                )
+////	            )
+////	        ));
+//		return MgdbDao.findCallSetsByIDs(MongoTemplateManager.get(sModule), callSetIDs).stream().collect(Collectors.groupingBy(
+//            CallSet::getProjectId,
+//            HashMap::new,
+//            Collectors.mapping(CallSet::getRun,
+//                Collectors.collectingAndThen(
+//                    Collectors.toSet(),  // use toSet() to ensure distinct runs
+//                    set -> new ArrayList<>(set)
+//                )
+//            )
+//        ));
+//	}
+	
+
+	public static HashMap<Integer, List<String>> getRunsByProjectFromSampleIDs(String sModule, Collection<String> sampleIDs) {
+	    List<GenotypingSample> samples = MongoTemplateManager.get(sModule).find(new Query(Criteria.where("_id").in(sampleIDs)), GenotypingSample.class);
+	    return samples.stream().map(sp -> sp.getCallSets()).flatMap(Collection::stream)
+	        .collect(Collectors.groupingBy(
+	            Callset::getProjectId,
+	            HashMap::new,
+	            Collectors.mapping(Callset::getRun,
+	                Collectors.collectingAndThen(
+	                    Collectors.toSet(),  // use toSet() to ensure distinct runs
+	                    set -> new ArrayList<>(set)
+	                )
+	            )
+	        ));
+	}
+   
 }
