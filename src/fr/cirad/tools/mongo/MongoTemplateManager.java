@@ -33,7 +33,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
 import java.util.MissingResourceException;
-import java.util.NoSuchElementException;
 import java.util.Properties;
 import java.util.Set;
 import java.util.TreeMap;
@@ -53,6 +52,9 @@ import org.springframework.beans.BeansException;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.context.ApplicationContext;
 import org.springframework.context.ApplicationContextAware;
+import org.springframework.context.event.ApplicationEventMulticaster;
+import org.springframework.context.support.AbstractApplicationContext;
+import org.springframework.context.support.GenericXmlApplicationContext;
 import org.springframework.core.io.ClassPathResource;
 import org.springframework.data.mongodb.ClientSessionException;
 import org.springframework.data.mongodb.core.MongoTemplate;
@@ -110,7 +112,7 @@ public class MongoTemplateManager implements ApplicationContextAware {
     /**
      * The hidden databases.
      */
-    static private List<String> hiddenDatabases = new ArrayList<>();
+    static private Set<String> hiddenDatabases = new TreeSet<>();
 
     /**
      * The mongo clients.
@@ -209,6 +211,11 @@ public class MongoTemplateManager implements ApplicationContextAware {
                     }
                 }.start();
         }
+    }
+    
+    public static void closeApplicationContextIfOffline() throws Exception {
+    	if (applicationContext != null && applicationContext instanceof GenericXmlApplicationContext)
+    		((GenericXmlApplicationContext) applicationContext).close();
     }
 
     public static Map<String, MongoTemplate> getTemplateMap() {
@@ -337,9 +344,10 @@ public class MongoTemplateManager implements ApplicationContextAware {
 						MgdbDao.addRunsToVariantCollectionIfNecessary(mongoTemplate);
 						MgdbDao.ensureCustomMetadataIndexes(mongoTemplate);
 						MgdbDao.ensurePositionIndexes(mongoTemplate, Arrays.asList(mongoTemplate.getCollection(mongoTemplate.getCollectionName(VariantData.class))), false, false);	// FIXME: move to end of addRunsToVariantCollectionIfNecessary()
+						MgdbDao.createCallsetsFromSamplesIfNecessary(mongoTemplate);
 						MgdbDao.createGeneCacheIfNecessary(db, MgdbDao.COLLECTION_NAME_GENE_CACHE);
                     } catch (Exception e) {
-						LOG.error("Error while adding run info to variants collection for db " + db, e);
+						LOG.error("Error while adding ensuring data model is up to date for database " + db, e);
 					}
         		}
         	});
@@ -375,15 +383,16 @@ public class MongoTemplateManager implements ApplicationContextAware {
         MongoClient client = mongoClients.get(sHost);
         if (client == null)
             throw new IOException("Unknown host: " + sHost);
-
+        
         MongoTemplate mongoTemplate = new MongoTemplate(client, sDbName);
-        ((MappingMongoConverter) mongoTemplate.getConverter()).setMapKeyDotReplacement(DOT_REPLACEMENT_STRING);
-
+		mongoTemplate.setApplicationContext(applicationContext);
+		((MappingMongoConverter) mongoTemplate.getConverter()).setMapKeyDotReplacement(DOT_REPLACEMENT_STRING);
+        
         MgdbDao.ensurePositionIndexes(mongoTemplate, Arrays.asList(mongoTemplate.getCollection(mongoTemplate.getCollectionName(VariantData.class)), mongoTemplate.getCollection(mongoTemplate.getCollectionName(VariantRunData.class))), false, false);	// make sure we have indexes defined as required in v2.4
 
         return mongoTemplate;
     }
-
+    
     public enum ModuleAction {
     	CREATE, UPDATE_STATUS, DELETE;
     }
@@ -582,6 +591,17 @@ public class MongoTemplateManager implements ApplicationContextAware {
      * @return the mongo template
      */
     static public MongoTemplate get(String module) {
+    	if (applicationContext == null) {	// it we have not been initialized we are probably being invoked offline
+    		GenericXmlApplicationContext appContext = new GenericXmlApplicationContext("applicationContext-data.xml");
+    		appContext.getBean(AbstractApplicationContext.APPLICATION_EVENT_MULTICASTER_BEAN_NAME, ApplicationEventMulticaster.class).addApplicationListener(new fr.cirad.tools.SampleAfterConvertListener());
+            MongoTemplateManager.initialize(appContext);
+            MongoTemplate mongoTemplate = templateMap.get(module);
+            if (mongoTemplate == null) {
+                LOG.error("DATASOURCE '" + module + "' is not supported!");
+                System.exit(1);
+            }
+            return mongoTemplate;
+    	}
         return templateMap.get(module);
     }
 
@@ -775,8 +795,9 @@ public class MongoTemplateManager implements ApplicationContextAware {
 	public static void unlockProjectForWriting(String sModule, String sProject) {
 		Set<String> moduleLockedProjects = currentlyImportedProjects.get(sModule);
 		if (moduleLockedProjects == null)
-			throw new NoSuchElementException("There are currently no locked projects in database " + sModule);
-		moduleLockedProjects.remove(sProject);
+			LOG.error("There are currently no locked projects in database " + sModule);
+		else
+			moduleLockedProjects.remove(sProject);
 	}
 
 	public static void lockModuleForWriting(String sModule) {

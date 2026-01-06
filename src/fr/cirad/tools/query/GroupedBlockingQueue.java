@@ -26,19 +26,24 @@ public class GroupedBlockingQueue<E> implements BlockingQueue<E> {
 	
 	private HashMap<String, LinkedBlockingQueue<E>> taskGroups;
     private HashSet<String> shutdownGroups = new HashSet<>();
-    private int previousGroupIndex = -1; // Member variable to track the index of the previously selected group
+    private int previousGroupIndex = -1;
+    private final Object lock = new Object(); // Single lock object for all synchronization
 
     public GroupedBlockingQueue() {
         taskGroups = new HashMap<>();
     }
     
     public int getGroupCount() {
-    	return taskGroups.size();
+        synchronized (lock) {
+            return taskGroups.size();
+        }
     }
     
 	public void shutdown(String group) {
-		synchronized (shutdownGroups) {
-			shutdownGroups.add(group);
+		synchronized (lock) {
+			if (taskGroups.containsKey(group))
+				shutdownGroups.add(group);
+            lock.notifyAll(); // Wake up threads waiting in take()
 		}
 	}
 
@@ -62,25 +67,22 @@ public class GroupedBlockingQueue<E> implements BlockingQueue<E> {
         if (group == null)
             throw new NullPointerException("Group cannot be null");
         
-    	if (shutdownGroups.contains(group))
-            throw new RejectedExecutionException("Group " + group + " has already been shutdown (" + taskGroups.size() + ")");
+        synchronized (lock) {
+            if (shutdownGroups.contains(group))
+                throw new RejectedExecutionException("Group " + group + " has already been shutdown (" + taskGroups.size() + ")");
 
-    	synchronized (taskGroups) {
-	        LinkedBlockingQueue<E> groupQueue = taskGroups.computeIfAbsent(group, k -> {
-	    		shutdownGroups.remove(group);
-	    		return new LinkedBlockingQueue<>();
-	    	} );
-	        
-	        boolean offered = groupQueue.offer(element);
-	        if (offered) {
-	            synchronized (this) {
-	                notifyAll();
-	            }
-	            return true;
-	        }
+            LinkedBlockingQueue<E> groupQueue = taskGroups.computeIfAbsent(group, k -> {
+                shutdownGroups.remove(group);
+                return new LinkedBlockingQueue<>();
+            });
+            
+            boolean offered = groupQueue.offer(element);
+            if (offered) {
+                lock.notifyAll();
+                return true;
+            }
+            return false;
         }
-
-        return false;
     }
 
 	@Override
@@ -93,14 +95,14 @@ public class GroupedBlockingQueue<E> implements BlockingQueue<E> {
             throw new NullPointerException("Group cannot be null");
         }
 
-        synchronized (taskGroups) {
-	        LinkedBlockingQueue<E> groupQueue = taskGroups.computeIfAbsent(group, k -> {
-	        		shutdownGroups.remove(group);
-	        		return new LinkedBlockingQueue<>();
-	        	} );
-	        groupQueue.put(element);
+        synchronized (lock) {
+            LinkedBlockingQueue<E> groupQueue = taskGroups.computeIfAbsent(group, k -> {
+                shutdownGroups.remove(group);
+                return new LinkedBlockingQueue<>();
+            });
+            groupQueue.put(element);
+            lock.notifyAll();
         }
-        notifyAll();
     }
 
     @Override
@@ -112,63 +114,101 @@ public class GroupedBlockingQueue<E> implements BlockingQueue<E> {
         if (group == null)
             throw new NullPointerException("Group cannot be null");
 
-        synchronized (taskGroups) {
-	        LinkedBlockingQueue<E> groupQueue = taskGroups.computeIfAbsent(group, k -> {
-	    		shutdownGroups.remove(group);
-	    		return new LinkedBlockingQueue<>();
-	    	} );
-	        boolean offered = groupQueue.offer(element);
-	        if (offered) {
-	            notifyAll();
-	            return true;
-	        }
-	
-	        long endTime = System.currentTimeMillis() + unit.toMillis(timeout);
-	        long remainingTime = unit.toMillis(timeout);
-	
-	        while (remainingTime > 0) {
-	            wait(remainingTime);
-	            remainingTime = endTime - System.currentTimeMillis();
-	            offered = groupQueue.offer(element);
-	            if (offered) {
-	                notifyAll();
-	                return true;
-	            }
-	        }
+        synchronized (lock) {
+            LinkedBlockingQueue<E> groupQueue = taskGroups.computeIfAbsent(group, k -> {
+                shutdownGroups.remove(group);
+                return new LinkedBlockingQueue<>();
+            });
+            
+            boolean offered = groupQueue.offer(element);
+            if (offered) {
+                lock.notifyAll();
+                return true;
+            }
+
+            long endTime = System.currentTimeMillis() + unit.toMillis(timeout);
+            long remainingTime = unit.toMillis(timeout);
+
+            while (remainingTime > 0) {
+                lock.wait(remainingTime);
+                remainingTime = endTime - System.currentTimeMillis();
+                offered = groupQueue.offer(element);
+                if (offered) {
+                    lock.notifyAll();
+                    return true;
+                }
+            }
+            return false;
         }
-        return false;
     }
 
     @Override
     public E take() throws InterruptedException {
-        synchronized (this) {
-	        while (true) {
-	            for (int i = 0; i < taskGroups.size(); i++) {
-	        		int currentIndex = (previousGroupIndex + 1) % taskGroups.size(); // Calculate the index of the next group
-	        		String group = new ArrayList<>(taskGroups.keySet()).get(currentIndex);
-	                Queue<E> groupQueue = taskGroups.get(group);
-	                if (groupQueue == null) {	// it may have been removed because it ran empty
-	                	currentIndex = 0;
-		                group = taskGroups.keySet().iterator().next();
-		                groupQueue = taskGroups.get(group);
-	                }
-	                else {
-		                E element = groupQueue.poll();
-		                if (element != null) {
-		                    previousGroupIndex = currentIndex; // Update the previousGroupIndex variable
-//		                    LOG.debug("Took task from group: " + currentIndex + " / " + groupQueue.size());
-		                    return element;
-		                }
-		                else if (groupQueue.isEmpty() && shutdownGroups.contains(group)) {
-	                		shutdownGroups.remove(group);
-	                		taskGroups.remove(group);
-//		                	LOG.debug("Removed group: " + group + " / " + taskGroups.size());
-		                }
-	                }
-	            }
-//	            LOG.info("wait(): "  + taskGroups.values().stream().map(list -> list.size()).toList());
-                wait();
+        synchronized (lock) {
+            while (true) {
+                // First, clean up any empty shutdown groups
+                cleanupEmptyShutdownGroups();
+                
+                List<String> groups = new ArrayList<>(taskGroups.keySet());
+                if (groups.isEmpty()) {
+                    lock.wait();
+                    continue;
+                }
+
+                // Start from next group after the last one we took from
+                int startIndex = (previousGroupIndex + 1) % groups.size();
+                int currentIndex = startIndex;
+                
+                do {
+                    String group = groups.get(currentIndex);
+                    LinkedBlockingQueue<E> groupQueue = taskGroups.get(group);
+                    
+                    if (groupQueue != null) {
+                        E element = groupQueue.poll();
+                        if (element != null) {
+                            previousGroupIndex = currentIndex;
+                            // Check if queue is now empty and group is shutdown
+                            if (groupQueue.isEmpty() && shutdownGroups.contains(group)) {
+                                shutdownGroups.remove(group);
+                                taskGroups.remove(group);
+                                LOG.debug("Removed empty shutdown group after polling: " + group);
+                            }
+                            return element;
+                        }
+                    }
+                    
+                    currentIndex = (currentIndex + 1) % groups.size();
+                } while (currentIndex != startIndex);
+
+                // If we get here, we've checked all groups and found nothing
+                // Clean up again before waiting
+                cleanupEmptyShutdownGroups();
+                lock.wait();
             }
+        }
+    }
+    
+    /**
+     * Removes all groups that are both empty and marked for shutdown.
+     * Must be called while holding the lock.
+     */
+    private void cleanupEmptyShutdownGroups() {
+        if (shutdownGroups.isEmpty()) {
+            return;
+        }
+        
+        List<String> groupsToRemove = new ArrayList<>();
+        for (String group : shutdownGroups) {
+            LinkedBlockingQueue<E> groupQueue = taskGroups.get(group);
+            if (groupQueue != null && groupQueue.isEmpty()) {
+                groupsToRemove.add(group);
+            }
+        }
+        
+        for (String group : groupsToRemove) {
+            shutdownGroups.remove(group);
+            taskGroups.remove(group);
+            LOG.debug("Cleaned up empty shutdown group: " + group + " (remaining groups: " + taskGroups.size() + ")");
         }
     }
 
@@ -177,94 +217,110 @@ public class GroupedBlockingQueue<E> implements BlockingQueue<E> {
         long endTime = System.currentTimeMillis() + unit.toMillis(timeout);
         long remainingTime = unit.toMillis(timeout);
 
-        while (remainingTime > 0) {
-            E element = poll();
-            if (element != null) {
-                return element;
+        synchronized (lock) {
+            while (remainingTime > 0) {
+                E element = pollInternal();
+                if (element != null) {
+                    return element;
+                }
+
+                lock.wait(remainingTime);
+                remainingTime = endTime - System.currentTimeMillis();
             }
-
-            wait(remainingTime);
-
-            remainingTime = endTime - System.currentTimeMillis();
+            return null;
         }
-
-        return null;
     }
 
     @Override
     public int size() {
-        int totalSize = 0;
-        for (Queue<E> groupQueue : taskGroups.values()) {
-            totalSize += groupQueue.size();
+        synchronized (lock) {
+            int totalSize = 0;
+            for (Queue<E> groupQueue : taskGroups.values()) {
+                totalSize += groupQueue.size();
+            }
+            return totalSize;
         }
-        return totalSize;
     }
 
     @Override
     public boolean isEmpty() {
-        for (Queue<E> groupQueue : taskGroups.values()) {
-            if (!groupQueue.isEmpty()) {
-                return false;
+        synchronized (lock) {
+            for (Queue<E> groupQueue : taskGroups.values()) {
+                if (!groupQueue.isEmpty()) {
+                    return false;
+                }
             }
+            return true;
         }
-        return true;
     }
 
     @Override
     public boolean contains(Object o) {
-        for (Queue<E> groupQueue : taskGroups.values()) {
-            if (groupQueue.contains(o)) {
-                return true;
+        synchronized (lock) {
+            for (Queue<E> groupQueue : taskGroups.values()) {
+                if (groupQueue.contains(o)) {
+                    return true;
+                }
             }
+            return false;
         }
-        return false;
     }
 
     @Override
     public Iterator<E> iterator() {
-        List<E> elements = new ArrayList<>();
-        for (Queue<E> groupQueue : taskGroups.values()) {
-            elements.addAll(groupQueue);
+        synchronized (lock) {
+            List<E> elements = new ArrayList<>();
+            for (Queue<E> groupQueue : taskGroups.values()) {
+                elements.addAll(groupQueue);
+            }
+            return elements.iterator();
         }
-        return elements.iterator();
     }
 
     @Override
     public Object[] toArray() {
-        List<E> elements = new ArrayList<>();
-        for (Queue<E> groupQueue : taskGroups.values()) {
-            elements.addAll(groupQueue);
+        synchronized (lock) {
+            List<E> elements = new ArrayList<>();
+            for (Queue<E> groupQueue : taskGroups.values()) {
+                elements.addAll(groupQueue);
+            }
+            return elements.toArray();
         }
-        return elements.toArray();
     }
 
     @Override
     public <T> T[] toArray(T[] a) {
-        List<E> elements = new ArrayList<>();
-        for (Queue<E> groupQueue : taskGroups.values()) {
-            elements.addAll(groupQueue);
+        synchronized (lock) {
+            List<E> elements = new ArrayList<>();
+            for (Queue<E> groupQueue : taskGroups.values()) {
+                elements.addAll(groupQueue);
+            }
+            return elements.toArray(a);
         }
-        return elements.toArray(a);
     }
 
     @Override
     public boolean remove(Object o) {
-        for (Queue<E> groupQueue : taskGroups.values()) {
-            if (groupQueue.remove(o)) {
-                return true;
+        synchronized (lock) {
+            for (Queue<E> groupQueue : taskGroups.values()) {
+                if (groupQueue.remove(o)) {
+                    return true;
+                }
             }
+            return false;
         }
-        return false;
     }
 
     @Override
     public boolean containsAll(Collection<?> c) {
-        for (Object element : c) {
-            if (!contains(element)) {
-                return false;
+        synchronized (lock) {
+            for (Object element : c) {
+                if (!contains(element)) {
+                    return false;
+                }
             }
+            return true;
         }
-        return true;
     }
 
     @Override
@@ -284,8 +340,11 @@ public class GroupedBlockingQueue<E> implements BlockingQueue<E> {
 
     @Override
     public void clear() {
-    	shutdownGroups.clear();
-    	taskGroups.clear();
+        synchronized (lock) {
+            shutdownGroups.clear();
+            taskGroups.clear();
+            lock.notifyAll();
+        }
     }
 
     @Override
@@ -300,41 +359,52 @@ public class GroupedBlockingQueue<E> implements BlockingQueue<E> {
 
     @Override
     public int drainTo(Collection<? super E> c, int maxElements) {
-        int elementsCount = 0;
-
-        for (Queue<E> groupQueue : taskGroups.values()) {
-            while (elementsCount < maxElements) {
-                E element = groupQueue.poll();
-                if (element == null) {
-                    break;
+        synchronized (lock) {
+            int elementsCount = 0;
+            for (Queue<E> groupQueue : taskGroups.values()) {
+                while (elementsCount < maxElements) {
+                    E element = groupQueue.poll();
+                    if (element == null) {
+                        break;
+                    }
+                    c.add(element);
+                    elementsCount++;
                 }
-                c.add(element);
-                elementsCount++;
             }
+            return elementsCount;
         }
-
-        return elementsCount;
     }
 
     @Override
     public Spliterator<E> spliterator() {
-        List<E> elements = new ArrayList<>();
-        for (Queue<E> groupQueue : taskGroups.values()) {
-            elements.addAll(groupQueue);
+        synchronized (lock) {
+            List<E> elements = new ArrayList<>();
+            for (Queue<E> groupQueue : taskGroups.values()) {
+                elements.addAll(groupQueue);
+            }
+            return elements.spliterator();
         }
-        return elements.spliterator();
     }
 
     @Override
-	public boolean removeIf(Predicate<? super E> filter) {
-	    boolean removed = false;
-	    for (Queue<E> groupQueue : taskGroups.values()) {
-	        removed |= groupQueue.removeIf(filter);
-	    }
-	    return removed;
-	}
+    public boolean removeIf(Predicate<? super E> filter) {
+        synchronized (lock) {
+            boolean removed = false;
+            for (Queue<E> groupQueue : taskGroups.values()) {
+                removed |= groupQueue.removeIf(filter);
+            }
+            return removed;
+        }
+    }
 
-	public E poll() {
+    public E poll() {
+        synchronized (lock) {
+            return pollInternal();
+        }
+    }
+
+    private E pollInternal() {
+        // Must be called while holding lock
         for (Queue<E> groupQueue : taskGroups.values()) {
             E element = groupQueue.poll();
             if (element != null) {
@@ -345,37 +415,45 @@ public class GroupedBlockingQueue<E> implements BlockingQueue<E> {
     }
 
     public E peek() {
-        for (Queue<E> groupQueue : taskGroups.values()) {
-            E element = groupQueue.peek();
-            if (element != null) {
-                return element;
+        synchronized (lock) {
+            for (Queue<E> groupQueue : taskGroups.values()) {
+                E element = groupQueue.peek();
+                if (element != null) {
+                    return element;
+                }
             }
+            return null;
         }
-        return null;
     }
 
     @Override
     public E remove() {
-        for (Queue<E> groupQueue : taskGroups.values()) {
-            E element = groupQueue.poll();
-            if (element != null) {
-                return element;
+        synchronized (lock) {
+            for (Queue<E> groupQueue : taskGroups.values()) {
+                E element = groupQueue.poll();
+                if (element != null) {
+                    return element;
+                }
             }
+            throw new NoSuchElementException();
         }
-        throw new NoSuchElementException();
     }
 
     public E element() {
-        for (Queue<E> groupQueue : taskGroups.values()) {
-            E element = groupQueue.peek();
-            if (element != null) {
-                return element;
+        synchronized (lock) {
+            for (Queue<E> groupQueue : taskGroups.values()) {
+                E element = groupQueue.peek();
+                if (element != null) {
+                    return element;
+                }
             }
+            throw new NoSuchElementException();
         }
-        throw new NoSuchElementException();
     }
     
     public List<Integer> getGroupQueueCounts() {
-    	return taskGroups.values().stream().map(g -> g.size()).toList();
+        synchronized (lock) {
+            return taskGroups.values().stream().map(g -> g.size()).toList();
+        }
     }
 }

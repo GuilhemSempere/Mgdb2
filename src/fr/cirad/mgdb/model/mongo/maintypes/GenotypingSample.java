@@ -16,47 +16,43 @@
  *******************************************************************************/
 package fr.cirad.mgdb.model.mongo.maintypes;
 
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import org.springframework.data.annotation.Id;
+import org.springframework.data.annotation.Transient;
 import org.springframework.data.annotation.TypeAlias;
 import org.springframework.data.mongodb.core.mapping.Document;
 import org.springframework.data.mongodb.core.mapping.Field;
 
+import fr.cirad.mgdb.model.mongo.subtypes.Callset;
+
 /**
  * The Class Sample.
  */
-@Document(collection = "samples")
-@TypeAlias("GS")
+@Document(collection = "samplesAndCallSets")
+@TypeAlias("SC")
 public class GenotypingSample {
 
-	public final static String FIELDNAME_INDEX = "ix";
-	public final static String FIELDNAME_NAME = "nm";
 	public final static String FIELDNAME_INDIVIDUAL = "in";
-	public final static String FIELDNAME_PROJECT_ID = "pj";
-	public final static String FIELDNAME_RUN = "rn";
+    public final static String FIELDNAME_CALLSETS = "cs";
     public final static String SECTION_ADDITIONAL_INFO = "ai";
-    
+
 	/** The sample id. */
 	@Id
-	private int id;
+	private String id;
 
-	/** The sample name. */
-	@Field(FIELDNAME_NAME)
-	private String sampleName;
-		
 	/** The individual. */
 	@Field(FIELDNAME_INDIVIDUAL)
 	private String individual;
+
+	/** The callsets. */
+	@Field(FIELDNAME_CALLSETS)
+	private HashSet<Callset> callSets = new HashSet<>();
 	
-	/** The projectId. */
-	@Field(FIELDNAME_PROJECT_ID)
-	private int projectId;
-	
-	/** The run. */
-	@Field(FIELDNAME_RUN)
-	private String run;
-        
-    /**
+	@Transient
+	private boolean detached = false;
+
+	/**
      * The additional info.
      */
     @Field(SECTION_ADDITIONAL_INFO)
@@ -66,54 +62,36 @@ public class GenotypingSample {
 	 * Instantiates a new GenotypingSample.
 	 *
 	 * @param sampleId the sample id
-	 * @param projectId the project id
-	 * @param run the run name
 	 * @param individual the individual
-	 * @param sampleName the sampleName
 	 */
-	public GenotypingSample(int sampleId, int projectId, String run, String individual, String sampleName) {
+	public GenotypingSample(String sampleId, String individual) {
 		this.id = sampleId;
-		this.projectId = projectId;
-		this.run = run;
 		this.individual = individual;
-		this.sampleName = sampleName != null ? sampleName : getIndividual() + "-" + getProjectId() + "-" + getRun();
-	}
-	
-	/**
-	 * Instantiates a new GenotypingSample.
-	 *
-	 * @param sampleId the sample id
-	 * @param projectId the project id
-	 * @param run the run name
-	 * @param individual the individual
-	 */
-	public GenotypingSample(int sampleId, int projectId, String run, String individual) {
-		this(sampleId, projectId, run, individual, null);
 	}
 
-	public Integer getProjectId() {
-		return projectId;
+	public HashSet<Callset> getCallSets() {
+		return callSets;
 	}
 
-//	public void setProjectId(Integer projectId) {
-//		this.projectId = projectId;
-//	}
-
-	public String getRun() {
-		return run;
+	public void setCallSets(HashSet<Callset> callSets) {
+		this.callSets = callSets;
 	}
-
-//	public void setRun(String run) {
-//		this.run = run;
-//	}
 
 	public String getIndividual() {
-		return individual;
+		return detached ? getId().toString() : individual;
 	}
 
 //	public void setIndividual(String individual) {
 //		this.individual = individual;
 //	}
+
+    public boolean isDetached() {
+		return detached;
+	}
+
+	public void setDetached(boolean detached) {
+		this.detached = detached;
+	}
 
     public LinkedHashMap<String, Object> getAdditionalInfo() {
         if (additionalInfo == null) {
@@ -125,7 +103,11 @@ public class GenotypingSample {
     public void setAdditionalInfo(LinkedHashMap<String, Object> additionalInfo) {
         this.additionalInfo = additionalInfo;
     }
-	
+
+    public void detachFromIndividual() {
+    	detached = true;
+    }
+
 	@Override
 	public boolean equals(Object o)
 	{
@@ -135,34 +117,24 @@ public class GenotypingSample {
 		if (o == null || !(o instanceof GenotypingSample))
 			return false;
 		
-		boolean f1 = getIndividual() == getIndividual() || (getIndividual() != null && getIndividual().equals(getIndividual()));
-		boolean f2 = getProjectId() == getProjectId() || (getProjectId() != null && getProjectId().equals(getProjectId()));
-		boolean f3 = getRun() == getRun() || (getRun() != null && getRun().equals(getRun()));
-		return f1 && f2 && f3;
+		boolean f1 = getIndividual() == ((GenotypingSample) o).getIndividual() || (getIndividual() != null && getIndividual().equals(((GenotypingSample) o).getIndividual()));
+        return f1;
 	}
 
     public GenotypingSample() {
     }
 
-	public String getSampleName() {
-		return sampleName;
-	}
-
-	public void setSampleName(String sampleName) {
-		this.sampleName = sampleName;
-	}
+    @Override
+    public String toString() {
+        return id;
+    }
 
     @Override
     public int hashCode() {
         return toString().hashCode();
     }
-	
-	public String toString()
-	{
-		return getSampleName() + "(" + individual + "&curren;" + projectId + "&curren;" + run + ")";
-	}
 
-	public Integer getId() {
+	public String getId() {
 		return id;
 	}
 }

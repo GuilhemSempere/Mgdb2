@@ -36,6 +36,7 @@ import org.springframework.core.type.filter.AssignableTypeFilter;
 
 import fr.cirad.mgdb.exporting.IExportHandler;
 import fr.cirad.mgdb.model.mongo.maintypes.GenotypingSample;
+import fr.cirad.mgdb.model.mongo.subtypes.Callset;
 import fr.cirad.tools.ProgressIndicator;
 import fr.cirad.tools.mgdb.VariantQueryWrapper;
 
@@ -65,14 +66,15 @@ public abstract class AbstractMarkerOrientedExportHandler implements IExportHand
      * @param varQueryWrapper variant query wrapper
      * @param markerCount number of variants to export
      * @param markerSynonyms the marker synonyms
-     * @param individuals List of the individuals in each group
+     * @param individualsByPop List of the individuals in each group
+     * @param workWithSamples if true export sample names, otherwise individual names
      * @param annotationFieldThresholds the annotation field thresholds for each group
-     * @param samplesToExport the samples to export genotyping data for
+     * @param callSetsToExport the samples to export genotyping data for
      * @param individualMetadataFieldsToExport metadata fields to export for individuals
      * @param readyToExportFiles files to export along with the genotyping data
      * @throws Exception the exception
      */
-    abstract public void exportData(OutputStream outputStream, String sModule, Integer nAssemblyId, String sExportingUser, ProgressIndicator progress, String tmpVarCollName, VariantQueryWrapper varQueryWrapper, long markerCount, Map<String, String> markerSynonyms, Map<String, Collection<String>> individuals, Map<String, HashMap<String, Float>> annotationFieldThresholds, Collection<GenotypingSample> samplesToExport, Collection<String> individualMetadataFieldsToExport, Map<String, InputStream> readyToExportFiles) throws Exception;
+    abstract public void exportData(OutputStream outputStream, String sModule, Integer nAssemblyId, String sExportingUser, ProgressIndicator progress, String tmpVarCollName, VariantQueryWrapper varQueryWrapper, long markerCount, Map<String, String> markerSynonyms, Map<String, Collection<String>> individualsByPop, boolean workWithSamples, Map<String, HashMap<String, Float>> annotationFieldThresholds, Collection<Callset> callSetsToExport, Collection<String> individualMetadataFieldsToExport, Map<String, InputStream> readyToExportFiles) throws Exception;
 
     /**
 	 * Gets the marker oriented export handlers.
@@ -165,4 +167,15 @@ public abstract class AbstractMarkerOrientedExportHandler implements IExportHand
 	public void setTmpFolder(String tmpFolderPath) {
 		this.tmpFolderPath = tmpFolderPath;	
 	}
+	
+	@Override
+	public String getMetadataContentsPrefix() {
+		return "individual";
+	}
+
+	@Override
+	public String getMetadataFileExtension() {
+		return "tsv";
+	}
+
 }

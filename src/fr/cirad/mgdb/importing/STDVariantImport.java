@@ -16,10 +16,7 @@
  *******************************************************************************/
 package fr.cirad.mgdb.importing;
 
-import java.io.BufferedReader;
-import java.io.File;
-import java.io.FileReader;
-import java.io.FileWriter;
+import java.io.*;
 import java.nio.charset.Charset;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -30,8 +27,8 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.Scanner;
 
+import fr.cirad.mgdb.importing.parameters.ImportParameters;
 import org.apache.log4j.Logger;
-import org.springframework.context.support.GenericXmlApplicationContext;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
@@ -47,7 +44,7 @@ import fr.cirad.tools.ProgressIndicator;
 import fr.cirad.tools.mongo.AutoIncrementCounter;
 import fr.cirad.tools.mongo.MongoTemplateManager;
 
-public class STDVariantImport extends RefactoredImport {
+public class STDVariantImport extends RefactoredImport<ImportParameters> {
 	
 	private static final Logger LOG = Logger.getLogger(STDVariantImport.class);
 	
@@ -105,23 +102,7 @@ public class STDVariantImport extends RefactoredImport {
 			ProgressIndicator.registerProgressIndicator(progress);
 		}
 		
-		GenericXmlApplicationContext ctx = null;
 		MongoTemplate mongoTemplate = MongoTemplateManager.get(sModule);
-		if (mongoTemplate == null) { // we are probably being invoked offline
-			ctx = new GenericXmlApplicationContext("applicationContext-data.xml");
-
-			MongoTemplateManager.initialize(ctx);
-			mongoTemplate = MongoTemplateManager.get(sModule);
-			if (mongoTemplate == null)
-			{	// we are probably being invoked offline
-				ctx = new GenericXmlApplicationContext("applicationContext-data.xml");
-	
-				MongoTemplateManager.initialize(ctx);
-				mongoTemplate = MongoTemplateManager.get(sModule);
-				if (mongoTemplate == null)
-					throw new Exception("DATASOURCE '" + sModule + "' is not supported!");
-			}
-		}
 
 		File genotypeFile = new File(mainFilePath);
 		List<File> sortedTempFiles = null;
@@ -172,6 +153,7 @@ public class STDVariantImport extends RefactoredImport {
 			
 			try
 			{
+				progress.setPercentageEnabled(true);
 				progress.addStep("Creating temp files to sort in batch");
 				progress.moveToNextStep();			
 				sortedTempFiles = ExternalSort.sortInBatch(in, genotypeFile.length(), comparator, ExternalSort.DEFAULTMAXTEMPFILES, Charset.defaultCharset(), sortedFile.getParentFile(), false, 0, true, progress);
@@ -256,7 +238,10 @@ public class STDVariantImport extends RefactoredImport {
 			
 
             // Create the necessary samples
-            createSamples(mongoTemplate, project.getId(), sRun, sampleToIndividualMap, orderedIndividualToPopulationMap, progress);
+            //ImportParameters only used here in the createCallSetsSamplesIndividuals, only giving useful arguments)
+//            ImportParameters params = new ImportParameters(sModule, sProject, sRun, null, null, null, sampleToIndividualMap, false, 0);
+            createCallSetsSamplesIndividuals(new ArrayList<>(orderedIndividualToPopulationMap.keySet()), mongoTemplate, project.getId(), sRun, sampleToIndividualMap, progress);
+
             if (progress.getError() != null || progress.isAborted())
                 return createdProject;
             
@@ -307,8 +292,22 @@ public class STDVariantImport extends RefactoredImport {
                 MgdbDao.prepareDatabaseForSearches(sModule);
             }
 
-			if (ctx != null)
-				ctx.close();
+            MongoTemplateManager.closeApplicationContextIfOffline();
 		}
 	}
+
+    @Override
+    protected long doImport(ImportParameters params, MongoTemplate mongoTemplate, GenotypingProject project, ProgressIndicator progress, Integer createdProject) throws Exception {
+        return 0;
+    }
+
+    @Override
+    protected void initReader(ImportParameters params) throws Exception {
+
+    }
+
+    @Override
+    protected void closeResource() throws IOException {
+
+    }
 }
