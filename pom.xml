@@ -3,7 +3,7 @@
     <modelVersion>4.0.0</modelVersion>
     
     <properties>
-	    <project.version>2.10-RELEASE</project.version>
+      <project.version>2.11-RELEASE</project.version>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <maven.compiler.source>17</maven.compiler.source>
@@ -11,7 +11,7 @@
     </properties>
     
     <name>Mongo Genotype DataBase</name>
-	<packaging>jar</packaging>
+  <packaging>jar</packaging>
     <groupId>fr.cirad</groupId>
     <artifactId>Mgdb2</artifactId>
     <version>${project.version}</version>        
@@ -23,107 +23,95 @@
     </developers>
 
     <dependencies>
- 		<dependency>
-    		<groupId>javax.servlet</groupId>
-    		<artifactId>javax.servlet-api</artifactId>
-    		<version>4.0.1</version>
-    		<scope>provided</scope>
-    	</dependency>
+    <dependency>
+        <groupId>javax.servlet</groupId>
+        <artifactId>javax.servlet-api</artifactId>
+        <version>4.0.1</version>
+        <scope>provided</scope>
+      </dependency>
 
-		<dependency>
-		    <groupId>com.opencsv</groupId>
-		    <artifactId>opencsv</artifactId>
-		    <version>5.4</version>
-		</dependency>
-
-		<dependency>
-		    <groupId>com.squareup.okhttp3</groupId>
-		    <artifactId>okhttp</artifactId>
-		    <version>3.14.9</version>
-		</dependency>
-		<dependency>
-		    <groupId>com.squareup.retrofit2</groupId>
-		    <artifactId>retrofit</artifactId>
-		    <version>2.9.0</version>
-		</dependency>
-		<dependency>
-		    <groupId>com.squareup.retrofit2</groupId>
-		    <artifactId>converter-jackson</artifactId>
-		    <version>2.1.0</version>
-		</dependency>
-		<dependency>
-		    <groupId>org.codehaus.jackson</groupId>
-		    <artifactId>jackson-core-asl</artifactId>
-			<version>1.9.13</version>
-		</dependency>
-
-		<dependency>
-			<groupId>org.springframework.security</groupId>
-			<artifactId>spring-security-core</artifactId>
-			<version>5.6.10</version>
-		    <exclusions>
-			    <exclusion>
-					<groupId>org.springframework</groupId>
-					<artifactId>spring-core</artifactId>
-	  	        </exclusion>
-			    <exclusion>
-					<groupId>org.springframework</groupId>
-					<artifactId>spring-context</artifactId>
-	  	        </exclusion>
-			    <exclusion>
-					<groupId>org.springframework</groupId>
-					<artifactId>spring-beans</artifactId>
-	  	        </exclusion>
-	  	        <exclusion>
-					<groupId>org.springframework</groupId>
-					<artifactId>spring-aop</artifactId>
-	  	        </exclusion>
-	  	        <exclusion>
-					<groupId>org.springframework</groupId>
-					<artifactId>spring-jdbc</artifactId>
-	  	        </exclusion>
-	  	        <exclusion>
-					<groupId>org.springframework</groupId>
-					<artifactId>spring-tx</artifactId>
-	  	        </exclusion>
-		    </exclusions>
-		</dependency>
-    
-		<dependency>
-		    <groupId>org.slf4j</groupId>
-		    <artifactId>slf4j-log4j12</artifactId>
-		    <version>1.7.22</version>
-		</dependency>
-
-		<dependency>
-		    <groupId>javax.ejb</groupId>
-		    <artifactId>ejb-api</artifactId>
-		    <version>3.0</version>
-		</dependency>
-
-        <dependency>
-            <groupId>log4j</groupId>
-            <artifactId>log4j</artifactId>
-            <version>1.2.17</version>
+    <dependency>
+        <groupId>com.opencsv</groupId>
+        <artifactId>opencsv</artifactId>
+        <version>5.4</version>
             <exclusions>
                 <exclusion>
-                    <groupId>com.sun.jmx</groupId>
-                    <artifactId>jmxri</artifactId>
-                </exclusion>
-                <exclusion>
-                    <groupId>javax.jms</groupId>
-                    <artifactId>jms</artifactId>
-                </exclusion>
-                <exclusion>
-                    <groupId>com.sun.jdmk</groupId>
-                    <artifactId>jmxtools</artifactId>
-                </exclusion>
-                <exclusion>
-                    <groupId>javax.mail</groupId>
-                    <artifactId>mail</artifactId>
+                    <groupId>commons-logging</groupId>
+                    <artifactId>commons-logging</artifactId>
                 </exclusion>
             </exclusions>
-        </dependency>
+    </dependency>
+
+    <dependency>
+        <groupId>com.squareup.okhttp3</groupId>
+        <artifactId>okhttp</artifactId>
+        <version>3.14.9</version>
+    </dependency>
+    <dependency>
+        <groupId>com.squareup.retrofit2</groupId>
+        <artifactId>retrofit</artifactId>
+        <version>2.9.0</version>
+    </dependency>
+    <dependency>
+        <groupId>com.squareup.retrofit2</groupId>
+        <artifactId>converter-jackson</artifactId>
+        <version>2.1.0</version>
+    </dependency>
+    <dependency>
+        <groupId>org.codehaus.jackson</groupId>
+        <artifactId>jackson-core-asl</artifactId>
+      <version>1.9.13</version>
+    </dependency>
+
+    <dependency>
+      <groupId>org.springframework.security</groupId>
+      <artifactId>spring-security-core</artifactId>
+      <version>5.6.10</version>
+        <exclusions>
+          <exclusion>
+          <groupId>org.springframework</groupId>
+          <artifactId>spring-core</artifactId>
+              </exclusion>
+          <exclusion>
+          <groupId>org.springframework</groupId>
+          <artifactId>spring-context</artifactId>
+              </exclusion>
+          <exclusion>
+          <groupId>org.springframework</groupId>
+          <artifactId>spring-beans</artifactId>
+              </exclusion>
+              <exclusion>
+          <groupId>org.springframework</groupId>
+          <artifactId>spring-aop</artifactId>
+              </exclusion>
+              <exclusion>
+          <groupId>org.springframework</groupId>
+          <artifactId>spring-jdbc</artifactId>
+              </exclusion>
+              <exclusion>
+          <groupId>org.springframework</groupId>
+          <artifactId>spring-tx</artifactId>
+              </exclusion>
+        </exclusions>
+    </dependency>
+    
+    <dependency>
+        <groupId>javax.ejb</groupId>
+        <artifactId>ejb-api</artifactId>
+        <version>3.0</version>
+    </dependency>
+    
+    <dependency>
+        <groupId>org.slf4j</groupId>
+        <artifactId>slf4j-reload4j</artifactId>
+        <version>1.7.36</version>
+    </dependency>
+    <dependency>
+        <groupId>ch.qos.reload4j</groupId>
+        <artifactId>reload4j</artifactId>
+        <version>1.2.19</version>
+    </dependency>
+
         <dependency>
             <groupId>com.github.samtools</groupId>
             <artifactId>htsjdk</artifactId>
@@ -132,6 +120,10 @@
                 <exclusion>
                     <groupId>org.apache.commons</groupId>
                     <artifactId>commons-compress</artifactId>
+                </exclusion>
+                <exclusion>
+          <groupId>commons-logging</groupId>
+          <artifactId>commons-logging</artifactId>
                 </exclusion>
                 <exclusion>
                     <groupId>org.tukaani</groupId>
@@ -162,11 +154,11 @@
             <version>2.6</version>
         </dependency>
         
-		<dependency>
-		  <groupId>commons-io</groupId>
-		  <artifactId>commons-io</artifactId>
-		  <version>2.11.0</version>
-		</dependency>
+    <dependency>
+      <groupId>commons-io</groupId>
+      <artifactId>commons-io</artifactId>
+      <version>2.11.0</version>
+    </dependency>
 
         <dependency>
             <groupId>org.apache.commons</groupId>
@@ -185,6 +177,10 @@
             <version>4.1.12</version>
             <exclusions>
                 <exclusion>
+                    <groupId>org.slf4j</groupId>
+                    <artifactId>slf4j-api</artifactId>
+                </exclusion>
+                <exclusion>
                     <groupId>org.mongodb</groupId>
                     <artifactId>mongodb-driver-core</artifactId>
                 </exclusion>
@@ -194,14 +190,20 @@
         <dependency>
             <groupId>fr.cirad</groupId>
             <artifactId>GenotypeFileManipulation</artifactId>
-            <version>0.1.3-RELEASE</version>
+            <version>0.1.4-RELEASE</version>
         </dependency>
         
         <dependency>
             <groupId>fr.cirad</groupId>
             <artifactId>Mgdb2BrapiModel</artifactId>
-            <version>1.0.7-RELEASE</version>
+            <version>1.0.8-RELEASE</version>
         </dependency>
+
+    <dependency>
+      <groupId>org.snpeff</groupId>
+      <artifactId>SnpEff</artifactId>
+      <version>5.1-lightened</version>
+    </dependency>
 
         <dependency>
             <groupId>org.opencb.ga4gh</groupId>
@@ -241,22 +243,22 @@
         </dependency> 
     </dependencies>
 
-	<repositories>
-		<repository>
-			<id>central</id>
-			<url>http://central.maven.org/maven2/</url>
-		</repository>
-		<repository>
-			<id>sonatype</id>
-			<url>https://oss.sonatype.org/content/repositories/releases/</url>
-		</repository>
-		<repository>
-			<id>Spring Plugins</id>
-			<url>http://repo.spring.io/plugins-release/</url>
-		</repository>
+  <repositories>
+    <repository>
+      <id>central</id>
+      <url>http://central.maven.org/maven2/</url>
+    </repository>
+    <repository>
+      <id>sonatype</id>
+      <url>https://oss.sonatype.org/content/repositories/releases/</url>
+    </repository>
+    <repository>
+      <id>Spring Plugins</id>
+      <url>http://repo.spring.io/plugins-release/</url>
+    </repository>
 
-	</repositories>
-	
+  </repositories>
+  
     <build>
         <plugins>
             <plugin>
@@ -265,8 +267,8 @@
                 <version>3.9.0</version>
                 <configuration>
                     <encoding>${project.build.sourceEncoding}</encoding>
-					<source>17</source>
-					<target>17</target>
+        			<source>17</source>
+        			<target>17</target>
                 </configuration>
             </plugin>
             <plugin>
