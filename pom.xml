@@ -199,11 +199,11 @@
             <version>1.0.8-RELEASE</version>
         </dependency>
 
-    <dependency>
-      <groupId>org.snpeff</groupId>
-      <artifactId>SnpEff</artifactId>
-      <version>5.1-lightened</version>
-    </dependency>
+<!--    <dependency>-->
+<!--      <groupId>org.snpeff</groupId>-->
+<!--      <artifactId>SnpEff</artifactId>-->
+<!--      <version>5.1-lightened</version>-->
+<!--    </dependency>-->
 
         <dependency>
             <groupId>org.opencb.ga4gh</groupId>
