@@ -41,8 +41,10 @@ import org.springframework.data.domain.Sort;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
+import org.springframework.data.mongodb.core.query.Update;
 
 import com.mongodb.client.MongoCursor;
+import com.mongodb.client.result.UpdateResult;
 
 import fr.cirad.mgdb.importing.IndividualMetadataImport;
 import fr.cirad.mgdb.importing.parameters.ImportParameters;
@@ -54,6 +56,7 @@ import fr.cirad.mgdb.model.mongo.maintypes.VariantData;
 import fr.cirad.mgdb.model.mongo.maintypes.VariantRunData;
 import fr.cirad.mgdb.model.mongo.subtypes.Callset;
 import fr.cirad.mgdb.model.mongo.subtypes.ReferencePosition;
+import fr.cirad.mgdb.model.mongo.subtypes.VariantRunDataId;
 import fr.cirad.mgdb.model.mongodao.MgdbDao;
 import fr.cirad.tools.Helper;
 import fr.cirad.tools.ProgressIndicator;
@@ -629,5 +632,17 @@ public abstract class AbstractGenotypeImport<T extends ImportParameters> {
 
         for (Thread t : callsetImportThreads)
         	t.join();
+    }
+
+    public void updateExistingVrdAlleles(MongoTemplate mongoTemplate, int initialAlleleCount, VariantData variant) {
+	    if (variant.getKnownAlleles().size() > initialAlleleCount) {
+	    	new Thread() {
+	    		public void run() {
+			    	UpdateResult existingVrdAlleleUpdates = mongoTemplate.updateMulti(new Query(Criteria.where("_id." + VariantRunDataId.FIELDNAME_VARIANT_ID).is(variant.getId())), new Update().set(VariantData.FIELDNAME_KNOWN_ALLELES, variant.getKnownAlleles()), VariantRunData.class);
+			    	if (existingVrdAlleleUpdates.getModifiedCount() > 0)
+						LOG.debug("Updated " + existingVrdAlleleUpdates.getModifiedCount() + " existing VRD entries for variant " + variant.getId() + " to reflect new known alleles");
+	    		}
+	    	}.start();
+	    }
     }
 }

@@ -225,6 +225,7 @@ public class BrapiImport extends STDVariantImport {
 			progress.moveToNextStep();
 			ArrayList<String> variantsToQueryGenotypesFor = new ArrayList<>();
 			Boolean fGotKnownAllelesWhenImportingVariants = null;	// value will be determined below
+			boolean fSomeProjectsExistedBeforeImport = mongoTemplate.findOne(new Query(), GenotypingProject.class) != null;
 
 			HashSet<String> variantsToUpdateRunsFor = new HashSet<>();
 			while (markerPager.isPaging()) {
@@ -315,8 +316,11 @@ public class BrapiImport extends STDVariantImport {
 								variant.setType(marker.getType());
 							if (fGotKnownAllelesWhenImportingVariants == null)
 								fGotKnownAllelesWhenImportingVariants = marker.getRefAlt() != null && marker.getRefAlt().size() > 0;
-							if (fGotKnownAllelesWhenImportingVariants)
+							if (fGotKnownAllelesWhenImportingVariants) {
+								if (fSomeProjectsExistedBeforeImport)
+									updateExistingVrdAlleles(mongoTemplate, variant.getKnownAlleles().size(), variant);
 								variant.setKnownAlleles(marker.getRefAlt());
+							}
 							
 							// update list of existing variants (FIXME: this should be a separate method in AbstractGenotypeImport) 
 							ArrayList<String> idAndSynonyms = new ArrayList<>();

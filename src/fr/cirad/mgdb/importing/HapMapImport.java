@@ -330,6 +330,7 @@ public class HapMapImport extends AbstractGenotypeImport<FileImportParameters> {
                                 //update variant runs
                                 variant.getRuns().add(new Run(finalProject.getId(), params.getRun()));
 
+                                int initialAlleleCount = variant.getKnownAlleles().size();
                                 AtomicInteger allIdx = new AtomicInteger(0);
                                 Map<String, Integer> alleleIndexMap = variant.getKnownAlleles().stream().collect(Collectors.toMap(Function.identity(), t -> allIdx.getAndIncrement()));  // should be more efficient not to call indexOf too often...
                                 List<Allele> knownAlleles = new ArrayList<>();
@@ -342,7 +343,7 @@ public class HapMapImport extends AbstractGenotypeImport<FileImportParameters> {
                                     }
                                 }
 
-                                VariantRunData runToSave = addHapMapDataToVariant(finalMongoTemplate, variant, finalAssembly == null ? null : finalAssembly.getId(), variantType, alleleIndexMap, hmFeature, finalProject, params.getRun(), sampleIds);
+                                VariantRunData runToSave = addHapMapDataToVariant(finalMongoTemplate, variant, finalAssembly == null ? null : finalAssembly.getId(), variantType, alleleIndexMap, hmFeature, finalProject, params.getRun(), sampleIds, initialAlleleCount);
 
                                 for (Integer asmId : assemblyIDs) {
                                     ReferencePosition rp = variant.getReferencePosition(asmId);
@@ -463,7 +464,7 @@ public class HapMapImport extends AbstractGenotypeImport<FileImportParameters> {
 	 * @return the variant run data
 	 * @throws Exception the exception
 	 */
-	private VariantRunData addHapMapDataToVariant(MongoTemplate mongoTemplate, VariantData variantToFeed, Integer nAssemblyId, Type variantType, Map<String, Integer> alleleIndexMap, RawHapMapFeature hmFeature, GenotypingProject project, String runName, List<String>individuals) throws Exception
+	private VariantRunData addHapMapDataToVariant(MongoTemplate mongoTemplate, VariantData variantToFeed, Integer nAssemblyId, Type variantType, Map<String, Integer> alleleIndexMap, RawHapMapFeature hmFeature, GenotypingProject project, String runName, List<String>individuals, int initialAlleleCount) throws Exception
 	{
         boolean fSNP = variantType.equals(Type.SNP);
 
@@ -528,6 +529,10 @@ public class HapMapImport extends AbstractGenotypeImport<FileImportParameters> {
             project.setPloidyLevel(ploidiesFound.iterator().next());
 
 		project.getVariantTypes().add(variantType.toString());
+		
+        if (project.getId() > 1 || project.getRuns().size() > 0)
+        	updateExistingVrdAlleles(mongoTemplate, initialAlleleCount, variantToFeed);
+        
         vrd.setKnownAlleles(variantToFeed.getKnownAlleles());
         vrd.setPositions(variantToFeed.getPositions());
         vrd.setReferencePosition(variantToFeed.getReferencePosition());
