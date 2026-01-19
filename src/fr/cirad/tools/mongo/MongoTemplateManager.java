@@ -69,6 +69,7 @@ import com.mongodb.client.MongoCollection;
 import com.mongodb.connection.ClusterDescription;
 import com.mongodb.connection.ServerDescription;
 
+import fr.cirad.mgdb.annotation.AnnotationControllerInterface;
 import fr.cirad.mgdb.model.mongo.maintypes.CachedCount;
 import fr.cirad.mgdb.model.mongo.maintypes.DatabaseInformation;
 import fr.cirad.mgdb.model.mongo.maintypes.VariantData;
@@ -120,6 +121,11 @@ public class MongoTemplateManager implements ApplicationContextAware {
     static private Map<String, MongoClient> mongoClients = new HashMap<>();
     
     /**
+     * The available annotation functionalities.
+     */
+    static private Collection<AnnotationControllerInterface> annotationControllers = new ArrayList<>();
+    
+	/**
      * The Executor to use for asynchronously querying each host
      */
     static private Map<String, GroupedExecutor> hostExecutors = new HashMap<>();
@@ -277,6 +283,7 @@ public class MongoTemplateManager implements ApplicationContextAware {
         publicDatabases.clear();
         hiddenDatabases.clear();
         try {
+        	annotationControllers = applicationContext.getBeansOfType(AnnotationControllerInterface.class).values();
             mongoClients = applicationContext.getBeansOfType(MongoClient.class);
             
     	    InputStream input = MongoTemplateManager.class.getClassLoader().getResourceAsStream(resource + ".properties");
@@ -886,5 +893,9 @@ public class MongoTemplateManager implements ApplicationContextAware {
             MgdbDao.ensurePositionIndexes(mongoTemplate, Arrays.asList(tmpColl), fIndexPositionFieldsEvenIfCollectionIsEmpty, fWaitForIndexCreationCompletion);    // make sure we have indexes defined as required in v2.4
         }
         return tmpColl;
+	}
+
+    public static Collection<AnnotationControllerInterface> getAnnotationControllers() {
+		return annotationControllers;
 	}
 }

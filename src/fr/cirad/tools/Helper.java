@@ -464,7 +464,7 @@ public class Helper {
         }
     }
     
-    static public List<BasicDBObject> getIntervalQueries(int nIntervalCount, Collection<String> sequences, String variantType, long rangeMin, long rangeMax, BasicDBList variantQueryDBListToMerge) {
+    static public List<BasicDBObject> getIntervalQueries(int nIntervalCount, Collection<String> sequences, Collection<String> variantTypes, long rangeMin, long rangeMax, BasicDBList variantQueryDBListToMerge) {
         String refPosPathWithTrailingDot = Assembly.getThreadBoundVariantRefPosPath() + ".";
         final int intervalSize = (int) Math.ceil(Math.max(1, ((rangeMax - rangeMin) / (nIntervalCount - 1))));
 
@@ -473,8 +473,8 @@ public class Helper {
             BasicDBObject initialMatchStage = new BasicDBObject();
             if (sequences != null && !sequences.isEmpty())
                 initialMatchStage.put(refPosPathWithTrailingDot + ReferencePosition.FIELDNAME_SEQUENCE, new BasicDBObject("$in", sequences));
-            if (variantType != null)
-                initialMatchStage.put(VariantData.FIELDNAME_TYPE, variantType);
+            if (variantTypes != null && !variantTypes.isEmpty())
+                initialMatchStage.put(VariantData.FIELDNAME_TYPE, new BasicDBObject("$in", variantTypes));
             BasicDBObject positionSettings = new BasicDBObject();
             positionSettings.put("$gte", rangeMin + (i*intervalSize));
             positionSettings.put(i < nIntervalCount - 1 ? "$lt" : "$lte", i < nIntervalCount - 1 ? rangeMin + ((i+1)*intervalSize) : rangeMax);
@@ -487,7 +487,7 @@ public class Helper {
         return result;
     }
     
-    static public boolean findDefaultRangeMinMax(String sModule, Collection<Integer> nProjectIDs, String tmpCollName /* if null, main variant coll is used*/, String variantType, Collection<String> sequences, Long start, Long end, Long minMaxresult[])
+    static public boolean findDefaultRangeMinMax(String sModule, Collection<Integer> nProjectIDs, String tmpCollName /* if null, main variant coll is used*/, Collection<String> variantTypes, Collection<String> sequences, Long start, Long end, Long minMaxresult[])
     {
         final MongoTemplate mongoTemplate = MongoTemplateManager.get(sModule);
         String refPosPathWithTrailingDot = Assembly.getThreadBoundVariantRefPosPath() + ".";
@@ -505,8 +505,8 @@ public class Helper {
                 posCrit.put("$lte", end);
             matchAndList.add(new BasicDBObject(refPosPathWithTrailingDot + ReferencePosition.FIELDNAME_START_SITE, posCrit));
         }
-        if (variantType != null)
-            matchAndList.add(new BasicDBObject(VariantData.FIELDNAME_TYPE, variantType));
+        if (variantTypes != null && !variantTypes.isEmpty())
+            matchAndList.add(new BasicDBObject(VariantData.FIELDNAME_TYPE, new BasicDBObject("$in", variantTypes)));
         BasicDBObject match = new BasicDBObject("$match", new BasicDBObject("$and", matchAndList));
         
         BasicDBObject limit = new BasicDBObject("$limit", 1);

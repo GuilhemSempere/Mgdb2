@@ -28,14 +28,19 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-import fr.cirad.mgdb.importing.parameters.ImportParameters;
-import fr.cirad.mgdb.model.mongo.maintypes.*;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.log4j.Logger;
 import org.bson.types.ObjectId;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.query.Query;
 
+import fr.cirad.mgdb.importing.parameters.ImportParameters;
+import fr.cirad.mgdb.model.mongo.maintypes.Assembly;
+import fr.cirad.mgdb.model.mongo.maintypes.GenotypingProject;
+import fr.cirad.mgdb.model.mongo.maintypes.GenotypingSample;
+import fr.cirad.mgdb.model.mongo.maintypes.Individual;
+import fr.cirad.mgdb.model.mongo.maintypes.VariantData;
+import fr.cirad.mgdb.model.mongo.maintypes.VariantRunData;
 import fr.cirad.mgdb.model.mongo.subtypes.ReferencePosition;
 import fr.cirad.mgdb.model.mongo.subtypes.Run;
 import fr.cirad.mgdb.model.mongo.subtypes.SampleGenotype;
@@ -276,7 +281,6 @@ public abstract class RefactoredImport<T extends ImportParameters> extends Abstr
                             LOG.error(progress.getError(), t);
                             return;
                         }
-
                     }
                 };
 
@@ -315,7 +319,7 @@ public abstract class RefactoredImport<T extends ImportParameters> extends Abstr
         // genotype fields
         AtomicInteger allIdx = new AtomicInteger(0);
         Map<String, Integer> alleleIndexMap = variantToFeed.getKnownAlleles().stream().collect(Collectors.toMap(Function.identity(), t -> allIdx.getAndIncrement()));  // should be more efficient not to call indexOf too often...
-        int i = -1;
+        int i = -1, initialAlleleCount = variantToFeed.getKnownAlleles().size();
         for (String sIndOrSp : orderedIndOrSpToPopulationMap.keySet()) {
             i++;
 
@@ -368,6 +372,9 @@ public abstract class RefactoredImport<T extends ImportParameters> extends Abstr
             else if (null != variantType && Type.NO_VARIATION != variantType && !variantToFeed.getType().equals(sVariantType))
                 throw new Exception("Variant type mismatch between existing data and data to import: " + variantToFeed.getId());
         }
+        
+        if (project.getId() > 1 || project.getRuns().size() > 0)
+        	updateExistingVrdAlleles(mongoTemplate, initialAlleleCount, variantToFeed);
 
         vrd.setKnownAlleles(variantToFeed.getKnownAlleles());
         vrd.setPositions(variantToFeed.getPositions());

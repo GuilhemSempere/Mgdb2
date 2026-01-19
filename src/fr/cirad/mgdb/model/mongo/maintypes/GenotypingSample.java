@@ -31,7 +31,7 @@ import fr.cirad.mgdb.model.mongo.subtypes.Callset;
  */
 @Document(collection = "samplesAndCallSets")
 @TypeAlias("SC")
-public class GenotypingSample {
+public class GenotypingSample implements Comparable<GenotypingSample> {
 
 	public final static String FIELDNAME_INDIVIDUAL = "in";
     public final static String FIELDNAME_CALLSETS = "cs";
@@ -136,5 +136,10 @@ public class GenotypingSample {
 
 	public String getId() {
 		return id;
+	}
+
+	@Override
+	public int compareTo(GenotypingSample arg0) {
+		return this.id.compareTo(((GenotypingSample)arg0).id);	
 	}
 }

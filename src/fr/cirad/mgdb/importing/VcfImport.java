@@ -212,8 +212,6 @@ public class VcfImport extends AbstractGenotypeImport<VCFParameters> {
             }
         }
 
-
-
         mongoTemplate.save(new DBVCFHeader(new VcfHeaderId(project.getId(), sRun), header));
 
         progress.addStep("Header was written for project " + sProject + " and run " + sRun);
@@ -438,6 +436,8 @@ public class VcfImport extends AbstractGenotypeImport<VCFParameters> {
      */
     private VariantRunData addVcfDataToVariant(MongoTemplate mongoTemplate, VCFHeader header, VariantData variantToFeed, Integer nAssemblyId, VariantContextHologram vc, GenotypingProject project, String runName, HashMap<String /*individual*/, Comparable> phasingGroup, int effectAnnotationPos, int geneIdAnnotationPos) throws Exception
     {
+    	int initialAlleleCount = variantToFeed.getKnownAlleles().size();
+    	
         if (variantToFeed.getType() == null || Type.NO_VARIATION.toString().equals(variantToFeed.getType()))
             variantToFeed.setType(vc.getType().toString());
         else if (null != vc.getType() && Type.NO_VARIATION != vc.getType() && !variantToFeed.getType().equals(vc.getType().toString()))
@@ -590,6 +590,9 @@ public class VcfImport extends AbstractGenotypeImport<VCFParameters> {
             	vrd.getSampleGenotypes().put(m_providedIdToCallsetMap.get(sIndOrSpId).getId(), aGT);
         }
 
+        if (project.getId() > 1 || project.getRuns().size() > 0)
+        	updateExistingVrdAlleles(mongoTemplate, initialAlleleCount, variantToFeed);
+        
         vrd.setKnownAlleles(variantToFeed.getKnownAlleles());
         vrd.setPositions(variantToFeed.getPositions());
         vrd.setReferencePosition(variantToFeed.getReferencePosition());
