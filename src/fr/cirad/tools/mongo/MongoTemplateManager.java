@@ -63,6 +63,7 @@ import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.data.mongodb.core.query.Update;
 import org.springframework.stereotype.Component;
 
+import com.mongodb.MongoCommandException;
 import com.mongodb.ServerAddress;
 import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoCollection;
@@ -879,19 +880,15 @@ public class MongoTemplateManager implements ApplicationContextAware {
     public static MongoCollection<Document> getTemporaryVariantCollection(String sModule, String processID, boolean fEmptyItBeforeHand, boolean fIndexPositionFieldsEvenIfCollectionIsEmpty, boolean fWaitForIndexCreationCompletion) throws InterruptedException {
         MongoTemplate mongoTemplate = get(sModule);
         MongoCollection<Document> tmpColl = mongoTemplate.getCollection(TEMP_COLL_PREFIX + Helper.convertToMD5(processID));
-        if (fEmptyItBeforeHand) {
-
-//            ArrayList<StackTraceElement> keptStackTraceElements = new ArrayList<>();
-//            Exception e = new Exception("Check stack trace");
-//            for (StackTraceElement ste : e.getStackTrace())
-//                if (ste.toString().startsWith("fr.cirad."))
-//                    keptStackTraceElements.add(ste);
-//            e.setStackTrace(keptStackTraceElements.toArray(new StackTraceElement[keptStackTraceElements.size()]));
-//            LOG.debug("Dropping " + sModule + "." + tmpColl.getName() + " from getTemporaryVariantCollection", e);
-
-            tmpColl.drop();
-            MgdbDao.ensurePositionIndexes(mongoTemplate, Arrays.asList(tmpColl), fIndexPositionFieldsEvenIfCollectionIsEmpty, fWaitForIndexCreationCompletion);    // make sure we have indexes defined as required in v2.4
-        }
+        if (fEmptyItBeforeHand)
+        	try {
+	            tmpColl.drop();
+	            MgdbDao.ensurePositionIndexes(mongoTemplate, Arrays.asList(tmpColl), fIndexPositionFieldsEvenIfCollectionIsEmpty, fWaitForIndexCreationCompletion);    // make sure we have indexes defined as required in v2.4
+        	}
+        	catch (MongoCommandException mce) {
+        		if (!mce.getMessage().contains("BackgroundOperationInProgressForNamespace"))	// usually this is simply because index creation is already running in the background (simultaneous invocations)
+        			throw mce;
+        	}
         return tmpColl;
 	}
 
