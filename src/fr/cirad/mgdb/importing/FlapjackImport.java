@@ -323,7 +323,8 @@ public class FlapjackImport extends RefactoredImport<FlapjackImportParameters> {
 
             // Normal data line
             else {
-                Matcher initMatcher = allelePattern.matcher(insertMissingDashes(initLine));
+            	initLine = insertMissingDashes(initLine);
+                Matcher initMatcher = allelePattern.matcher(initLine);
                 initMatcher.find();
                 String sIndividual = initMatcher.group().trim();
 
