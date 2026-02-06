@@ -13,7 +13,7 @@ public class VCFParameters extends ImportParameters {
         this.mainFileUrl = mainFileUrl;
     }
 
-    public boolean isfIsBCF() {
+    public boolean isBCF() {
         return fIsBCF;
     }
 
