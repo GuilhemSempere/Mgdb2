@@ -44,6 +44,7 @@ import com.mongodb.client.MongoCursor;
 import com.mongodb.client.model.Collation;
 
 import fr.cirad.mgdb.exporting.tools.ExportManager.ExportOutputs;
+import fr.cirad.mgdb.importing.VcfImport;
 import fr.cirad.mgdb.model.mongo.maintypes.Assembly;
 import fr.cirad.mgdb.model.mongo.maintypes.GenotypingSample;
 import fr.cirad.mgdb.model.mongo.maintypes.Individual;
@@ -52,6 +53,7 @@ import fr.cirad.mgdb.model.mongo.subtypes.Callset;
 import fr.cirad.mgdb.model.mongodao.MgdbDao;
 import fr.cirad.tools.AlphaNumericComparator;
 import fr.cirad.tools.Helper;
+import htsjdk.variant.vcf.VCFInfoHeaderLine;
 
 /**
  * The Interface IExportHandler.
@@ -69,6 +71,8 @@ public interface IExportHandler
 	
 	/** The Constant LINE_SEPARATOR. */
 	static final String LINE_SEPARATOR = "\n";
+
+	static final String VEP_LIKE_HEADER_LINE = "#Uploaded_variation\tLocation\tAllele\tGene\tFeature\tFeature_type\tConsequence";
 	
 	/**
      * Gets the supported ploidy levels
@@ -284,4 +288,97 @@ public interface IExportHandler
 	public static String buildExportName(String sModule, Assembly assembly, long markerCount, int indOrSampleCount, boolean workWithSamples) {
 		return sModule + (assembly != null && assembly.getName() != null ? "__" + assembly.getName() : "") + "__" + markerCount + "variants__" + indOrSampleCount + (workWithSamples ? "sample" : "individual" ) + "s";
 	}
+	
+	// VEP standard columns: #Uploaded_variation, Location, Allele, Gene, Feature, Feature_type, Consequence
+	public static String formatAnnotation(String id, String chrom, long pos, String annValue, int geneIdx, int consequenceIdx, int featureIdx) {
+	    if (annValue == null || annValue.isEmpty())
+	        return "";
+
+	    StringBuilder sb = new StringBuilder();
+
+	    // Both SnpEff (ANN/EFF) and VEP (CSQ) use comma to separate multiple effects
+	    String[] annotations = annValue.split(",");
+	    for (String ann : annotations) {
+	        String[] parts = ann.split("\\|", -1);
+
+	        // Ensure the array is long enough for the requested indices
+	        int maxIdx = Math.max(geneIdx, Math.max(consequenceIdx, featureIdx));
+	        if (parts.length <= maxIdx) {
+	            continue;
+	        }
+
+	        // 1. Allele is index 0 in almost all standard ANN/CSQ formats
+	        String allele = dotIfEmpty(parts[0]);
+	        
+	        // 2. Use the indices passed from the import detector
+	        String gene = dotIfEmpty(parts[geneIdx]);
+	        String consequence = normalizeConsequence(parts[consequenceIdx]);
+	        
+	        // 3. Feature (Transcript ID) handling
+	        // If featureIdx is unknown (-1), we use a dot
+	        String feature = (featureIdx >= 0) ? dotIfEmpty(parts[featureIdx]) : ".";
+
+	        if (consequence.equals(".")) {
+	            continue;
+	        }
+
+	        sb.append(id).append('\t')                           // #Uploaded_variation
+	          .append(chrom).append(':').append(pos).append('\t')     // Location
+	          .append(allele).append('\t')                       // Allele
+	          .append(gene).append('\t')                         // Gene
+	          .append(feature).append('\t')                      // Feature
+	          .append("Transcript").append('\t')                 // Feature_type
+	          .append(consequence).append('\n');                 // Consequence
+	    }
+
+	    return sb.toString();
+	}
+
+	private static String dotIfEmpty(String value) {
+	    return (value == null || value.isEmpty()) ? "." : value;
+	}
+
+	private static String normalizeConsequence(String value) {
+	    if (value == null || value.isEmpty()) {
+	        return ".";
+	    }
+	    // VEP prefers comma-separated SO terms
+	    return value.replace('&', ',');
+	}
+	
+	public static Map<String, Integer> getAnnotationIndices(Map<String, VCFInfoHeaderLine> infoHeaders) {
+        Map<String, Integer> indices = new HashMap<>();
+        
+        // Default fallbacks (Standard SnpEff/VEP positions)
+        indices.put("GENE", 3); 
+        indices.put("CONSEQUENCE", 1);
+        indices.put("FEATURE", 6);
+
+        for (VCFInfoHeaderLine line : infoHeaders.values()) {
+            String id = line.getID();
+            if (VcfImport.ANNOTATION_FIELDNAME_EFF.equals(id) || VcfImport.ANNOTATION_FIELDNAME_CSQ.equals(id) || VcfImport.ANNOTATION_FIELDNAME_EFF.equals(id)) {
+                
+                // Clean the description to get the pipe-separated format string
+                String desc = line.getDescription().replaceAll("[()]", "").replace("'", "");
+                if (desc.contains(":")) {
+                    desc = desc.substring(desc.indexOf(":") + 1).trim();
+                }
+                
+                String[] fields = desc.split("\\|");
+                for (int i = 0; i < fields.length; i++) {
+                    String trimmedField = fields[i].trim();
+                    
+                    // Logic matching your doImport snippet
+                    if ("Gene_Name".equals(trimmedField) || "Gene_ID".equals(trimmedField) || "Gene".equals(trimmedField)) {
+                        indices.put("GENE", i);
+                    } else if ("Annotation".equals(trimmedField) || "Consequence".equals(trimmedField)) {
+                        indices.put("CONSEQUENCE", i);
+                    } else if ("Feature_ID".equals(trimmedField) || "Feature".equals(trimmedField) || "Transcript_ID".equals(trimmedField)) {
+                        indices.put("FEATURE", i);
+                    }
+                }
+            }
+        }
+        return indices;
+    }
 }

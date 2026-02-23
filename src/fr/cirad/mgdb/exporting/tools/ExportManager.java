@@ -141,8 +141,9 @@ public class ExportManager
     
     private File[] chunkGenotypeFiles;
     private File[] chunkVariantFiles;
+    private File[] chunkAnnotationFiles;
     private File[] chunkWarningFiles;
-    
+   
 	private File dataExtractionFolder;
 
     public static final CodecRegistry pojoCodecRegistry = CodecRegistries.fromRegistries(MongoClientSettings.getDefaultCodecRegistry(), CodecRegistries.fromProviders(PojoCodecProvider.builder().register(new IntKeyMapPropertyCodecProvider()).automatic(true).build()));
@@ -258,6 +259,7 @@ public class ExportManager
         chunkGenotypeFiles = new File[chunkExportTasks.length];
         if (exportWriter.writesVariantFiles())
         	chunkVariantFiles = new File[chunkExportTasks.length];
+        chunkAnnotationFiles = new File[chunkExportTasks.length];
         chunkWarningFiles = new File[chunkExportTasks.length];
         
         LOG.debug("Exporting from " + varColl.getNamespace().getCollectionName() + " in " + chunkExportTasks.length + " chunks of size " + nQueryChunkSize);
@@ -276,6 +278,9 @@ public class ExportManager
 	        		for (Future<Void> t : chunkExportTasks)
 	        			if (t != null)
 	        				t.cancel(true);
+	                for (File f : chunkAnnotationFiles)
+	                	if (f != null)
+	                		f.delete();
 	                for (File f : chunkWarningFiles)
 	                	if (f != null)
 	                		f.delete();
@@ -293,9 +298,9 @@ public class ExportManager
 	            			if (progress.isAborted() || progress.getError() != null)
 	            				return;
 	
-	            			OutputStream genotypeChunkOS = null, variantChunkOS = null, warningChunkOS = null;
+	            			OutputStream genotypeChunkOS = null, variantChunkOS = null, annotationOS = null, warningChunkOS = null;
 	            			try {
-		            			File genotypeChunkFile = File.createTempFile(nFinalChunkIndex + "__genotypes__", "__" + taskGroup, dataExtractionFolder), warningChunkFile = File.createTempFile(nFinalChunkIndex + "__warnings__", "__" + taskGroup, dataExtractionFolder);
+		            			File genotypeChunkFile = File.createTempFile(nFinalChunkIndex + "__genotypes__", "__" + taskGroup, dataExtractionFolder), annotationChunkFile = File.createTempFile(nFinalChunkIndex + "__annotations__", "__" + taskGroup, dataExtractionFolder), warningChunkFile = File.createTempFile(nFinalChunkIndex + "__warnings__", "__" + taskGroup, dataExtractionFolder);
 		            			chunkGenotypeFiles[nFinalChunkIndex - 1] = genotypeChunkFile;
 
 		            			genotypeChunkOS = new BufferedOutputStream(new FileOutputStream(genotypeChunkFile), 16384);
@@ -304,6 +309,8 @@ public class ExportManager
 			            			chunkVariantFiles[nFinalChunkIndex - 1] = variantChunkFile;
 			            			variantChunkOS = new BufferedOutputStream(new FileOutputStream(variantChunkFile), 16384);
 		            			}
+		            			chunkAnnotationFiles[nFinalChunkIndex - 1] = annotationChunkFile;
+		            			annotationOS = new BufferedOutputStream(new FileOutputStream(annotationChunkFile), 16384);
 		            			chunkWarningFiles[nFinalChunkIndex - 1] = warningChunkFile;
 		            			warningChunkOS = new BufferedOutputStream(new FileOutputStream(warningChunkFile), 16384);
 		            			
@@ -378,12 +385,13 @@ public class ExportManager
 		                        }
 
 	                            progress.setCurrentStepProgress(extractedChunks.size() * 100l / chunkGenotypeFiles.length);
-		                        exportWriter.writeChunkRuns(chunkMarkerRunsToWrite.values(), chunkMarkerIDs, genotypeChunkOS, variantChunkOS, warningChunkOS);
+		                        exportWriter.writeChunkRuns(chunkMarkerRunsToWrite.values(), chunkMarkerIDs, genotypeChunkOS, variantChunkOS, annotationOS, warningChunkOS);
 		                        
 		        		    	// make sure data is completely written out before the files get read
 		        		        genotypeChunkOS.close();
 	            				if (variantChunkOS != null)
 									variantChunkOS.close();
+	            				annotationOS.close();
 								warningChunkOS.close();
 		                        extractedChunks.add(nFinalChunkIndex - 1);
 		                        previousVarId = null;
@@ -391,6 +399,8 @@ public class ExportManager
 		                        // early cleanup to avoid having too many empty files all over the place
 		        		        if (exportWriter.writesVariantFiles() && chunkVariantFiles[nFinalChunkIndex - 1] != null && chunkVariantFiles[nFinalChunkIndex - 1].length() == 0) 
 		        		        	chunkVariantFiles[nFinalChunkIndex - 1].delete();	// only keep non-empty files
+		        		        if (chunkAnnotationFiles[nFinalChunkIndex - 1] != null && chunkAnnotationFiles[nFinalChunkIndex - 1].length() == 0) 
+		        		        	chunkAnnotationFiles[nFinalChunkIndex - 1].delete();	// only keep non-empty files
 		        		        if (chunkWarningFiles[nFinalChunkIndex - 1] != null && chunkWarningFiles[nFinalChunkIndex - 1].length() == 0) 
 		        		        	chunkWarningFiles[nFinalChunkIndex - 1].delete();	// only keep non-empty files
 
@@ -514,20 +524,22 @@ public class ExportManager
     }
 
 	public ExportOutputs getOutputs() {
-		return new ExportOutputs(chunkGenotypeFiles, chunkVariantFiles, chunkWarningFiles);
+		return new ExportOutputs(chunkGenotypeFiles, chunkVariantFiles, chunkAnnotationFiles, chunkWarningFiles);
 	}
     
     public static class ExportOutputs
     {
-        public ExportOutputs(File[] chunkGenotypeFiles, File[] chunkVariantFiles, File[] chunkWarningFiles) {
+        public ExportOutputs(File[] chunkGenotypeFiles, File[] chunkVariantFiles, File[] chunkAnnotationFiles, File[] chunkWarningFiles) {
 			super();
 			this.chunkGenotypeFiles = chunkGenotypeFiles;
 			this.chunkVariantFiles = chunkVariantFiles;
+			this.chunkAnnotationFiles = chunkAnnotationFiles;
 			this.chunkWarningFiles = chunkWarningFiles;
 		}
 
 		private File[] chunkGenotypeFiles;
         private File[] chunkVariantFiles;
+        private File[] chunkAnnotationFiles;
         private File[] chunkWarningFiles;
         private String metadataFileName;
         private String metadataFileContents;
@@ -546,6 +558,10 @@ public class ExportManager
     		return chunkVariantFiles;
     	}
 
+    	public File[] getAnnotationFiles() {
+    		return chunkAnnotationFiles;
+    	}
+    	
     	public File[] getWarningFiles() {
     		return chunkWarningFiles;
     	}
@@ -589,6 +605,6 @@ public class ExportManager
 			return fWritesVariantFile;
 		}
 
-		abstract public void writeChunkRuns(Collection<Collection<VariantRunData>> markerRunsToWrite, List<String> orderedMarkerIDs, OutputStream genotypeOS, OutputStream variantOS, OutputStream warningkOS) throws IOException;
+		abstract public void writeChunkRuns(Collection<Collection<VariantRunData>> markerRunsToWrite, List<String> orderedMarkerIDs, OutputStream genotypeOS, OutputStream variantOS, OutputStream annotationOS, OutputStream warningkOS) throws IOException;
     }
 }

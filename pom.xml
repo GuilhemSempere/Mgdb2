@@ -112,10 +112,10 @@
         <version>1.2.19</version>
     </dependency>
 
-        <dependency>
-            <groupId>com.github.samtools</groupId>
-            <artifactId>htsjdk</artifactId>
-            <version>2.24.1</version>
+	<dependency>
+	    <groupId>com.github.samtools</groupId>
+	    <artifactId>htsjdk</artifactId>
+	    <version>4.3.0</version>
             <exclusions>
                 <exclusion>
                     <groupId>org.apache.commons</groupId>

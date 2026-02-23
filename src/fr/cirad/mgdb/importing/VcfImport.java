@@ -16,8 +16,14 @@
  *******************************************************************************/
 package fr.cirad.mgdb.importing;
 
+import java.io.BufferedInputStream;
 import java.io.File;
 import java.io.IOException;
+import java.io.InputStream;
+import java.io.UncheckedIOException;
+import java.net.URISyntaxException;
+import java.nio.ByteBuffer;
+import java.nio.channels.SeekableByteChannel;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
@@ -26,6 +32,7 @@ import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.util.NoSuchElementException;
 import java.util.Set;
 import java.util.Spliterator;
 import java.util.Spliterators;
@@ -39,8 +46,6 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 import java.util.stream.StreamSupport;
 
-import fr.cirad.mgdb.importing.parameters.VCFParameters;
-import fr.cirad.mgdb.model.mongo.maintypes.*;
 import org.apache.log4j.Logger;
 import org.bson.types.ObjectId;
 import org.springframework.data.mongodb.core.BulkOperations;
@@ -52,7 +57,14 @@ import org.springframework.data.mongodb.core.query.Update;
 import com.mongodb.bulk.BulkWriteResult;
 
 import fr.cirad.mgdb.importing.base.AbstractGenotypeImport;
+import fr.cirad.mgdb.importing.parameters.VCFParameters;
+import fr.cirad.mgdb.model.mongo.maintypes.Assembly;
+import fr.cirad.mgdb.model.mongo.maintypes.DBVCFHeader;
 import fr.cirad.mgdb.model.mongo.maintypes.DBVCFHeader.VcfHeaderId;
+import fr.cirad.mgdb.model.mongo.maintypes.GenotypingProject;
+import fr.cirad.mgdb.model.mongo.maintypes.Sequence;
+import fr.cirad.mgdb.model.mongo.maintypes.VariantData;
+import fr.cirad.mgdb.model.mongo.maintypes.VariantRunData;
 import fr.cirad.mgdb.model.mongo.subtypes.ReferencePosition;
 import fr.cirad.mgdb.model.mongo.subtypes.Run;
 import fr.cirad.mgdb.model.mongo.subtypes.SampleGenotype;
@@ -60,9 +72,15 @@ import fr.cirad.mgdb.model.mongo.subtypes.VariantRunDataId;
 import fr.cirad.mgdb.model.mongodao.MgdbDao;
 import fr.cirad.tools.Helper;
 import fr.cirad.tools.ProgressIndicator;
+import htsjdk.samtools.util.BlockCompressedInputStream;
 import htsjdk.tribble.AbstractFeatureReader;
+import htsjdk.tribble.CloseableTribbleIterator;
+import htsjdk.tribble.FeatureCodec;
 import htsjdk.tribble.FeatureReader;
-import htsjdk.variant.bcf2.BCF2Codec;
+import htsjdk.tribble.TribbleIndexedFeatureReader;
+import htsjdk.tribble.readers.AsciiLineReader;
+import htsjdk.tribble.readers.LineIterator;
+import htsjdk.tribble.readers.LineIteratorImpl;
 import htsjdk.variant.variantcontext.Allele;
 import htsjdk.variant.variantcontext.Genotype;
 import htsjdk.variant.variantcontext.VariantContext;
@@ -89,6 +107,7 @@ public class VcfImport extends AbstractGenotypeImport<VCFParameters> {
     public static final String ANNOTATION_FIELDNAME_ANN = "ANN";
     public static final String ANNOTATION_FIELDNAME_CSQ = "CSQ";
 
+    @SuppressWarnings({"unchecked", "rawtypes"})
     private FeatureReader<VariantContext> reader;
     private Iterator<VariantContext> variantIterator;
 
@@ -384,16 +403,262 @@ public class VcfImport extends AbstractGenotypeImport<VCFParameters> {
         return totalProcessedVariantCount.get();
     }
 
-    @Override
-    protected void initReader(VCFParameters params) throws IOException {
-        if (params.isfIsBCF()) {
-            BCF2Codec bc = new BCF2Codec();
-            reader = AbstractFeatureReader.getFeatureReader(params.getMainFileUrl().toString(), bc, false);
-        } else {
-            VCFCodec vc = new VCFCodec();
-            reader = AbstractFeatureReader.getFeatureReader(params.getMainFileUrl().toString(), vc, false);
+    private static class SeekableByteChannelAdapter implements SeekableByteChannel {
+        private final InputStream inputStream;
+        private long position = 0;
+        private boolean open = true;
+        
+        public SeekableByteChannelAdapter(InputStream inputStream) {
+            this.inputStream = inputStream;
         }
-        variantIterator = reader.iterator();
+        
+        @Override
+        public int read(ByteBuffer dst) throws IOException {
+            if (!open) throw new java.nio.channels.ClosedChannelException();
+            
+            int remaining = dst.remaining();
+            if (remaining == 0) return 0;
+            
+            byte[] buffer = new byte[remaining];
+            int bytesRead = inputStream.read(buffer);
+            
+            if (bytesRead > 0) {
+                dst.put(buffer, 0, bytesRead);
+                position += bytesRead;
+            }
+            
+            return bytesRead;
+        }
+        
+        @Override
+        public int write(ByteBuffer src) throws IOException {
+            throw new UnsupportedOperationException("Write not supported");
+        }
+        
+        @Override
+        public long position() throws IOException {
+            return position;
+        }
+        
+        @Override
+        public SeekableByteChannel position(long newPosition) throws IOException {
+            if (newPosition != position) {
+                throw new UnsupportedOperationException("Seeking not supported on decompressed BGZF stream");
+            }
+            return this;
+        }
+        
+        @Override
+        public long size() throws IOException {
+            return -1; // Unknown size for decompressed stream
+        }
+        
+        @Override
+        public SeekableByteChannel truncate(long size) throws IOException {
+            throw new UnsupportedOperationException("Truncate not supported");
+        }
+        
+        @Override
+        public boolean isOpen() {
+            return open;
+        }
+        
+        @Override
+        public void close() throws IOException {
+            if (open) {
+                open = false;
+                inputStream.close();
+            }
+        }
+    }
+    
+    // Helper class to wrap InputStream as SeekableByteChannel
+    private static class NonSeekableByteChannel implements SeekableByteChannel {
+        private final InputStream inputStream;
+        private long position = 0;
+        private boolean open = true;
+        
+        public NonSeekableByteChannel(InputStream inputStream) {
+            this.inputStream = inputStream;
+        }
+        
+        @Override
+        public int read(ByteBuffer dst) throws IOException {
+            if (!open) throw new java.nio.channels.ClosedChannelException();
+            
+            int remaining = dst.remaining();
+            if (remaining == 0) return 0;
+            
+            byte[] buffer = new byte[remaining];
+            int bytesRead = inputStream.read(buffer);
+            
+            if (bytesRead > 0) {
+                dst.put(buffer, 0, bytesRead);
+                position += bytesRead;
+            }
+            
+            return bytesRead;
+        }
+        
+        @Override
+        public int write(ByteBuffer src) throws IOException {
+            throw new UnsupportedOperationException();
+        }
+        
+        @Override
+        public long position() throws IOException {
+            return position;
+        }
+        
+        @Override
+        public SeekableByteChannel position(long newPosition) throws IOException {
+            if (newPosition != position) {
+                throw new UnsupportedOperationException("Cannot seek on decompressed stream");
+            }
+            return this;
+        }
+        
+        @Override
+        public long size() throws IOException {
+            return -1;
+        }
+        
+        @Override
+        public SeekableByteChannel truncate(long size) throws IOException {
+            throw new UnsupportedOperationException();
+        }
+        
+        @Override
+        public boolean isOpen() {
+            return open;
+        }
+        
+        @Override
+        public void close() throws IOException {
+            if (open) {
+                open = false;
+                inputStream.close();
+            }
+        }
+    }
+
+    @Override
+    protected void initReader(VCFParameters params) throws IOException, URISyntaxException {
+        String urlString = params.getMainFileUrl().toString();
+        boolean fIsRemoteFile = !urlString.startsWith("file:/");
+        
+        // 1. Initialize the appropriate Codec
+        final FeatureCodec codec = params.isBCF() ? new RelaxedBCF2Codec() : new VCFCodec();
+
+        boolean fIsCompressed;
+        
+        if (params.isBCF()) {
+            InputStream testIS = params.getMainFileUrl().openStream();
+            if (!testIS.markSupported())
+                testIS = new BufferedInputStream(testIS);
+            testIS.mark(2);
+            int byte1 = testIS.read();
+            int byte2 = testIS.read();
+            testIS.close();
+            fIsCompressed = (byte1 == 0x1f && byte2 == 0x8b);
+            
+            this.reader = new FlexibleBCFReader(params.getMainFileUrl(), codec, fIsCompressed);
+        }
+        else {
+            fIsCompressed = urlString.toLowerCase().endsWith(".gz");
+            
+            if (!fIsRemoteFile || !fIsCompressed)
+                this.reader = AbstractFeatureReader.getFeatureReader(urlString, codec, false);	// plain HTSJDK handles this fine
+            else {	// Remote compressed VCF - use custom iterator with 8KB alignment (working around HTSJDK bug)
+                this.reader = (FeatureReader<VariantContext>) new TribbleIndexedFeatureReader<VariantContext, LineIterator>(urlString, codec, false) {
+                    @Override
+                    public CloseableTribbleIterator<VariantContext> iterator() {
+                        try {
+                            InputStream rawStream = new EightKBAlignedHTTPStream(params.getMainFileUrl());
+                            InputStream decompressedStream = new BlockCompressedInputStream(rawStream);
+                            final LineIterator lineIterator = new LineIteratorImpl(AsciiLineReader.from(decompressedStream));
+                            codec.readHeader(lineIterator);
+                            
+                            return new CloseableTribbleIterator<VariantContext>() {
+                                // Reusable wrapper that presents a single line as a LineIterator
+                                private final SingleLineIterator singleLineIterator = new SingleLineIterator();
+                                
+                                @Override
+                                public boolean hasNext() { return lineIterator.hasNext(); }
+
+                                @Override
+                                public VariantContext next() {
+                                    String line = lineIterator.next();
+                                    if (line == null) return null;
+                                    singleLineIterator.setLine(line);
+                                    
+                                    try {
+                                        return codec.decode(singleLineIterator);
+                                    } catch (IOException e) {
+                                        throw new UncheckedIOException("Failed to decode variant", e);
+                                    }
+                                }
+                                
+                                @Override
+                                public void remove() { throw new UnsupportedOperationException(); }
+                                
+                                @Override
+                                public void close() {
+                                    try {
+                                        decompressedStream.close();
+                                    } catch (IOException e) {
+                                        LOG.error("Failed to close stream", e);
+                                    }
+                                }
+                                
+                                @Override
+                                public java.util.Iterator<VariantContext> iterator() { return this; }
+                                
+                                // Inner class for reusable single-line iterator
+                                final class SingleLineIterator implements LineIterator {
+                                    private String currentLine;
+                                    private boolean consumed;
+                                    
+                                    public void setLine(String line) {
+                                        this.currentLine = line;
+                                        this.consumed = false;
+                                    }
+                                    
+                                    @Override
+                                    public boolean hasNext() {
+                                        return !consumed && currentLine != null;
+                                    }
+                                    
+                                    @Override
+                                    public String next() {
+                                        if (consumed || currentLine == null) {
+                                            throw new NoSuchElementException();
+                                        }
+                                        consumed = true;
+                                        return currentLine;
+                                    }
+                                    
+                                    @Override
+                                    public String peek() {
+                                        return consumed ? null : currentLine;
+                                    }
+                                    
+                                    @Override
+                                    public void remove() {
+                                        throw new UnsupportedOperationException();
+                                    }
+                                }
+                            };
+                        } catch (Exception e) {
+                            throw new RuntimeException("Failed to initialize custom iterator", e);
+                        }
+                    }
+                };
+            }
+        }
+
+        // 3. Start iteration
+        this.variantIterator = reader.iterator();
     }
 
     @Override
