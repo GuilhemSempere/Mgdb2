@@ -25,6 +25,7 @@ import htsjdk.variant.vcf.VCFHeaderLineType;
 import htsjdk.variant.vcf.VCFInfoHeaderLine;
 import htsjdk.variant.vcf.VCFSimpleHeaderLine;
 
+import java.util.Collection;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -34,9 +35,6 @@ import org.apache.log4j.Logger;
 import org.springframework.data.annotation.TypeAlias;
 import org.springframework.data.mongodb.core.mapping.Document;
 import org.springframework.data.mongodb.core.mapping.Field;
-
-import com.mongodb.BasicDBObject;
-import com.mongodb.DBObject;
 
 /**
  * The Class DBVCFHeader.
@@ -103,21 +101,21 @@ public class DBVCFHeader
 	private boolean writeEngineHeaders; 
 	
 	/** The m info meta data. */
-	private Map<String, VCFInfoHeaderLine> mInfoMetaData = new LinkedHashMap();
+	private Map<String, VCFInfoHeaderLine> mInfoMetaData = new LinkedHashMap<>();
 	
 	/** The m format meta data. */
         public final static String FIELDNAME_FORMAT_METADATA = "mFormatMetaData";
 
-	private Map<String, VCFFormatHeaderLine> mFormatMetaData = new LinkedHashMap();
+	private Map<String, VCFFormatHeaderLine> mFormatMetaData = new LinkedHashMap<>();
 	
 	/** The m filter meta data. */
-	private Map<String, VCFFilterHeaderLine> mFilterMetaData = new LinkedHashMap();
+	private Map<String, VCFFilterHeaderLine> mFilterMetaData = new LinkedHashMap<>();
 	
 	/** The m other meta data. */
-	private Map<String, VCFHeaderLine> mOtherMetaData = new LinkedHashMap();
+	private Map<String, VCFHeaderLine> mOtherMetaData = new LinkedHashMap<>();
 	
 	/** The m meta data. */
-	private Map<String, VCFSimpleHeaderLine> mMetaData = new LinkedHashMap();
+	private Map<String, VCFSimpleHeaderLine> mMetaData = new LinkedHashMap<>();
 
 	/** The Constant LOG. */
 	private static final Logger LOG = Logger.getLogger(DBVCFHeader.class);
@@ -418,19 +416,96 @@ public class DBVCFHeader
 		return header;
 	}
 	
-//	static public VCFHeaderLineCount getCount(BasicDBObject vcfCompoundHeaderLine) throws Exception
-//	{
-//		VCFHeaderLineCount countType = VCFHeaderLineCount.valueOf(vcfCompoundHeaderLine.getString("countType"));
-//		switch (countType)
-//		{
-//			case INTEGER:
-//				return vcfCompoundHeaderLine.getInt("count") + "";
-//			case A:
-//			case G:
-//			case UNBOUNDED:
-//				return ".";
-//			default:
-//				throw new Exception("Unable to find out VCF compound header-line count value");
-//		}
-//	}
+	public static Map<String, VCFInfoHeaderLine> mergeInfoHeaders(Collection<DBVCFHeader> headers) {
+	    Map<String, VCFInfoHeaderLine> merged = new LinkedHashMap<>();
+	    for (DBVCFHeader dbHeader : headers) {
+	        for (Map.Entry<String, VCFInfoHeaderLine> entry : dbHeader.getmInfoMetaData().entrySet()) {
+	            merged.merge(entry.getKey(), entry.getValue(), (existing, newLine) -> 
+	                existing.equals(newLine) ? existing : getMostPermissiveInfo(existing, newLine));
+	        }
+	    }
+	    return merged;
+	}
+
+	public static Map<String, VCFFormatHeaderLine> mergeFormatHeaders(Collection<DBVCFHeader> headers) {
+	    Map<String, VCFFormatHeaderLine> merged = new LinkedHashMap<>();
+	    for (DBVCFHeader dbHeader : headers) {
+	        for (Map.Entry<String, VCFFormatHeaderLine> entry : dbHeader.getmFormatMetaData().entrySet()) {
+	            merged.merge(entry.getKey(), entry.getValue(), (existing, newLine) -> 
+	                existing.equals(newLine) ? existing : getMostPermissiveFormat(existing, newLine));
+	        }
+	    }
+	    return merged;
+	}
+
+	public static Map<String, VCFFilterHeaderLine> mergeFilterHeaders(Collection<DBVCFHeader> headers) {
+	    Map<String, VCFFilterHeaderLine> merged = new LinkedHashMap<>();
+	    for (DBVCFHeader dbHeader : headers) {
+	        // Filters are usually identical or unique; we just keep all unique IDs
+	        for (Map.Entry<String, VCFFilterHeaderLine> entry : dbHeader.getmFilterMetaData().entrySet()) {
+	            merged.putIfAbsent(entry.getKey(), entry.getValue());
+	        }
+	    }
+	    return merged;
+	}
+
+	public static Map<String, VCFHeaderLine> mergeOtherHeaders(Collection<DBVCFHeader> headers) {
+	    Map<String, VCFHeaderLine> merged = new LinkedHashMap<>();
+	    for (DBVCFHeader dbHeader : headers) {
+	        // Other metadata (source, reference, etc.)
+	        for (Map.Entry<String, VCFHeaderLine> entry : dbHeader.getmOtherMetaData().entrySet()) {
+	            merged.putIfAbsent(entry.getKey(), entry.getValue());
+	        }
+	    }
+	    return merged;
+	}
+	
+	public static DBVCFHeader mergeHeaders(Collection<DBVCFHeader> headers) {
+	    DBVCFHeader mergedHeader = new DBVCFHeader();
+	    if (headers != null && !headers.isEmpty()) {
+		    // Set boolean flags from the first header in the collection
+		    DBVCFHeader first = headers.iterator().next();
+		    mergedHeader.setWriteCommandLine(first.getWriteCommandLine());
+		    mergedHeader.setWriteEngineHeaders(first.getWriteEngineHeaders());
+	
+		    // Perform all map merges
+		    mergedHeader.setmInfoMetaData(mergeInfoHeaders(headers));
+		    mergedHeader.setmFormatMetaData(mergeFormatHeaders(headers));
+		    mergedHeader.setmFilterMetaData(mergeFilterHeaders(headers));
+		    mergedHeader.setmOtherMetaData(mergeOtherHeaders(headers));
+	    }
+	    return mergedHeader;
+	}
+
+	private static VCFInfoHeaderLine getMostPermissiveInfo(VCFInfoHeaderLine line1, VCFInfoHeaderLine line2) {
+	    VCFHeaderLineCount count = getMostPermissiveCount(line1.getCountType(), line2.getCountType());
+	    VCFHeaderLineType type = getMostPermissiveType(line1.getType(), line2.getType());
+	    return new VCFInfoHeaderLine(line1.getID(), count, type, line1.getDescription());
+	}
+
+	private static VCFFormatHeaderLine getMostPermissiveFormat(VCFFormatHeaderLine line1, VCFFormatHeaderLine line2) {
+	    VCFHeaderLineCount count = getMostPermissiveCount(line1.getCountType(), line2.getCountType());
+	    VCFHeaderLineType type = getMostPermissiveType(line1.getType(), line2.getType());
+	    return new VCFFormatHeaderLine(line1.getID(), count, type, line1.getDescription());
+	}
+	
+	private static VCFHeaderLineCount getMostPermissiveCount(VCFHeaderLineCount c1, VCFHeaderLineCount c2) {
+	    // If either is UNBOUNDED (.), the result must be UNBOUNDED
+	    if (c1 == VCFHeaderLineCount.UNBOUNDED || c2 == VCFHeaderLineCount.UNBOUNDED) {
+	        return VCFHeaderLineCount.UNBOUNDED;
+	    }
+	    return c1; // Default to first if they match or are simple integers
+	}
+
+	private static VCFHeaderLineType getMostPermissiveType(VCFHeaderLineType t1, VCFHeaderLineType t2) {
+	    // String is the most permissive type (can hold anything)
+	    if (t1 == VCFHeaderLineType.String || t2 == VCFHeaderLineType.String) {
+	        return VCFHeaderLineType.String;
+	    }
+	    // Float is more permissive than Integer
+	    if (t1 == VCFHeaderLineType.Float || t2 == VCFHeaderLineType.Float) {
+	        return VCFHeaderLineType.Float;
+	    }
+	    return t1;
+	}
 }
