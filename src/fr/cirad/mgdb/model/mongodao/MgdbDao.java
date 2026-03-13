@@ -135,7 +135,7 @@ public class MgdbDao {
     @Autowired
     static protected ObjectFactory<HttpSession> httpSessionFactory;
 
-    static protected MgdbDao instance;	// a bit of a hack, allows accessing a singleton to be able to call the non-static loadIndividualsWithAllMetadata
+    static protected MgdbDao instance;	// a bit of a hack, allows accessing a singleton to be able to call the non-static loadIndividualsForUser
 
     @Autowired
     private void setMgdbDao(MgdbDao mgdbDao) {
