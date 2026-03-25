@@ -30,6 +30,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeSet;
+import java.util.stream.Collectors;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
@@ -48,11 +49,13 @@ import fr.cirad.mgdb.importing.VcfImport;
 import fr.cirad.mgdb.model.mongo.maintypes.Assembly;
 import fr.cirad.mgdb.model.mongo.maintypes.GenotypingSample;
 import fr.cirad.mgdb.model.mongo.maintypes.Individual;
+import fr.cirad.mgdb.model.mongo.maintypes.Population;
 import fr.cirad.mgdb.model.mongo.maintypes.VariantRunData;
 import fr.cirad.mgdb.model.mongo.subtypes.Callset;
 import fr.cirad.mgdb.model.mongodao.MgdbDao;
 import fr.cirad.tools.AlphaNumericComparator;
 import fr.cirad.tools.Helper;
+import fr.cirad.tools.mongo.MongoTemplateManager;
 import htsjdk.variant.vcf.VCFInfoHeaderLine;
 
 /**
@@ -198,13 +201,26 @@ public interface IExportHandler
 		Collection material = workWithSamples ? new TreeSet<GenotypingSample>(new AlphaNumericComparator<GenotypingSample>()) {{ addAll(MgdbDao.getInstance().loadSamplesForUser(sModule, sExportingUser, null, exportedIndividuals, null, true).values()); }}
 				: new TreeSet<Individual>(new AlphaNumericComparator<Individual>()) {{ addAll(MgdbDao.getInstance().loadIndividualsForUser(sModule, sExportingUser, null, exportedIndividuals, null).values()); }};
 
+		Map<String, String> popIdToNameMap = MongoTemplateManager.get(sModule).findAll(Population.class).stream().collect(Collectors.toMap(Population::getId, Population::getPopGroup, (u, v) -> u, LinkedHashMap::new));
+		boolean fGotPopulationData = false;
 		LinkedHashSet<String> mdHeaders = new LinkedHashSet<>();	// definite header collection (avoids empty columns)
         for (Object indOrSp : material) {
+        	if (!workWithSamples && !fGotPopulationData && ((Individual) indOrSp).getPopulation() != null)
+				fGotPopulationData = true;
         	LinkedHashMap<String, Object> ai = indOrSp instanceof Individual ? ((Individual) indOrSp).getAdditionalInfo() : ((GenotypingSample) indOrSp).getAdditionalInfo();
         	Collection<String> fieldsToAccountFor = individualMetadataFieldsToExport == null ? ai.keySet() : individualMetadataFieldsToExport;
         	for (String key : fieldsToAccountFor)
         		if (!Helper.isNullOrEmptyString(ai.get(key)))
         			mdHeaders.add(key);
+        }
+        boolean fAppendPopulationData = false, fAppendPopulationGroupData = false;
+        if (fGotPopulationData && !mdHeaders.contains("population")) {
+			mdHeaders.add("population");
+			fAppendPopulationData = true;
+			if (!popIdToNameMap.isEmpty() && !mdHeaders.contains("population_group")) {
+				fAppendPopulationGroupData = true;
+				mdHeaders.add("population_group");
+			}
         }
 
 		StringBuffer sb = new StringBuffer(initialContents);
@@ -215,6 +231,12 @@ public interface IExportHandler
         for (Object indOrSp : material) {
         	sb.append((indOrSp instanceof Individual ? ((Individual) indOrSp).getId() : ((GenotypingSample) indOrSp).getId().toString()));
         	LinkedHashMap<String, Object> ai = indOrSp instanceof Individual ? ((Individual) indOrSp).getAdditionalInfo() : ((GenotypingSample) indOrSp).getAdditionalInfo();
+            if (fAppendPopulationData && ((Individual) indOrSp).getPopulation() != null) {
+            	String sPop = ((Individual) indOrSp).getPopulation();
+				ai.put("population", sPop);
+				if (fAppendPopulationGroupData)
+					ai.put("population_group", popIdToNameMap.get(sPop));	// no tab here because if we are on the population column, the loop above just added one
+            }
             for (String headerKey : mdHeaders)
             	sb.append(("\t" + Helper.nullToEmptyString(ai.get(headerKey))));
             sb.append("\n");
