@@ -630,13 +630,8 @@ public class MgdbDao {
      * @param samples the sample ids
      * @return the individuals from samples
      */
-    public static List<Individual> getIndividualsFromSamples(final String sModule, final Collection<GenotypingSample> samples) {
-        MongoTemplate mongoTemplate = MongoTemplateManager.get(sModule);
-        ArrayList<Individual> result = new ArrayList<Individual>();
-        for (GenotypingSample sp : samples) {
-            result.add(mongoTemplate.findById(sp.getIndividual(), Individual.class));
-        }
-        return result;
+    public static List<Individual> getIndividualsFromSamples(final MongoTemplate mongoTemplate, final Collection<GenotypingSample> samples) {
+        return mongoTemplate.find(new Query(Criteria.where("_id").in(samples.stream().map(GenotypingSample::getIndividual).distinct().toList())), Individual.class);
     }
 
     public static TreeMap<String /*individual*/, ArrayList<GenotypingSample>> getSamplesByIndividualForProjects(final String sModule, final Collection<Integer> projIDs, final Collection<String> individuals) throws ObjectNotFoundException {
@@ -648,8 +643,8 @@ public class MgdbDao {
         Criteria crit = Criteria.where(GenotypingSample.FIELDNAME_CALLSETS + "." + Callset.FIELDNAME_PROJECT_ID).in(projIDs);
         if (individuals != null)
             crit.andOperator(Criteria.where(GenotypingSample.FIELDNAME_INDIVIDUAL).in(individuals));
-        Query q = new Query(crit);
 
+        Query q = new Query(crit);
         for (GenotypingSample sample : mongoTemplate.find(q, GenotypingSample.class)) {
             ArrayList<GenotypingSample> individualSamples = result.get(sample.getIndividual());
             if (individualSamples == null) {
