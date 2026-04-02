@@ -763,10 +763,6 @@ public class MgdbDao {
         return result;
     }
     
-    public LinkedHashMap<String, Individual> loadIndividualsForUser(String module, String sUser, Collection<Integer> projIDs, Collection<String> indIDs, LinkedHashMap<String, Set<String>> filters) {
-    	return loadIndividualsForUser(module, sUser, projIDs, indIDs, filters, true);
-    }
-    
     /**
      * @param module the database name (mandatory)
      * @param sUser username for whom to get custom metadata (optional)
@@ -778,9 +774,9 @@ public class MgdbDao {
      * restricted by it, otherwise if projIDs is specified the list is
      * restricted by it, otherwise all database Individuals are returned
      */
-    public LinkedHashMap<String, Individual> loadIndividualsForUser(String module, String sUser, Collection<Integer> projIDs, Collection<String> indIDs, LinkedHashMap<String, Set<String>> filters, boolean fIncludeMetadata) {
+    public LinkedHashMap<String, Individual> loadIndividualsForUser(String module, String sUser, Collection<Integer> projIDs, Collection<String> indIDs, LinkedHashMap<String, Set<String>> filters) {
         MongoTemplate mongoTemplate = MongoTemplateManager.get(module);
-        List<Criteria> crits = new ArrayList<>();
+        List<Criteria> crits = new ArrayList<>();	
         
         if (indIDs == null && Helper.estimDocCount(mongoTemplate, GenotypingProject.class) != 1) // if no list of individuals is provided we may select them by project
         	indIDs = mongoTemplate.findDistinct(projIDs == null || projIDs.isEmpty() ? new Query() : new Query(Criteria.where(GenotypingSample.FIELDNAME_CALLSETS + "." + Callset.FIELDNAME_PROJECT_ID).in(projIDs)), GenotypingSample.FIELDNAME_INDIVIDUAL, GenotypingSample.class, String.class);
@@ -810,7 +806,7 @@ public class MgdbDao {
         	.as("cimd"));            	
         	
         	pipeline.add(Aggregation.unwind("$cimd", true));
-        	pipeline.add(Aggregation.project().and(MergeObjects.mergeValuesOf("$" + Individual.SECTION_ADDITIONAL_INFO, "$cimd." + Individual.SECTION_ADDITIONAL_INFO)).as(Individual.SECTION_ADDITIONAL_INFO));
+        	pipeline.add(Aggregation.project().andInclude(Individual.FIELDNAME_POPULATION).and(MergeObjects.mergeValuesOf("$" + Individual.SECTION_ADDITIONAL_INFO, "$cimd." + Individual.SECTION_ADDITIONAL_INFO)).as(Individual.SECTION_ADDITIONAL_INFO));
 
             if (filters != null)
     	        for (Entry<String, Set<String>> filterEntry : filters.entrySet()) {
