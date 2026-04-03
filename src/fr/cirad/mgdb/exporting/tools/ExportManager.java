@@ -45,6 +45,7 @@ import java.util.stream.Collectors;
 import fr.cirad.mgdb.model.mongo.maintypes.*;
 import fr.cirad.mgdb.model.mongodao.MgdbDao;
 import org.apache.log4j.Logger;
+import org.bson.BsonDocument;
 import org.bson.Document;
 import org.bson.codecs.configuration.CodecRegistries;
 import org.bson.codecs.configuration.CodecRegistry;
@@ -315,14 +316,14 @@ public class ExportManager
 		            			warningChunkOS = new BufferedOutputStream(new FileOutputStream(warningChunkFile), 16384);
 		            			
 		                        BasicDBList matchAndList = new BasicDBList();
-		                        if (!projectFilterList.isEmpty())
-		                            matchAndList.add(projectFilterList.size() == 1 ? projectFilterList.get(0) : new BasicDBObject("$or", projectFilterList));
+		                        //if (!projectFilterList.isEmpty())
+		                            // matchAndList.add(projectFilterList.size() == 1 ? projectFilterList.get(0) : new BasicDBObject("$or", projectFilterList));
 		                        matchAndList.add(new BasicDBObject("_id." + VariantRunDataId.FIELDNAME_VARIANT_ID, new BasicDBObject("$in", chunkMarkerIDs)));
 		
 		                        chunkPipeline.add(0, new BasicDBObject("$match", new BasicDBObject("$and", matchAndList)));
 	
-	                        	if (projectStage != null && (nNumberOfChunksUsedForSpeedEstimation == null || nFinalChunkIndex <= nNumberOfChunksUsedForSpeedEstimation))
-	                                chunkPipeline.add(projectStage);
+//	                        	if (projectStage != null && (nNumberOfChunksUsedForSpeedEstimation == null || nFinalChunkIndex <= nNumberOfChunksUsedForSpeedEstimation))
+//	                                chunkPipeline.add(projectStage);
 	
 //	                        	if (nFinalChunkIndex == 1)
 //	                        		LOG.debug("Export pipeline: " + chunkPipeline);
@@ -332,7 +333,8 @@ public class ExportManager
 
 		            			long chunkProcessingStartTime = System.currentTimeMillis();
 		                        ArrayList<VariantRunData> runs = runColl.aggregate(chunkPipeline, VariantRunData.class).allowDiskUse(true).into(new ArrayList<>(chunkMarkerIDs.size())); // we don't use collation here because it leads to unexpected behaviour (sometimes fetches some additional variants to those in chunkMarkerIDs) => we'll have to sort each chunk by hand
-
+//								VariantRunData sample = runColl.find().first();
+//								runs.add(sample);
 		                        if (nNumberOfChunksUsedForSpeedEstimation != null) {  // chunkPipeline contains a $project stage that we need to assess: let's compare execution speed with and without it (best option depends on so many things that we can't find it out otherwise)
 			                        long chunkProcessingDuration = System.currentTimeMillis() - chunkProcessingStartTime;
 	

@@ -73,7 +73,7 @@ public abstract class AbstractGenotypeImport<T extends ImportParameters> {
 
 	protected static final int nMaxChunkSize = 20000;
 
-	private boolean m_fAllowDbDropIfNoGenotypingData = true;
+	protected boolean m_fAllowDbDropIfNoGenotypingData = true;
 	public boolean m_fCloseContextAfterImport = false;
     public boolean m_fAllowNewAssembly = true;
 	private boolean m_fSamplesPersisted = false;
@@ -498,12 +498,19 @@ public abstract class AbstractGenotypeImport<T extends ImportParameters> {
                     createdProject = project.getId();
             }
 
+			List<String> runs = project.getRuns();
+			if (!runs.contains(params.getRun())) {
+				runs.add(params.getRun());
+				mongoTemplate.save(project);
+			}
+			int runIndex = runs.indexOf(params.getRun());
+
             // specific part
             long count = doImport(params, mongoTemplate, project, progress, createdProject);
 
-            if (!project.getRuns().contains(params.getRun()))
-                project.getRuns().add(params.getRun());
-            mongoTemplate.save(project);
+//            if (!project.getRuns().contains(params.getRun()))
+//                project.getRuns().add(params.getRun());
+//            mongoTemplate.save(project);
 
             String importType = params.getClass().getSimpleName();
             if (importType.endsWith("Parameters")) {
@@ -555,7 +562,7 @@ public abstract class AbstractGenotypeImport<T extends ImportParameters> {
         boolean fDbAlreadyContainedIndividuals = mongoTemplate.findOne(new Query(), Individual.class) != null;
         boolean fDbAlreadyContainedSamples = mongoTemplate.findOne(new Query(), GenotypingSample.class) != null;       
         attemptPreloadingIndividuals(biologicalMaterialIDs, progress);
-
+		int indexOfCallsetInsideGenotypeArray = 0;
         for (String bioEntityID : biologicalMaterialIDs) {
         	GenotypingSample sample = null;
         	if (sampleToIndividualMap != null) {	// provided bio-entities are actually samples
@@ -591,9 +598,10 @@ public abstract class AbstractGenotypeImport<T extends ImportParameters> {
 
             m_providedIdToSampleMap.put(bioEntityID, sample);  // add a sample for this individual to the project
             int callsetId = AutoIncrementCounter.getNextSequence(mongoTemplate, MongoTemplateManager.getMongoCollectionName(Callset.class));
-            Callset cs = new Callset(callsetId, sample, projId, sRun);
+            Callset cs = new Callset(callsetId, sample, projId, sRun,indexOfCallsetInsideGenotypeArray);
             sample.getCallSets().add(cs);
             m_providedIdToCallsetMap.put(bioEntityID, cs);
+			indexOfCallsetInsideGenotypeArray++;
         }
 
         insertNewCallSetsSamplesIndividuals(mongoTemplate, indsToAdd, samplesToAdd, samplesToUpdate);

@@ -14,6 +14,7 @@ import fr.cirad.mgdb.model.mongo.maintypes.GenotypingSample;
 public class Callset {
     public final static String FIELDNAME_PROJECT_ID = "pj";
     public final static String FIELDNAME_RUN = "rn";
+    public final static String FIELDNAME_INDEX_INSIDE_GENOTYPE_ARRAY = "idx";
 
     /** The callset id. */
     @Id
@@ -35,6 +36,14 @@ public class Callset {
     @Field(FIELDNAME_RUN)
     private String run;
 
+    public void setCallSetIndexInsideArray(int callSetIndexInsideArray) {
+        this.callSetIndexInsideArray = callSetIndexInsideArray;
+    }
+
+    /** The callSet index inside its genotype array in the variantGenotypes collection*/
+    @Field(FIELDNAME_INDEX_INSIDE_GENOTYPE_ARRAY)
+    private int callSetIndexInsideArray = 0;
+
     public Callset() {
     }
 
@@ -44,6 +53,15 @@ public class Callset {
         this.individual = sample.getIndividual();
         this.projectId = projectId;
         this.run = run;
+    }
+
+    public Callset(int id, GenotypingSample sample, int projectId, String run, int callSetIndexInsideArray) {
+        this.id = id;
+        this.sampleId = sample.getId();
+        this.individual = sample.getIndividual();
+        this.projectId = projectId;
+        this.run = run;
+        this.callSetIndexInsideArray = callSetIndexInsideArray;
     }
 
     public int getId() {
@@ -88,5 +106,9 @@ public class Callset {
 
     public void setRun(String run) {
         this.run = run;
+    }
+
+    public int getCallSetIndexInsideArray() {
+        return callSetIndexInsideArray;
     }
 }

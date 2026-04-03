@@ -407,12 +407,12 @@ public class DartImport extends AbstractGenotypeImport<FileImportParameters> {
 
                                     VariantRunData runToSave = addDartSeqDataToVariant(finalMongoTemplate, variant, finalAssembly == null ? null : finalAssembly.getId(), variantType, alleleIndexMap, dartFeature, finalProject, sRun, sampleIds, initialAlleleCount);
 
-                                    runToSave.getAdditionalInfo().put("AS", dartFeature.getAlleleSequence());
-                                    runToSave.getAdditionalInfo().put("SP", dartFeature.getSnpPos());
-                                    runToSave.getAdditionalInfo().put("CR", dartFeature.getCallRate());
-                                    runToSave.getAdditionalInfo().put("FHR", dartFeature.getFreqHomRef());
-                                    runToSave.getAdditionalInfo().put("FHS", dartFeature.getFreqHomSnp());
-                                    runToSave.getAdditionalInfo().put("FH", dartFeature.getFreqHets());
+                                    runToSave.getAdditionalInfo(project.getId(),project.getId()).put("AS", dartFeature.getAlleleSequence());
+                                    runToSave.getAdditionalInfo(project.getId(),project.getId()).put("SP", dartFeature.getSnpPos());
+                                    runToSave.getAdditionalInfo(project.getId(),project.getId()).put("CR", dartFeature.getCallRate());
+                                    runToSave.getAdditionalInfo(project.getId(),project.getId()).put("FHR", dartFeature.getFreqHomRef());
+                                    runToSave.getAdditionalInfo(project.getId(),project.getId()).put("FHS", dartFeature.getFreqHomSnp());
+                                    runToSave.getAdditionalInfo(project.getId(),project.getId()).put("FH", dartFeature.getFreqHets());
 
                                     for (Integer asmId : assemblyIDs) {
                                         ReferencePosition rp = variant.getReferencePosition(asmId);

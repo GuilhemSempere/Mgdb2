@@ -31,13 +31,14 @@ import java.util.TreeMap;
 import java.util.TreeSet;
 import java.util.stream.Collectors;
 
+import fr.cirad.mgdb.model.mongo.maintypes.*;
 import org.apache.commons.lang3.StringUtils;
+import org.apache.log4j.Logger;
 import org.bson.codecs.pojo.annotations.BsonProperty;
+import org.mortbay.log.Log;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.mapping.Field;
 
-import fr.cirad.mgdb.model.mongo.maintypes.VariantData;
-import fr.cirad.mgdb.model.mongo.maintypes.VariantRunData;
 import fr.cirad.tools.Helper;
 import fr.cirad.tools.SetUniqueListWithConstructor;
 import htsjdk.variant.variantcontext.Allele;
@@ -48,6 +49,8 @@ import htsjdk.variant.variantcontext.VariantContext;
 import htsjdk.variant.variantcontext.VariantContext.Type;
 import htsjdk.variant.variantcontext.VariantContextBuilder;
 import htsjdk.variant.vcf.VCFConstants;
+
+import static fr.cirad.mgdb.model.mongo.maintypes.GenotypeCodeManager.decodeGenotypeCode;
 
 abstract public class AbstractVariantData
 {
@@ -130,6 +133,7 @@ abstract public class AbstractVariantData
     
     /** The Constant GT_FIELDVAL_ID_MISSING. */
     public static final String GT_FIELDVAL_ID_MISSING = ".";
+    private static final Logger log = Logger.getLogger(AbstractVariantData.class);
 
     /** The type. */
     @BsonProperty(FIELDNAME_TYPE)
@@ -162,9 +166,9 @@ abstract public class AbstractVariantData
     protected SetUniqueListWithConstructor<String> knownAlleles;
 
     /** The additional info. */
-    @BsonProperty(SECTION_ADDITIONAL_INFO)
-    @Field(SECTION_ADDITIONAL_INFO)
-    private HashMap<String, Object> additionalInfo = null;
+    @BsonProperty("vai")
+    @Field("vai")
+    private List<List<HashMap<String, Object>>>  additionalInfo = new ArrayList<>();
 
 	static private HashSet<String> specificallyTreatedAdditionalInfoFields = new HashSet<String> () {{ add(FIELD_SOURCE); add(FIELD_FULLYDECODED); add(FIELD_FILTERS); add(FIELD_PHREDSCALEDQUAL); }};
 
@@ -534,9 +538,18 @@ abstract public class AbstractVariantData
      * @return the additional info
      */
     public HashMap<String, Object> getAdditionalInfo() {
-        if (additionalInfo == null)
-            additionalInfo = new HashMap<>();
-        return additionalInfo;
+//        if (additionalInfo == null)
+//            additionalInfo = new ArrayList<>();
+        return new HashMap<>(); //FIXME
+    }
+
+    public HashMap<String, Object> getAdditionalInfo(int projectIndex, int runIndex) {
+        if (additionalInfo == null || additionalInfo.size() <= projectIndex)
+            return new HashMap<>();
+        List<HashMap<String, Object>> runsForProject = additionalInfo.get(projectIndex);
+        if (runsForProject == null || runsForProject.size() <= runIndex)
+            return new HashMap<>();
+        return runsForProject.get(runIndex);
     }
 
     /**
@@ -545,9 +558,38 @@ abstract public class AbstractVariantData
      * @param additionalInfo the additional info
      */
     public void setAdditionalInfo(HashMap<String, Object> additionalInfo) {
-        this.additionalInfo = additionalInfo;
+        Log.debug("setting variant additional info: " + additionalInfo );
+        List a = new ArrayList<>();
+        a.add(getAdditionalInfo(1,0)); //FIXME
+        this.additionalInfo.add(a);
     }
-    
+
+//    public void setAdditionalInfo(List<List<HashMap<String, Object>>> additionalInfo) {
+//        this.additionalInfo = additionalInfo;
+//    }
+
+    public void setAdditionalInfo(int projectIndex, int runIndex, HashMap<String, Object> ai) {
+        Log.debug("setting variant additional info: " + ai );
+        if (additionalInfo == null)
+            additionalInfo = new ArrayList<>();
+
+        // Ensure the outer list has enough projects
+        while (additionalInfo.size() <= projectIndex) {
+            additionalInfo.add(new ArrayList<>());
+        }
+
+        List<HashMap<String, Object>> runsForProject = additionalInfo.get(projectIndex);
+
+        // Ensure the list has enough runs
+        while (runsForProject.size() <= runIndex) {
+            runsForProject.add(null);
+        }
+
+        // Set the object for this project's run
+        runsForProject.set(runIndex, ai);
+    }
+
+
     /**
      * Static get alleles from genotype code.
      *
@@ -635,6 +677,72 @@ abstract public class AbstractVariantData
 
 		return result.length() > 0 ? result.toString() : null;
 	}
+    /**
+     * Overload of toVariantContext for VariantRunDataV3 (array-based numeric genotype storage).
+     * Decodes numeric genotype codes back to VCF allele index strings before delegating
+     * to the standard toVariantContext pipeline via synthetic SampleGenotype objects.
+     *
+     * @param mongoTemplate     the mongoTemplate
+     * @param runsV3            the V3 runs
+     * @param nAssemblyId       ID of the assembly to work with
+     * @param exportVariantIDs  the export variant ids
+     * @param callSetsToExport  overall list of samples involved in the export
+     * @param individualPositions map providing the index at which each individual must appear
+     * @param individualsByPop  List of individual IDs for each group
+     * @param workWithSamples   whether to work with samples or individuals
+     * @param annotationFieldThresholds the annotation field thresholds for each group
+     * @param previousPhasingIds the previous phasing ids
+     * @param warningOS         the warning file writer
+     * @param synonym           the synonym
+     * @return the variant context
+     * @throws Exception the exception
+     */
+    public VariantContext toVariantContextV3(MongoTemplate mongoTemplate, List<VariantRunDataV3> runsV3, Integer nAssemblyId, boolean exportVariantIDs, Collection<Callset> callSetsToExport, Map<String, Integer> individualPositions, Map<String, Collection<String>> individualsByPop, boolean workWithSamples, Map<String, HashMap<String, Float>> annotationFieldThresholds, HashMap<Integer, Object> previousPhasingIds, OutputStream warningOS, String synonym) throws Exception {
+        // convert each VariantRunDataV3 into a synthetic VariantRunData with decoded string genotype codes
+        List<VariantRunData> syntheticRuns = new ArrayList<>();
+
+        for (VariantRunDataV3 vrdV3 : runsV3) {
+            // find the project index and run index from the sp array
+            List<List<List<Integer>>> sp = vrdV3.getSampleGenotypes();
+            if (sp == null) continue;
+
+            for (int projectIndex = 0; projectIndex < sp.size(); projectIndex++) {
+                List<List<Integer>> projectRuns = sp.get(projectIndex);
+                if (projectRuns == null) continue;
+
+                for (int runIndex = 0; runIndex < projectRuns.size(); runIndex++) {
+                    List<Integer> callsetCodes = projectRuns.get(runIndex);
+                    if (callsetCodes == null) continue;
+
+                    // build a synthetic VariantRunData carrying decoded SampleGenotype objects
+                    VariantRunData syntheticRun = new VariantRunData(new VariantRunDataId(projectIndex, String.valueOf(runIndex), vrdV3.getId().getVariantId()));
+                    syntheticRun.setKnownAlleles(vrdV3.getKnownAlleles());
+                    syntheticRun.setPositions(vrdV3.getPositions());
+                    syntheticRun.setReferencePosition(vrdV3.getReferencePosition());
+                    syntheticRun.setType(vrdV3.getType());
+                    syntheticRun.setSynonyms(vrdV3.getSynonyms());
+
+                    // map callset index → callset id using callSetsToExport order
+                    List<Callset> orderedCallsets = new ArrayList<>(callSetsToExport);
+                    for (int callsetIndex = 0; callsetIndex < callsetCodes.size(); callsetIndex++) {
+                        Integer code = callsetCodes.get(callsetIndex);
+                        if (code == null) continue;
+
+                        if (callsetIndex >= orderedCallsets.size()) continue;
+                        Callset cs = orderedCallsets.get(callsetIndex);
+
+                        String gtString = decodeGenotypeCode(code, mongoTemplate);
+                        SampleGenotype sg = new SampleGenotype(gtString);
+                        syntheticRun.getSampleGenotypes().put(cs.getId(), sg);
+                    }
+
+                    syntheticRuns.add(syntheticRun);
+                }
+            }
+        }
+
+        return toVariantContext(mongoTemplate, syntheticRuns, nAssemblyId, exportVariantIDs, callSetsToExport, individualPositions, individualsByPop, workWithSamples, annotationFieldThresholds, previousPhasingIds, warningOS, synonym);
+    }
 		
 	/**
 	 * To variant context.
@@ -655,45 +763,83 @@ abstract public class AbstractVariantData
 	 */
 	public VariantContext toVariantContext(MongoTemplate mongoTemplate, Collection<VariantRunData> runs, Integer nAssemblyId, boolean exportVariantIDs, Collection<Callset> callSetsToExport, Map<String, Integer> individualPositions, Map<String /*population*/, Collection<String>> individualsByPop, boolean workWithSamples, Map<String /*population*/, HashMap<String, Float>> annotationFieldThresholds, HashMap<Integer, Object> previousPhasingIds, OutputStream warningOS, String synonym) throws Exception
 	{
+        System.out.println("running to variant context");
+        // FIXME
+        int projectIndex = 2;
+        int runIndex = 0;
 		ArrayList<Genotype> genotypes = new ArrayList<Genotype>();
 		String sRefAllele = knownAlleles.isEmpty() ? null : knownAlleles.iterator().next();
 
+        // HashMap<Integer, SampleGenotype> sampleGenotypes = new HashMap<>();
         HashMap<Integer, SampleGenotype> sampleGenotypes = new HashMap<>();
         HashSet<VariantRunData> runsWhereDataWasFound = new HashSet<>();
 
         // collect all genotypes from various runs for all individuals
-        HashMap<String/*genotype code*/, LinkedHashSet<Integer/*callSet*/>>[] individualGenotypes = new HashMap[individualPositions.size()];
+        HashMap<Object/*genotype code*/, LinkedHashSet<Integer/*callSet*/>>[] individualGenotypes = new HashMap[individualPositions.size()];
         Integer knownAlleleCount = null;
         if (runs != null && !runs.isEmpty())
             for (VariantRunData run : runs) {
-                for (Callset cs : callSetsToExport) {
-                    if (sRefAllele == null) {
-                        knownAlleleCount = run.getKnownAlleles().size();
-                        if (knownAlleleCount > 0)
-                            sRefAllele = run.getKnownAlleles().iterator().next();
-                    }
-    
-                    String materialName = workWithSamples ? cs.getSampleId() : cs.getIndividual();
-                    SampleGenotype sampleGenotype = run.getSampleGenotypes().get(cs.getId());
-                    if (sampleGenotype == null || !gtPassesVcfAnnotationFilters(materialName, sampleGenotype, individualsByPop, annotationFieldThresholds))
-                        continue;    // run contains no data for this sample, or its annotation values are below filter thresholds
+                for (int projectIdx = 2; projectIdx <= 2; projectIdx++) {
+                    List<List<Integer>> projectGenotypeArray = run.getGenotypeArray().get(projectIdx);
+                    List<List<HashMap<String,Object>>> projectGenotypeAnnotationArray = run.getGenotypeAnnotationArray().get(projectIdx);
+                    if (projectGenotypeArray.isEmpty())
+                        continue;
+                    GenotypingProject project = mongoTemplate.findById(projectIdx, GenotypingProject.class);
 
-                    // keep track of SampleGenotype and Run so we can have access to additional info later on
-                    sampleGenotypes.put(cs.getId(), sampleGenotype);
-                    runsWhereDataWasFound.add(run);
 
-                    int nIndividualIndex = individualPositions.get(materialName);
-                    if (individualGenotypes[nIndividualIndex] == null)
-                        individualGenotypes[nIndividualIndex] = new HashMap<>(1);
-                    LinkedHashSet<Integer> samplesWithGivenGenotype = individualGenotypes[nIndividualIndex].get(sampleGenotype.getCode());
-                    if (samplesWithGivenGenotype == null) {
-                        samplesWithGivenGenotype = new LinkedHashSet<>(2);
-                        individualGenotypes[nIndividualIndex].put(sampleGenotype.getCode(), samplesWithGivenGenotype);
+                    for (int runIdx = 0; runIdx <= 2; runIdx++) {
+
+                        List<Integer> runGenotypeArray = projectGenotypeArray.get(runIdx);
+                        List<HashMap<String,Object>> runGenotypeAnnotationArray = projectGenotypeAnnotationArray.get(runIdx);
+                        System.out.println(runGenotypeAnnotationArray);
+                        if (runGenotypeArray.isEmpty())
+                            continue;
+                        String cuurentRun = project.getRuns().get(runIdx);
+                        for (Callset cs : callSetsToExport) {
+                            if (cs.getProjectId() != projectIdx || cs.getRun() != cuurentRun)
+                                continue;
+                            System.out.println("Exporting genotypes of callset: " + cs.getId() + " which is ranked: " + cs.getCallSetIndexInsideArray());
+                            if (sRefAllele == null) {
+                                knownAlleleCount = run.getKnownAlleles().size();
+                                if (knownAlleleCount > 0)
+                                    sRefAllele = run.getKnownAlleles().iterator().next();
+                            }
+
+                            String materialName = workWithSamples ? cs.getSampleId() : cs.getIndividual();
+                            SampleGenotype sampleGenotype = new SampleGenotype();
+
+                            int indexOfCallsetInsideArrays = cs.getCallSetIndexInsideArray();
+                            Integer genotypeCode = runGenotypeArray.get(indexOfCallsetInsideArrays);
+//                            if (sampleGenotype == null || !gtPassesVcfAnnotationFilters(materialName, sampleGenotype, individualsByPop, annotationFieldThresholds))
+//                                continue;    // run contains no data for this sample, or its annotation values are below filter thresholds
+                            if (genotypeCode == null)
+                                continue;
+                            String decodedGenotype = decodeGenotypeCode(genotypeCode, mongoTemplate);
+                            HashMap<String, Object> genotypeAnnotationForSample = runGenotypeAnnotationArray.get(indexOfCallsetInsideArrays);
+                            sampleGenotype.setCode(decodedGenotype);
+                            sampleGenotype.setAdditionalInfo(genotypeAnnotationForSample);
+
+                            // keep track of SampleGenotype and Run so we can have access to additional info later on
+                            sampleGenotypes.put(cs.getId(), sampleGenotype);
+                            runsWhereDataWasFound.add(run);
+
+                            int nIndividualIndex = individualPositions.get(materialName);
+                            if (individualGenotypes[nIndividualIndex] == null)
+                                individualGenotypes[nIndividualIndex] = new HashMap<>(1);
+                            LinkedHashSet<Integer> samplesWithGivenGenotype = individualGenotypes[nIndividualIndex].get(sampleGenotype.getCode());
+                            if (samplesWithGivenGenotype == null) {
+                                samplesWithGivenGenotype = new LinkedHashSet<>(2);
+                                individualGenotypes[nIndividualIndex].put(sampleGenotype.getCode(), samplesWithGivenGenotype);
+                            }
+                            samplesWithGivenGenotype.add(cs.getId());
+                        }
+
+
                     }
-                    samplesWithGivenGenotype.add(cs.getId());
                 }
             }
-        
+
+        System.out.println("runs checked");
         List<String> aiExhaustiveList = sampleGenotypes.values().stream().map(sg -> sg.getAdditionalInfo().keySet()).flatMap(Collection::stream).distinct().toList();     
         LinkedHashSet<Allele> variantAlleles = new LinkedHashSet<>(knownAlleleCount == null ? 4 : getKnownAlleles().size());
         variantAlleles.add(Allele.create(sRefAllele, true));
@@ -705,12 +851,12 @@ abstract public class AbstractVariantData
             HashMap<Object, Integer> genotypeCounts = new HashMap<>(2); // will help us to keep track of missing genotypes
                 
             int highestGenotypeCount = 0;
-            String mostFrequentGenotype = null;
+            Object mostFrequentGenotype = null;
             if (individualGenotypes[nIndividualIndex] != null) {
                 if (individualGenotypes[nIndividualIndex].size() == 1)
                     mostFrequentGenotype = individualGenotypes[nIndividualIndex].keySet().iterator().next();
                 else {
-                    for (String gtCode : individualGenotypes[nIndividualIndex].keySet()) {
+                    for (Object gtCode : individualGenotypes[nIndividualIndex].keySet()) {
                         if (gtCode == null)
                             continue; /* skip missing genotypes */
     
@@ -742,7 +888,7 @@ abstract public class AbstractVariantData
 
             Object currentPhId = sampleGenotype.getAdditionalInfo().get(GT_FIELD_PHASED_ID);
             boolean isPhased = currentPhId != null && currentPhId.equals(previousPhasingIds.get(csId));
-            String gtCode = isPhased ? (String) sampleGenotype.getAdditionalInfo().get(GT_FIELD_PHASED_GT) : mostFrequentGenotype;
+            String gtCode = isPhased ? (String) sampleGenotype.getAdditionalInfo().get(GT_FIELD_PHASED_GT) : mostFrequentGenotype.toString();
             List<String> alleles = genotypeStringCache.get(gtCode);
             if (alleles == null) {
                 alleles = safelyGetAllelesFromGenotypeCode(gtCode, mongoTemplate);
@@ -820,7 +966,7 @@ abstract public class AbstractVariantData
         }
 
         VariantRunData run = runsWhereDataWasFound.size() == 1 ? runsWhereDataWasFound.iterator().next() : null;    // if there is not exactly one run involved then we do not export meta-data
-        String source = run == null ? null : (String) run.getAdditionalInfo().get(FIELD_SOURCE);
+        String source = run == null ? null : (String) run.getAdditionalInfo(projectIndex,runIndex).get(FIELD_SOURCE);
 
         ReferencePosition referencePosition = getReferencePosition(nAssemblyId);
         long start = referencePosition != null ? referencePosition.getStartSite() : 0;
@@ -842,22 +988,22 @@ abstract public class AbstractVariantData
         vcb.genotypes(genotypes);
         
         if (run != null) {
-            Boolean fullDecod = (Boolean) run.getAdditionalInfo().get(FIELD_FULLYDECODED);
+            Boolean fullDecod = (Boolean) run.getAdditionalInfo(projectIndex,runIndex).get(FIELD_FULLYDECODED);
             vcb.fullyDecoded(fullDecod != null && fullDecod);
     
-            String filters = (String) run.getAdditionalInfo().get(FIELD_FILTERS);
+            String filters = (String) run.getAdditionalInfo(projectIndex,runIndex).get(FIELD_FILTERS);
             if (filters != null)
                 vcb.filters(filters.split(","));
             else
                 vcb.filters(VCFConstants.UNFILTERED);
             
-            Number qual = (Number) run.getAdditionalInfo().get(FIELD_PHREDSCALEDQUAL);
+            Number qual = (Number) run.getAdditionalInfo(projectIndex,runIndex).get(FIELD_PHREDSCALEDQUAL);
             if (qual != null)
                 vcb.log10PError(qual.doubleValue() / -10.0D);
             
-            for (String attrName : run.getAdditionalInfo().keySet())
+            for (String attrName : run.getAdditionalInfo(projectIndex,runIndex).keySet())
                 if (!VariantRunData.FIELDNAME_ADDITIONAL_INFO_EFFECT_NAME.equals(attrName) && !VariantRunData.FIELDNAME_ADDITIONAL_INFO_EFFECT_GENE.equals(attrName) && !specificallyTreatedAdditionalInfoFields.contains(attrName))
-                    vcb.attribute(attrName, run.getAdditionalInfo().get(attrName));
+                    vcb.attribute(attrName, run.getAdditionalInfo(projectIndex,runIndex).get(attrName));
         }
         VariantContext vc = vcb.make();
         return vc;

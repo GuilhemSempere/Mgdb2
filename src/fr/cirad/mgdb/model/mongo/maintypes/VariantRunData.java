@@ -16,10 +16,12 @@
  *******************************************************************************/
 package fr.cirad.mgdb.model.mongo.maintypes;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.NoSuchElementException;
 
+import org.bson.codecs.pojo.annotations.BsonIgnore;
 import org.bson.codecs.pojo.annotations.BsonProperty;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.annotation.TypeAlias;
@@ -58,9 +60,37 @@ public class VariantRunData extends AbstractVariantData
 	private VariantRunDataId id;
 
 	/** The sample genotypes. */
-	@BsonProperty(FIELDNAME_SAMPLEGENOTYPES)
-	@Field(FIELDNAME_SAMPLEGENOTYPES)
+	@BsonProperty("FIELDNAME_SAMPLEGENOTYPES")
+	@Field("FIELDNAME_SAMPLEGENOTYPES")
+	@BsonIgnore
 	private HashMap<Integer, SampleGenotype> sampleGenotypes = new HashMap<Integer, SampleGenotype>();
+
+	/** The genotypes array */
+	@BsonProperty("sp")
+	@Field("sp")
+	private List<List<List<Integer>>> genotypeArray = new ArrayList<>();
+
+	public List<List<List<Integer>>> getGenotypeArray() {
+		return genotypeArray;
+	}
+
+	public void setGenotypeArray(List<List<List<Integer>>> genotypeArray) {
+		this.genotypeArray = genotypeArray;
+	}
+
+	/** The genotypes array */
+	@BsonProperty("ai")
+	@Field("ai")
+	private List<List<List<HashMap<String, Object>>>> genotypeAnnotationArray = new ArrayList<>();
+
+	public List<List<List<HashMap<String, Object>>>>getGenotypeAnnotationArray() {
+		return genotypeAnnotationArray;
+	}
+
+	public void setGenotypeAnnotationArray (List<List<List<HashMap<String, Object>>>> genotypeAnnotationArray) {
+		this.genotypeAnnotationArray = genotypeAnnotationArray;
+	}
+
 
 	/**
 	 * Instantiates a new variant run data.
