@@ -23,6 +23,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
+import fr.cirad.mgdb.model.mongo.maintypes.*;
 import org.apache.log4j.Logger;
 import org.bson.types.ObjectId;
 import org.springframework.data.mongodb.core.MongoTemplate;
@@ -407,12 +408,13 @@ public class DartImport extends AbstractGenotypeImport<FileImportParameters> {
 
                                     VariantRunData runToSave = addDartSeqDataToVariant(finalMongoTemplate, variant, finalAssembly == null ? null : finalAssembly.getId(), variantType, alleleIndexMap, dartFeature, finalProject, sRun, sampleIds, initialAlleleCount);
 
-                                    runToSave.getAdditionalInfo(project.getId(),project.getId()).put("AS", dartFeature.getAlleleSequence());
-                                    runToSave.getAdditionalInfo(project.getId(),project.getId()).put("SP", dartFeature.getSnpPos());
-                                    runToSave.getAdditionalInfo(project.getId(),project.getId()).put("CR", dartFeature.getCallRate());
-                                    runToSave.getAdditionalInfo(project.getId(),project.getId()).put("FHR", dartFeature.getFreqHomRef());
-                                    runToSave.getAdditionalInfo(project.getId(),project.getId()).put("FHS", dartFeature.getFreqHomSnp());
-                                    runToSave.getAdditionalInfo(project.getId(),project.getId()).put("FH", dartFeature.getFreqHets());
+                                    // FIXME: Use exact indexes
+                                    runToSave.getVariantAnnotation(project.getId(),project.getId()).put("AS", dartFeature.getAlleleSequence());
+                                    runToSave.getVariantAnnotation(project.getId(),project.getId()).put("SP", dartFeature.getSnpPos());
+                                    runToSave.getVariantAnnotation(project.getId(),project.getId()).put("CR", dartFeature.getCallRate());
+                                    runToSave.getVariantAnnotation(project.getId(),project.getId()).put("FHR", dartFeature.getFreqHomRef());
+                                    runToSave.getVariantAnnotation(project.getId(),project.getId()).put("FHS", dartFeature.getFreqHomSnp());
+                                    runToSave.getVariantAnnotation(project.getId(),project.getId()).put("FH", dartFeature.getFreqHets());
 
                                     for (Integer asmId : assemblyIDs) {
                                         ReferencePosition rp = variant.getReferencePosition(asmId);
@@ -533,6 +535,9 @@ public class DartImport extends AbstractGenotypeImport<FileImportParameters> {
     private VariantRunData addDartSeqDataToVariant(MongoTemplate mongoTemplate, VariantData variantToFeed, Integer nAssemblyId, Type variantType, Map<String, Integer> alleleIndexMap, DartInfo dartFeature, GenotypingProject project, String runName, List<String>individuals, int initialAlleleCount) throws Exception {
         boolean fSNP = variantType.equals(Type.SNP);
 
+        int projectIndex = project.getId();
+        int runIndex = project.getRuns().size();
+
 		if (variantToFeed.getType() == null || Type.NO_VARIATION.toString().equals(variantToFeed.getType()))
 			variantToFeed.setType(variantType.toString());
 		else if (null != variantType && Type.NO_VARIATION != variantType && !variantToFeed.getType().equals(variantType.toString()))
@@ -550,8 +555,8 @@ public class DartImport extends AbstractGenotypeImport<FileImportParameters> {
         String[] genotypes = dartFeature.getGenotypes();
 		for (int i=0; i<genotypes.length; i++) {
             String genotype = genotypes[i].toUpperCase();
-            if (genotype.startsWith("N"))
-                continue;    // we don't add missing genotypes
+//            if (genotype.startsWith("N"))
+//                continue;    // we don't add missing genotypes
 
 //            if (genotype.length() == 1) {
 //                String gtForIupacCode = iupacCodeConversionMap.get(genotype);
@@ -576,12 +581,29 @@ public class DartImport extends AbstractGenotypeImport<FileImportParameters> {
             }
 
             try {
-	            SampleGenotype aGT = new SampleGenotype(alleles.stream().map(allele -> alleleIndexMap.get(allele)).sorted().map(index -> index.toString()).collect(Collectors.joining("/")));
-				GenotypingSample sample = m_providedIdToSampleMap.get(sIndOrSpId);
-                Callset callset = m_providedIdToCallsetMap.get(sIndOrSpId);
-	        	if (sample == null)
-	        		throw new Exception("Sample / individual mapping contains no individual for sample " + sIndOrSpId);
-				vrd.getSampleGenotypes().put(callset.getId(), aGT);
+                String genotypeCode = !genotype.startsWith("N") ? alleles.stream().map(allele -> alleleIndexMap.get(allele)).sorted().map(index -> index.toString()).collect(Collectors.joining("/")):null;
+                if (genotypeCode!=null){
+                    SampleGenotype aGT = new SampleGenotype();
+                    GenotypingSample sample = m_providedIdToSampleMap.get(sIndOrSpId);
+                    Callset callset = m_providedIdToCallsetMap.get(sIndOrSpId);
+                    if (sample == null)
+                        throw new Exception("Sample / individual mapping contains no individual for sample " + sIndOrSpId);
+                    vrd.getSampleGenotypes().put(callset.getId(), aGT);
+                }
+
+                Integer encodedGenotype = GenotypeCodeManager.createGenotypeEncoding(alleles,alleleIndexMap,mongoTemplate);
+                List<List<List<Integer>>> genotypeArray = vrd.getGenotypeArray();
+
+                while (genotypeArray.size() <= projectIndex) {
+                    genotypeArray.add(new ArrayList<>());
+                }
+
+                while (genotypeArray.get(projectIndex).size() <= runIndex) {
+                    genotypeArray.get(projectIndex).add(new ArrayList<>());
+                }
+
+                genotypeArray.get(projectIndex).get(runIndex).add(encodedGenotype);
+
             }
             catch (NullPointerException npe) {
             	throw new Exception("Some genotypes for variant " + dartFeature.getChrom() + ":" + dartFeature.getStart() + " refer to alleles not declared at the beginning of the line!");

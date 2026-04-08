@@ -117,7 +117,7 @@ public class VcfImport extends AbstractGenotypeImport<VCFParameters> {
     //private String m_processID;
 
     /**
-     * Instantiates a new vcf import.
+     * Instantiates a new vcf import.VariantRunDataV3
      */
     public VcfImport() {
         this("random_process_" + System.currentTimeMillis() + "_" + Math.random());
@@ -593,7 +593,7 @@ public class VcfImport extends AbstractGenotypeImport<VCFParameters> {
         // New run information
         List<Integer> newGenotypes = vrd.getSampleGenotypes().get(projectIndex).get(runIndex);
         List<HashMap<String, Object>> newAdditionalInfo = vrd.getAdditionalInformation().get(projectIndex).get(runIndex);
-        HashMap<String, Object> newVariantAdditionalInfo = vrd.getAdditionalInfo(projectIndex, runIndex);
+        HashMap<String, Object> newVariantAdditionalInfo = vrd.getVariantAnnotation(projectIndex, runIndex);
         LOG.debug("New run information are: " + newGenotypes + newAdditionalInfo + newVariantAdditionalInfo);
         // Paths to new run's genotypes and additional information
         String spPath = VariantRunDataV3.FIELDNAME_SAMPLEGENOTYPES + "." + projectIndex + "." + runIndex;
@@ -860,13 +860,13 @@ public class VcfImport extends AbstractGenotypeImport<VCFParameters> {
 
         // main VCF fields that are stored as additional info in the DB
         if (vc.isFullyDecoded())
-            vrd.getAdditionalInfo(project.getId(),runIndex).put(VariantData.FIELD_FULLYDECODED, true);
+            vrd.getVariantAnnotation(project.getId(),runIndex).put(VariantData.FIELD_FULLYDECODED, true);
         if (vc.hasLog10PError())
-            vrd.getAdditionalInfo(project.getId(),runIndex).put(VariantData.FIELD_PHREDSCALEDQUAL, vc.getPhredScaledQual());
+            vrd.getVariantAnnotation(project.getId(),runIndex).put(VariantData.FIELD_PHREDSCALEDQUAL, vc.getPhredScaledQual());
         if (!VariantData.FIELDVAL_SOURCE_MISSING.equals(vc.getSource()))
-            vrd.getAdditionalInfo(project.getId(),runIndex).put(VariantData.FIELD_SOURCE, vc.getSource());
+            vrd.getVariantAnnotation(project.getId(),runIndex).put(VariantData.FIELD_SOURCE, vc.getSource());
         if (vc.filtersWereApplied())
-            vrd.getAdditionalInfo(project.getId(),runIndex).put(VariantData.FIELD_FILTERS, vc.getFilters().size() > 0 ? Helper.arrayToCsv(",", vc.getFilters()) : VCFConstants.PASSES_FILTERS_v4);
+            vrd.getVariantAnnotation(project.getId(),runIndex).put(VariantData.FIELD_FILTERS, vc.getFilters().size() > 0 ? Helper.arrayToCsv(",", vc.getFilters()) : VCFConstants.PASSES_FILTERS_v4);
 
         List<String> aiEffect = new ArrayList<String>(), aiGene = new ArrayList<String>();
 
@@ -926,7 +926,7 @@ public class VcfImport extends AbstractGenotypeImport<VCFParameters> {
         }
         if (!vai.isEmpty())
             vrd.setAdditionalInfo(project.getId(), runIndex, vai);
-        LOG.debug("Variant: " + variantToFeed.getId() + " has additional informaion: " + vrd.getAdditionalInfo(project.getId(),runIndex) );
+        LOG.debug("Variant: " + variantToFeed.getId() + " has additional informaion: " + vrd.getVariantAnnotation(project.getId(),runIndex) );
         // genotype fields
         Iterator<Genotype> genotypes = vc.getGenotypesOrderedByName().iterator();
         Map<String, Integer> knownAlleleStringToIndexMap = new HashMap<>();

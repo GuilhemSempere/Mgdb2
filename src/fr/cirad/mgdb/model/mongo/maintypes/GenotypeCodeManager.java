@@ -60,7 +60,10 @@ public class GenotypeCodeManager {
      * @param mongoTemplate  the MongoTemplate to use
      * @return the numeric genotype code
      */
-    public static synchronized int createGenotypeEncoding(List<String> alleles, Map<String, Integer> alleleIndexMap, MongoTemplate mongoTemplate) {
+    public static synchronized Integer createGenotypeEncoding(List<String> alleles, Map<String, Integer> alleleIndexMap, MongoTemplate mongoTemplate) {
+
+        if (alleles.get(0)==null)
+            return null;
         List<Integer> alleleIndices = alleles.stream()
                 .map(alleleIndexMap::get)
                 .collect(Collectors.toList());

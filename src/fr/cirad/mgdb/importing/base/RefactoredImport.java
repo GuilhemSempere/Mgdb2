@@ -28,6 +28,7 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
+import fr.cirad.mgdb.model.mongo.maintypes.*;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.log4j.Logger;
 import org.bson.types.ObjectId;
@@ -35,12 +36,6 @@ import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.query.Query;
 
 import fr.cirad.mgdb.importing.parameters.ImportParameters;
-import fr.cirad.mgdb.model.mongo.maintypes.Assembly;
-import fr.cirad.mgdb.model.mongo.maintypes.GenotypingProject;
-import fr.cirad.mgdb.model.mongo.maintypes.GenotypingSample;
-import fr.cirad.mgdb.model.mongo.maintypes.Individual;
-import fr.cirad.mgdb.model.mongo.maintypes.VariantData;
-import fr.cirad.mgdb.model.mongo.maintypes.VariantRunData;
 import fr.cirad.mgdb.model.mongo.subtypes.ReferencePosition;
 import fr.cirad.mgdb.model.mongo.subtypes.Run;
 import fr.cirad.mgdb.model.mongo.subtypes.SampleGenotype;
@@ -315,6 +310,8 @@ public abstract class RefactoredImport<T extends ImportParameters> extends Abstr
 
     protected VariantRunData addDataToVariant(MongoTemplate mongoTemplate, VariantData variantToFeed, Integer nAssemblyId, String sequence, Long bpPos, LinkedHashMap<String, String> orderedIndOrSpToPopulationMap, Map<String, Type> nonSnpVariantTypeMap, String[][] alleles, GenotypingProject project, String runName, boolean fImportUnknownVariants) throws Exception {
         VariantRunData vrd = new VariantRunData(new VariantRunDataId(project.getId(), runName, variantToFeed.getId()));
+        int projectIndex = project.getId();
+        int runIndex = project.getRuns().size();
 
         // genotype fields
         AtomicInteger allIdx = new AtomicInteger(0);
@@ -323,25 +320,26 @@ public abstract class RefactoredImport<T extends ImportParameters> extends Abstr
         for (String sIndOrSp : orderedIndOrSpToPopulationMap.keySet()) {
             i++;
 
-            if (alleles[i][0] == null)
-                continue;  // Do not add missing genotypes
+            if (alleles[i][0] != null) {
 
-            for (int j = 0; j < alleles[i].length; j++) {
-                if (!alleles[i][j].matches(validAlleleRegex))
-                    throw new Exception("Invalid allele '" + alleles[i][j] + "' provided for " + sIndOrSp + " at variant" + variantToFeed.getId());
+                for (int j = 0; j < alleles[i].length; j++) {
+                    if (!alleles[i][j].matches(validAlleleRegex))
+                        throw new Exception("Invalid allele '" + alleles[i][j] + "' provided for " + sIndOrSp + " at variant" + variantToFeed.getId());
 
-                if ("I".equals(alleles[i][j]))
-                    alleles[i][j] = "NN";
-                else if ("D".equals(alleles[i][j]))
-                    alleles[i][j] = "N";
+                    if ("I".equals(alleles[i][j]))
+                        alleles[i][j] = "NN";
+                    else if ("D".equals(alleles[i][j]))
+                        alleles[i][j] = "N";
 
-                Integer alleleIndex = alleleIndexMap.get(alleles[i][j]);
-                if (alleleIndex != null)
-                    continue;    // we already have this one
+                    Integer alleleIndex = alleleIndexMap.get(alleles[i][j]);
+                    if (alleleIndex != null)
+                        continue;    // we already have this one
 
-                alleleIndex = variantToFeed.getKnownAlleles().size();
-                variantToFeed.getKnownAlleles().add(alleles[i][j]);
-                alleleIndexMap.put(alleles[i][j], alleleIndex);
+                    alleleIndex = variantToFeed.getKnownAlleles().size();
+                    variantToFeed.getKnownAlleles().add(alleles[i][j]);
+                    alleleIndexMap.put(alleles[i][j], alleleIndex);
+                }
+
             }
 
             try {
@@ -354,8 +352,26 @@ public abstract class RefactoredImport<T extends ImportParameters> extends Abstr
                 } else
                     alleleStream = Arrays.stream(alleles[i]);
 
-                SampleGenotype aGT = new SampleGenotype(alleleStream.map(allele -> alleleIndexMap.get(allele)).sorted().map(index -> index.toString()).collect(Collectors.joining("/")));
-                vrd.getSampleGenotypes().put(m_providedIdToCallsetMap.get(sIndOrSp).getId(), aGT);
+                String genotype = alleles[i][0]!=null?alleleStream.map(allele -> alleleIndexMap.get(allele)).sorted().map(index -> index.toString()).collect(Collectors.joining("/")):null;
+
+                if (genotype!=null) {
+                    SampleGenotype aGT = new SampleGenotype(genotype);
+                    vrd.getSampleGenotypes().put(m_providedIdToCallsetMap.get(sIndOrSp).getId(), aGT);
+                }
+                Integer encodedGenotype = GenotypeCodeManager.createGenotypeEncoding(Arrays.asList(alleles[i]),alleleIndexMap,mongoTemplate);
+                List<List<List<Integer>>> genotypeArray = vrd.getGenotypeArray();
+
+                while (genotypeArray.size() <= projectIndex) {
+                    genotypeArray.add(new ArrayList<>());
+                }
+
+                while (genotypeArray.get(projectIndex).size() <= runIndex) {
+                    genotypeArray.get(projectIndex).add(new ArrayList<>());
+                }
+
+                genotypeArray.get(projectIndex).get(runIndex).add(encodedGenotype);
+
+
             } catch (Exception e) {
                 LOG.warn("Ignoring invalid genotype \"" + String.join("/", alleles[i]) + "\" for variant " + variantToFeed.getId() + " and individual " + sIndOrSp, e);
             }

@@ -168,7 +168,15 @@ abstract public class AbstractVariantData
     /** The additional info. */
     @BsonProperty("vai")
     @Field("vai")
-    private List<List<HashMap<String, Object>>>  additionalInfo = new ArrayList<>();
+    private List<List<HashMap<String, Object>>>  variantAnnotation = new ArrayList<>();
+
+    public void setVariantAnnotation(List<List<HashMap<String, Object>>> variantAnnotation) {
+        this.variantAnnotation = variantAnnotation;
+    }
+
+    public List<List<HashMap<String, Object>>> getVariantAnnotation() {
+        return this.variantAnnotation;
+    }
 
 	static private HashSet<String> specificallyTreatedAdditionalInfoFields = new HashSet<String> () {{ add(FIELD_SOURCE); add(FIELD_FULLYDECODED); add(FIELD_FILTERS); add(FIELD_PHREDSCALEDQUAL); }};
 
@@ -543,10 +551,10 @@ abstract public class AbstractVariantData
         return new HashMap<>(); //FIXME
     }
 
-    public HashMap<String, Object> getAdditionalInfo(int projectIndex, int runIndex) {
-        if (additionalInfo == null || additionalInfo.size() <= projectIndex)
+    public HashMap<String, Object> getVariantAnnotation(int projectIndex, int runIndex) {
+        if (variantAnnotation == null || variantAnnotation.size() <= projectIndex)
             return new HashMap<>();
-        List<HashMap<String, Object>> runsForProject = additionalInfo.get(projectIndex);
+        List<HashMap<String, Object>> runsForProject = variantAnnotation.get(projectIndex);
         if (runsForProject == null || runsForProject.size() <= runIndex)
             return new HashMap<>();
         return runsForProject.get(runIndex);
@@ -560,8 +568,8 @@ abstract public class AbstractVariantData
     public void setAdditionalInfo(HashMap<String, Object> additionalInfo) {
         Log.debug("setting variant additional info: " + additionalInfo );
         List a = new ArrayList<>();
-        a.add(getAdditionalInfo(1,0)); //FIXME
-        this.additionalInfo.add(a);
+        //a.add(getAdditionalInfo(1,0)); //FIXME
+        this.variantAnnotation.add(a);
     }
 
 //    public void setAdditionalInfo(List<List<HashMap<String, Object>>> additionalInfo) {
@@ -570,15 +578,15 @@ abstract public class AbstractVariantData
 
     public void setAdditionalInfo(int projectIndex, int runIndex, HashMap<String, Object> ai) {
         Log.debug("setting variant additional info: " + ai );
-        if (additionalInfo == null)
-            additionalInfo = new ArrayList<>();
+        if (variantAnnotation == null)
+            variantAnnotation = new ArrayList<>();
 
         // Ensure the outer list has enough projects
-        while (additionalInfo.size() <= projectIndex) {
-            additionalInfo.add(new ArrayList<>());
+        while (variantAnnotation.size() <= projectIndex) {
+            variantAnnotation.add(new ArrayList<>());
         }
 
-        List<HashMap<String, Object>> runsForProject = additionalInfo.get(projectIndex);
+        List<HashMap<String, Object>> runsForProject = variantAnnotation.get(projectIndex);
 
         // Ensure the list has enough runs
         while (runsForProject.size() <= runIndex) {
@@ -765,7 +773,7 @@ abstract public class AbstractVariantData
 	{
         System.out.println("running to variant context");
         // FIXME
-        int projectIndex = 2;
+        int projectIndex = 1;
         int runIndex = 0;
 		ArrayList<Genotype> genotypes = new ArrayList<Genotype>();
 		String sRefAllele = knownAlleles.isEmpty() ? null : knownAlleles.iterator().next();
@@ -966,7 +974,7 @@ abstract public class AbstractVariantData
         }
 
         VariantRunData run = runsWhereDataWasFound.size() == 1 ? runsWhereDataWasFound.iterator().next() : null;    // if there is not exactly one run involved then we do not export meta-data
-        String source = run == null ? null : (String) run.getAdditionalInfo(projectIndex,runIndex).get(FIELD_SOURCE);
+        String source = run == null ? null : (String) run.getVariantAnnotation(projectIndex,runIndex).get(FIELD_SOURCE);
 
         ReferencePosition referencePosition = getReferencePosition(nAssemblyId);
         long start = referencePosition != null ? referencePosition.getStartSite() : 0;
@@ -988,22 +996,22 @@ abstract public class AbstractVariantData
         vcb.genotypes(genotypes);
         
         if (run != null) {
-            Boolean fullDecod = (Boolean) run.getAdditionalInfo(projectIndex,runIndex).get(FIELD_FULLYDECODED);
+            Boolean fullDecod = (Boolean) run.getVariantAnnotation(projectIndex,runIndex).get(FIELD_FULLYDECODED);
             vcb.fullyDecoded(fullDecod != null && fullDecod);
     
-            String filters = (String) run.getAdditionalInfo(projectIndex,runIndex).get(FIELD_FILTERS);
+            String filters = (String) run.getVariantAnnotation(projectIndex,runIndex).get(FIELD_FILTERS);
             if (filters != null)
                 vcb.filters(filters.split(","));
             else
                 vcb.filters(VCFConstants.UNFILTERED);
             
-            Number qual = (Number) run.getAdditionalInfo(projectIndex,runIndex).get(FIELD_PHREDSCALEDQUAL);
+            Number qual = (Number) run.getVariantAnnotation(projectIndex,runIndex).get(FIELD_PHREDSCALEDQUAL);
             if (qual != null)
                 vcb.log10PError(qual.doubleValue() / -10.0D);
             
-            for (String attrName : run.getAdditionalInfo(projectIndex,runIndex).keySet())
+            for (String attrName : run.getVariantAnnotation(projectIndex,runIndex).keySet())
                 if (!VariantRunData.FIELDNAME_ADDITIONAL_INFO_EFFECT_NAME.equals(attrName) && !VariantRunData.FIELDNAME_ADDITIONAL_INFO_EFFECT_GENE.equals(attrName) && !specificallyTreatedAdditionalInfoFields.contains(attrName))
-                    vcb.attribute(attrName, run.getAdditionalInfo(projectIndex,runIndex).get(attrName));
+                    vcb.attribute(attrName, run.getVariantAnnotation(projectIndex,runIndex).get(attrName));
         }
         VariantContext vc = vcb.make();
         return vc;
