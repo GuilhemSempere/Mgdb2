@@ -779,7 +779,7 @@ abstract public class AbstractVariantData
         Integer knownAlleleCount = null;
         if (runs != null && !runs.isEmpty())
             for (VariantRunData run : runs) {
-                for (int projectIdx = 2; projectIdx <= 2; projectIdx++) {
+                for (int projectIdx = 1; projectIdx <= 1; projectIdx++) {
                     List<List<Integer>> projectGenotypeArray = run.getGenotypeArray().get(projectIdx);
                     List<List<HashMap<String,Object>>> projectGenotypeAnnotationArray = run.getGenotypeAnnotationArray().get(projectIdx);
                     if (projectGenotypeArray.isEmpty())
@@ -787,7 +787,7 @@ abstract public class AbstractVariantData
                     GenotypingProject project = mongoTemplate.findById(projectIdx, GenotypingProject.class);
 
 
-                    for (int runIdx = 0; runIdx <= 2; runIdx++) {
+                    for (int runIdx = 0; runIdx <= 0; runIdx++) {
 
                         List<Integer> runGenotypeArray = projectGenotypeArray.get(runIdx);
                         List<HashMap<String,Object>> runGenotypeAnnotationArray = projectGenotypeAnnotationArray.get(runIdx);
