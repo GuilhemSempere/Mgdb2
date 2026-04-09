@@ -273,7 +273,7 @@ public class DartImport extends AbstractGenotypeImport<FileImportParameters> {
     @Override
     protected long doImport(FileImportParameters params, MongoTemplate mongoTemplate, GenotypingProject project, ProgressIndicator progress, Integer createdProject) throws Exception {
         String sModule = params.getModule();
-        String sProject = params.getRun();
+        String sProject = params.getProject();
         String sRun = params.getRun();
         String assemblyName = params.getAssemblyName();
         Map<String, String> sampleToIndividualMap = params.getSampleToIndividualMap();
