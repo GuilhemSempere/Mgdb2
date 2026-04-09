@@ -217,6 +217,11 @@ public class IntertekImport extends AbstractGenotypeImport<FileImportParameters>
             ExecutorService saveService = new ThreadPoolExecutor(1, saveServiceThreads(nNConcurrentThreads), 30, TimeUnit.SECONDS, saveServiceQueue, new ThreadPoolExecutor.CallerRunsPolicy());
             int nNumberOfVariantRunsToSaveAtOnce = 0;
 
+
+
+            List<List<List<Integer>>> genotypeArray = null;
+            List<List<List<HashMap<String,Object>>>> genotypeArrayAnnotationArray = null;
+
             while ((values = csvReader.readNext()) != null) {
                 if (progress.getError() != null || progress.isAborted())
                     return 0;
@@ -373,6 +378,14 @@ public class IntertekImport extends AbstractGenotypeImport<FileImportParameters>
 
                     if (currentVariantId == null) {
                         currentVariantId = variantId;
+
+                        genotypeArray = new ArrayList<>();
+                        genotypeArray.add(new ArrayList<>());
+                        genotypeArray.get(0).add(new ArrayList<>());
+
+                        genotypeArrayAnnotationArray = new ArrayList<>();
+                        genotypeArrayAnnotationArray.add(new ArrayList<>());
+                        genotypeArrayAnnotationArray.get(0).add(new ArrayList<>());
                     }
 
                     if (!variantId.equals(currentVariantId)) {
@@ -380,9 +393,18 @@ public class IntertekImport extends AbstractGenotypeImport<FileImportParameters>
                             nNumberOfVariantRunsToSaveAtOnce = Math.max(1, nMaxChunkSize / m_providedIdToCallsetMap.size());
                         }
 
+
+
                         addVariantRunToChunk(currentVariantId, fSkipMonomorphic, existingIds, variantIdsToSave, variantRunsChunk, variantsChunk,
-                                sampleGenotypes, variants, project, sRun, assemblyIDs);
+                                sampleGenotypes, variants, project, sRun, assemblyIDs, genotypeArray,genotypeArrayAnnotationArray);
                         sampleGenotypes = new HashMap<>();
+                        genotypeArray = new ArrayList<>();
+                        genotypeArray.add(new ArrayList<>());
+                        genotypeArray.get(0).add(new ArrayList<>());
+
+                        genotypeArrayAnnotationArray = new ArrayList<>();
+                        genotypeArrayAnnotationArray.add(new ArrayList<>());
+                        genotypeArrayAnnotationArray.get(0).add(new ArrayList<>());
 
                         if (variantRunsChunk.size() == nNumberOfVariantRunsToSaveAtOnce) {
                             //save variantRuns
@@ -393,6 +415,13 @@ public class IntertekImport extends AbstractGenotypeImport<FileImportParameters>
                     currentVariantId = variantId;
 
                     String gtCode = null;
+                    Integer encodedGenotype = null;
+                    Map<String, Integer> allelesMapForEncoding = variantAllelesMap.get(variantId).entrySet()
+                            .stream()
+                            .collect(Collectors.toMap(
+                                    entry -> entry.getKey(),
+                                    entry -> Integer.parseInt(entry.getValue())
+                            ));
                     Map<String, String> variantAlleles = variantAllelesMap.get(variantId);
                     String refAllele = variantAlleles.get(0);
                     if (!call.equals("NTC")) {
@@ -403,6 +432,7 @@ public class IntertekImport extends AbstractGenotypeImport<FileImportParameters>
                             gtCode = alleles.stream()
                                     .map(al -> variantAlleles.get(al))
                                     .collect(Collectors.joining("/"));
+                            encodedGenotype = GenotypeCodeManager.createGenotypeEncoding(alleles,allelesMapForEncoding,mongoTemplate);
                             if (nPloidy == 0) {
                                 nPloidy = alleles.size();
                                 project.setPloidyLevel(nPloidy);
@@ -453,6 +483,8 @@ public class IntertekImport extends AbstractGenotypeImport<FileImportParameters>
                         SampleGenotype sampleGt = new SampleGenotype(gtCode);
                         sampleGt.getAdditionalInfo().put(AbstractVariantData.GT_FIELD_FI, FI);	//TODO - Check how the fluorescence indexes X et Y should be stored
                         sampleGenotypes.put(m_providedIdToCallsetMap.get(bioEntityID).getId(), sampleGt);
+                        genotypeArray.get(0).get(0).add(encodedGenotype);
+                        genotypeArrayAnnotationArray.get(0).get(0).add(sampleGt.getAdditionalInfo());
                     }
                 }
             }
@@ -460,7 +492,7 @@ public class IntertekImport extends AbstractGenotypeImport<FileImportParameters>
 
             //Add last variantRun
             addVariantRunToChunk(currentVariantId, fSkipMonomorphic, existingIds, variantIdsToSave, variantRunsChunk,
-                    variantsChunk, sampleGenotypes, variants, project, sRun, assemblyIDs);
+                    variantsChunk, sampleGenotypes, variants, project, sRun, assemblyIDs, genotypeArray, genotypeArrayAnnotationArray);
 
             //save last chunk
             if (!variantRunsChunk.isEmpty())
@@ -488,7 +520,7 @@ public class IntertekImport extends AbstractGenotypeImport<FileImportParameters>
     private void addVariantRunToChunk(String currentVariantId, boolean fSkipMonomorphic, Set<String> existingVariantIds,
                                       Set<String> variantIdsToSave, HashSet<VariantRunData> variantRunsChunk, HashSet<VariantData> variantsChunk,
                                       HashMap<Integer, SampleGenotype> sampleGenotypes, Map<String, VariantData> variants,
-                                      GenotypingProject project, String sRun, Collection<Integer> assemblyIDs) {
+                                      GenotypingProject project, String sRun, Collection<Integer> assemblyIDs, List<List<List<Integer>>> genotypeArray, List<List<List<HashMap<String,Object>>>> genotypeAnnotationArray) {
 
         if (!existingVariantIds.contains(currentVariantId) && fSkipMonomorphic) {
             String[] distinctGTs = sampleGenotypes.values().stream().map(sampleGT -> sampleGT.getCode()).filter(gtCode -> gtCode != null).distinct().toArray(String[]::new);
@@ -517,6 +549,11 @@ public class IntertekImport extends AbstractGenotypeImport<FileImportParameters>
         }
 
         vrd.setSampleGenotypes(sampleGenotypes);
+        vrd.setGenotypeArray(genotypeArray);
+        vrd.setGenotypeAnnotationArray(genotypeAnnotationArray);
+
+
+
 
         variantRunsChunk.add(vrd);
         variantsChunk.add(variant);
