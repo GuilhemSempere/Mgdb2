@@ -581,7 +581,13 @@ public class DartImport extends AbstractGenotypeImport<FileImportParameters> {
             }
 
             try {
-                String genotypeCode = !genotype.startsWith("N") ? alleles.stream().map(allele -> alleleIndexMap.get(allele)).sorted().map(index -> index.toString()).collect(Collectors.joining("/")):null;
+                String genotypeCode = null;
+                Integer encodedGenotype = null;
+                if (genotype!=null && alleles != null && alleleIndexMap != null){
+                    encodedGenotype = GenotypeCodeManager.createGenotypeEncoding(alleles,alleleIndexMap,mongoTemplate);
+                    genotypeCode = !genotype.startsWith("N") ? alleles.stream().map(allele -> alleleIndexMap.get(allele)).sorted().map(index -> index.toString()).collect(Collectors.joining("/")):null;
+                }
+                    genotypeCode = !genotype.startsWith("N") ? alleles.stream().map(allele -> alleleIndexMap.get(allele)).sorted().map(index -> index.toString()).collect(Collectors.joining("/")):null;
                 if (genotypeCode!=null){
                     SampleGenotype aGT = new SampleGenotype();
                     GenotypingSample sample = m_providedIdToSampleMap.get(sIndOrSpId);
@@ -591,7 +597,7 @@ public class DartImport extends AbstractGenotypeImport<FileImportParameters> {
                     vrd.getSampleGenotypes().put(callset.getId(), aGT);
                 }
 
-                Integer encodedGenotype = GenotypeCodeManager.createGenotypeEncoding(alleles,alleleIndexMap,mongoTemplate);
+
                 List<List<List<Integer>>> genotypeArray = vrd.getGenotypeArray();
 
                 while (genotypeArray.size() <= projectIndex) {
@@ -606,6 +612,7 @@ public class DartImport extends AbstractGenotypeImport<FileImportParameters> {
 
             }
             catch (NullPointerException npe) {
+                LOG.debug(npe);
             	throw new Exception("Some genotypes for variant " + dartFeature.getChrom() + ":" + dartFeature.getStart() + " refer to alleles not declared at the beginning of the line!");
             }
     	}
