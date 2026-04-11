@@ -291,6 +291,7 @@ public class DartImport extends AbstractGenotypeImport<FileImportParameters> {
         progress.addStep("Processing variant lines");
         progress.moveToNextStep();
 
+        int runIndex = project.getRuns().indexOf(sRun) == -1 ? project.getRuns().size() : project.getRuns().indexOf(sRun);
         int nNConcurrentThreads = Math.max(1, nNumProc);
         LOG.debug("Importing project '" + sProject + "' into " + sModule + " using " + nNConcurrentThreads + " threads");
 
@@ -435,7 +436,7 @@ public class DartImport extends AbstractGenotypeImport<FileImportParameters> {
                                     numberOfVariantsProcessedInThread++;
                                     int currentTotalProcessedVariants = totalProcessedVariantCount.get();
                                     if (currentTotalProcessedVariants % localNumberOfVariantsToSaveAtOnce == 0) {
-                                        saveChunk(unsavedVariants, unsavedRuns, existingVariantIDs, finalMongoTemplate, progress, saveService);
+                                        VcfImport.saveChunkV3(unsavedVariants, unsavedRuns, existingVariantIDs, finalMongoTemplate, progress, saveService, project.getId(),runIndex);
                                         unsavedVariants = new HashSet<>();
                                         unsavedRuns = new HashSet<>();
                                     }

@@ -21,6 +21,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.NoSuchElementException;
 
+import fr.cirad.mgdb.model.mongo.subtypes.VariantRunDataV3Id;
 import org.bson.codecs.pojo.annotations.BsonIgnore;
 import org.bson.codecs.pojo.annotations.BsonProperty;
 import org.springframework.data.annotation.Id;
@@ -56,12 +57,14 @@ public class VariantRunData extends AbstractVariantData
 
 	/** The id. */
 	@BsonProperty("_id")
-	@Id
 	private VariantRunDataId id;
 
+	/** The id. */
+	@BsonProperty("_idv")
+	@Id
+	private VariantRunDataV3Id idv;
+
 	/** The sample genotypes. */
-	@BsonProperty("FIELDNAME_SAMPLEGENOTYPES")
-	@Field("FIELDNAME_SAMPLEGENOTYPES")
 	@BsonIgnore
 	private HashMap<Integer, SampleGenotype> sampleGenotypes = new HashMap<Integer, SampleGenotype>();
 
@@ -100,6 +103,13 @@ public class VariantRunData extends AbstractVariantData
 
 	/**
 	 * Instantiates a new variant run data.
+	 */
+	public VariantRunData(VariantRunDataV3Id id) {
+		setId(id);
+	}
+
+	/**
+	 * Instantiates a new variant run data.
 	 *
 	 * @param id the id
 	 */
@@ -117,6 +127,16 @@ public class VariantRunData extends AbstractVariantData
 	}
 
 	/**
+	 * Gets the id.
+	 *
+	 * @return the id
+	 */
+
+	public VariantRunDataV3Id getIdV3() {
+		return idv;
+	}
+
+	/**
 	 * Sets the id.
 	 *
 	 * @param id the new id
@@ -124,10 +144,19 @@ public class VariantRunData extends AbstractVariantData
 	public void setId(VariantRunDataId id) {
 		this.id = id;
 	}
+
+	/**
+	 * Sets the id.
+	 *
+	 * @param id the new id
+	 */
+	public void setId(VariantRunDataV3Id id) {
+		this.idv = id;
+	}
 	
         @Override
 	public String getVariantId() {
-		return getId().getVariantId();
+		return getIdV3().getVariantId();
 	}
 
 	/**
@@ -169,25 +198,25 @@ public class VariantRunData extends AbstractVariantData
 		if (o == null || !(o instanceof VariantRunData))
 			return false;
 		
-		return getId().equals(((VariantRunData)o).getId());
+		return getIdV3().equals(((VariantRunData)o).getIdV3());
 	}
     
 	@Override
 	public int hashCode()	// thanks to this overriding, HashSet.contains will find such objects based on their ID
 	{
-		if (getId() == null)
+		if (getIdV3() == null)
 			return super.hashCode();
 
-		return getId().hashCode();
+		return getIdV3().hashCode();
 	}
 	
 	@Override
 	public String toString()
 	{
-		if (getId() == null)
+		if (getIdV3() == null)
 			return super.toString();
 
-		return getId().toString();
+		return getIdV3().toString();
 	}
 	
     /**

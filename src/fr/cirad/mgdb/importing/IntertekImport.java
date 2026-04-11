@@ -205,6 +205,8 @@ public class IntertekImport extends AbstractGenotypeImport<FileImportParameters>
             int i = 0;
             int nPloidy = 0;
 
+            int runIndex = project.getRuns().indexOf(sRun) == -1 ? project.getRuns().size() : project.getRuns().indexOf(sRun);
+
             String currentVariantId = null;
             HashMap<Integer, SampleGenotype> sampleGenotypes = new HashMap<>();
             HashSet<VariantRunData> variantRunsChunk = new HashSet<>();
@@ -408,7 +410,7 @@ public class IntertekImport extends AbstractGenotypeImport<FileImportParameters>
 
                         if (variantRunsChunk.size() == nNumberOfVariantRunsToSaveAtOnce) {
                             //save variantRuns
-                            saveChunk(variantsChunk, variantRunsChunk, existingVariantIDs, mongoTemplate, progress, saveService);
+                            VcfImport.saveChunkV3(variantsChunk, variantRunsChunk, existingVariantIDs, mongoTemplate, progress, saveService,project.getId(),runIndex);
                             variantRunsChunk = new HashSet<>();
                         }
                     }
@@ -496,7 +498,7 @@ public class IntertekImport extends AbstractGenotypeImport<FileImportParameters>
 
             //save last chunk
             if (!variantRunsChunk.isEmpty())
-                saveChunk(variantsChunk, variantRunsChunk, existingVariantIDs, mongoTemplate, progress, saveService);
+                VcfImport.saveChunkV3(variantsChunk, variantRunsChunk, existingVariantIDs, mongoTemplate, progress, saveService,project.getId(),runIndex);
 
             if (!ambiguousVariants.isEmpty()) {
                 progress.markAsComplete("WARNING : Ambiguous matching between alleleX/alleleY and existing variant REF/ALT alleles for variants : " + String.join(",", ambiguousVariants));

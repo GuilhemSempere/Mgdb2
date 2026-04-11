@@ -28,6 +28,7 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
+import fr.cirad.mgdb.importing.VcfImport;
 import fr.cirad.mgdb.model.mongo.maintypes.*;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.log4j.Logger;
@@ -68,6 +69,7 @@ public abstract class RefactoredImport<T extends ImportParameters> extends Abstr
     public long importTempFileContents(ProgressIndicator progress, int nNConcurrentThreads, MongoTemplate mongoTemplate, Integer nAssemblyId, File tempFile, LinkedHashMap<String, String> providedVariantPositions, HashMap<String, String> existingVariantIDs, GenotypingProject project, String sRun, HashMap<String, ArrayList<String>> inconsistencies, LinkedHashMap<String, String> orderedIndividualToPopulationMap, Map<String, Type> nonSnpVariantTypeMap, HashSet<Integer> indexesOfLinesThatMustBeSkipped, boolean fSkipMonomorphic) throws Exception {
         String[] individuals = orderedIndividualToPopulationMap.keySet().toArray(new String[orderedIndividualToPopulationMap.size()]);
         final AtomicInteger count = new AtomicInteger(0);
+        int runIndex = project.getRuns().indexOf(sRun) == -1 ? project.getRuns().size() : project.getRuns().indexOf(sRun);
 
         // loop over each variation and write to DB
         BufferedReader reader = null;
@@ -257,7 +259,7 @@ public abstract class RefactoredImport<T extends ImportParameters> extends Abstr
                                     }
 
                                     if (processedVariants % nNumberOfVariantsToSaveAtOnce == 0) {
-                                        saveChunk(unsavedVariants, unsavedRuns, existingVariantIDs, mongoTemplate, progress, saveService);
+                                        VcfImport.saveChunkV3(unsavedVariants, unsavedRuns, existingVariantIDs, mongoTemplate, progress, saveService,projId,runIndex);
                                         unsavedVariants = new HashSet<VariantData>();
                                         unsavedRuns = new HashSet<VariantRunData>();
 
