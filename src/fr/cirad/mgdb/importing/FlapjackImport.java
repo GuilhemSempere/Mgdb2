@@ -219,6 +219,7 @@ public class FlapjackImport extends RefactoredImport<FlapjackImportParameters> {
             orderedIndOrSpToPopulationMap.put(sInd, null);	// we have no population info
         progress.setPercentageEnabled(false);
         createCallSetsSamplesIndividuals(new ArrayList<>(orderedIndOrSpToPopulationMap.keySet()), mongoTemplate, project.getId(), sRun, sampleToIndividualMap, progress);
+        setSamplesPersisted(true);
         if (progress.getError() != null || progress.isAborted())
             return 0;
 

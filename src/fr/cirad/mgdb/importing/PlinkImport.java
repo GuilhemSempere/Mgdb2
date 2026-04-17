@@ -219,6 +219,7 @@ public class PlinkImport extends RefactoredImport<PlinkImportParameters> {
         // Create the necessary samples
         progress.setPercentageEnabled(false);
         createCallSetsSamplesIndividuals(new ArrayList<>(orderedIndOrSpToPopulationMap.keySet()), mongoTemplate, project.getId(), sRun, sampleToIndividualMap, progress);
+        setSamplesPersisted(true);
 
         if (progress.getError() != null || progress.isAborted())
             return createdProject;
