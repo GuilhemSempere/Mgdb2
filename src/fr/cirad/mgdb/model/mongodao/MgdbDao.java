@@ -630,13 +630,8 @@ public class MgdbDao {
      * @param samples the sample ids
      * @return the individuals from samples
      */
-    public static List<Individual> getIndividualsFromSamples(final String sModule, final Collection<GenotypingSample> samples) {
-        MongoTemplate mongoTemplate = MongoTemplateManager.get(sModule);
-        ArrayList<Individual> result = new ArrayList<Individual>();
-        for (GenotypingSample sp : samples) {
-            result.add(mongoTemplate.findById(sp.getIndividual(), Individual.class));
-        }
-        return result;
+    public static List<Individual> getIndividualsFromSamples(final MongoTemplate mongoTemplate, final Collection<GenotypingSample> samples) {
+        return mongoTemplate.find(new Query(Criteria.where("_id").in(samples.stream().map(GenotypingSample::getIndividual).distinct().toList())), Individual.class);
     }
 
     public static TreeMap<String /*individual*/, ArrayList<GenotypingSample>> getSamplesByIndividualForProjects(final String sModule, final Collection<Integer> projIDs, final Collection<String> individuals) throws ObjectNotFoundException {
@@ -648,8 +643,8 @@ public class MgdbDao {
         Criteria crit = Criteria.where(GenotypingSample.FIELDNAME_CALLSETS + "." + Callset.FIELDNAME_PROJECT_ID).in(projIDs);
         if (individuals != null)
             crit.andOperator(Criteria.where(GenotypingSample.FIELDNAME_INDIVIDUAL).in(individuals));
-        Query q = new Query(crit);
 
+        Query q = new Query(crit);
         for (GenotypingSample sample : mongoTemplate.find(q, GenotypingSample.class)) {
             ArrayList<GenotypingSample> individualSamples = result.get(sample.getIndividual());
             if (individualSamples == null) {
@@ -768,10 +763,6 @@ public class MgdbDao {
         return result;
     }
     
-    public LinkedHashMap<String, Individual> loadIndividualsForUser(String module, String sUser, Collection<Integer> projIDs, Collection<String> indIDs, LinkedHashMap<String, Set<String>> filters) {
-    	return loadIndividualsForUser(module, sUser, projIDs, indIDs, filters, true);
-    }
-    
     /**
      * @param module the database name (mandatory)
      * @param sUser username for whom to get custom metadata (optional)
@@ -783,9 +774,9 @@ public class MgdbDao {
      * restricted by it, otherwise if projIDs is specified the list is
      * restricted by it, otherwise all database Individuals are returned
      */
-    public LinkedHashMap<String, Individual> loadIndividualsForUser(String module, String sUser, Collection<Integer> projIDs, Collection<String> indIDs, LinkedHashMap<String, Set<String>> filters, boolean fIncludeMetadata) {
+    public LinkedHashMap<String, Individual> loadIndividualsForUser(String module, String sUser, Collection<Integer> projIDs, Collection<String> indIDs, LinkedHashMap<String, Set<String>> filters) {
         MongoTemplate mongoTemplate = MongoTemplateManager.get(module);
-        List<Criteria> crits = new ArrayList<>();
+        List<Criteria> crits = new ArrayList<>();	
         
         if (indIDs == null && Helper.estimDocCount(mongoTemplate, GenotypingProject.class) != 1) // if no list of individuals is provided we may select them by project
         	indIDs = mongoTemplate.findDistinct(projIDs == null || projIDs.isEmpty() ? new Query() : new Query(Criteria.where(GenotypingSample.FIELDNAME_CALLSETS + "." + Callset.FIELDNAME_PROJECT_ID).in(projIDs)), GenotypingSample.FIELDNAME_INDIVIDUAL, GenotypingSample.class, String.class);
@@ -815,7 +806,7 @@ public class MgdbDao {
         	.as("cimd"));            	
         	
         	pipeline.add(Aggregation.unwind("$cimd", true));
-        	pipeline.add(Aggregation.project().and(MergeObjects.mergeValuesOf("$" + Individual.SECTION_ADDITIONAL_INFO, "$cimd." + Individual.SECTION_ADDITIONAL_INFO)).as(Individual.SECTION_ADDITIONAL_INFO));
+        	pipeline.add(Aggregation.project().andInclude(Individual.FIELDNAME_POPULATION).and(MergeObjects.mergeValuesOf("$" + Individual.SECTION_ADDITIONAL_INFO, "$cimd." + Individual.SECTION_ADDITIONAL_INFO)).as(Individual.SECTION_ADDITIONAL_INFO));
 
             if (filters != null)
     	        for (Entry<String, Set<String>> filterEntry : filters.entrySet()) {

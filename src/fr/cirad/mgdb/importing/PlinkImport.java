@@ -174,7 +174,7 @@ public class PlinkImport extends RefactoredImport<PlinkImportParameters> {
     @Override
     protected long doImport(PlinkImportParameters params, MongoTemplate mongoTemplate, GenotypingProject project, ProgressIndicator progress, Integer createdProject) throws Exception {
         String sModule = params.getModule();
-        String sProject = params.getRun();
+        String sProject = params.getProject();
         String sRun = params.getRun();
         String assemblyName = params.getAssemblyName();
         Map<String, String> sampleToIndividualMap = params.getSampleToIndividualMap();
@@ -219,6 +219,7 @@ public class PlinkImport extends RefactoredImport<PlinkImportParameters> {
         // Create the necessary samples
         progress.setPercentageEnabled(false);
         createCallSetsSamplesIndividuals(new ArrayList<>(orderedIndOrSpToPopulationMap.keySet()), mongoTemplate, project.getId(), sRun, sampleToIndividualMap, progress);
+        setSamplesPersisted(true);
 
         if (progress.getError() != null || progress.isAborted())
             return createdProject;

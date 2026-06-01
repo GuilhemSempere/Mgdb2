@@ -867,6 +867,10 @@ public class MongoTemplateManager implements ApplicationContextAware {
     			ge.getValue().shutdownNow();
     		}
     }
+    
+    public static String getTemporaryVariantCollectionName(String processID) {
+    	return TEMP_COLL_PREFIX + Helper.convertToMD5(processID);
+    }
 
 	/**
 	     * Gets the temporary variant collection.
@@ -879,7 +883,7 @@ public class MongoTemplateManager implements ApplicationContextAware {
      */
     public static MongoCollection<Document> getTemporaryVariantCollection(String sModule, String processID, boolean fEmptyItBeforeHand, boolean fIndexPositionFieldsEvenIfCollectionIsEmpty, boolean fWaitForIndexCreationCompletion) throws InterruptedException {
         MongoTemplate mongoTemplate = get(sModule);
-        MongoCollection<Document> tmpColl = mongoTemplate.getCollection(TEMP_COLL_PREFIX + Helper.convertToMD5(processID));
+        MongoCollection<Document> tmpColl = mongoTemplate.getCollection(getTemporaryVariantCollectionName(processID));
         if (fEmptyItBeforeHand)
         	try {
 	            tmpColl.drop();
