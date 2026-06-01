@@ -143,7 +143,7 @@ public class FlapjackImport extends RefactoredImport<FlapjackImportParameters> {
     @Override
     protected long doImport(FlapjackImportParameters params, MongoTemplate mongoTemplate, GenotypingProject project, ProgressIndicator progress, Integer createdProject) throws Exception {
         String sModule = params.getModule();
-        String sProject = params.getRun();
+        String sProject = params.getProject();
         String sRun = params.getRun();
         String assemblyName = params.getAssemblyName();
         Map<String, String> sampleToIndividualMap = params.getSampleToIndividualMap();
@@ -219,6 +219,7 @@ public class FlapjackImport extends RefactoredImport<FlapjackImportParameters> {
             orderedIndOrSpToPopulationMap.put(sInd, null);	// we have no population info
         progress.setPercentageEnabled(false);
         createCallSetsSamplesIndividuals(new ArrayList<>(orderedIndOrSpToPopulationMap.keySet()), mongoTemplate, project.getId(), sRun, sampleToIndividualMap, progress);
+        setSamplesPersisted(true);
         if (progress.getError() != null || progress.isAborted())
             return 0;
 

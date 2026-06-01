@@ -30,6 +30,7 @@ import java.util.Properties;
 import java.util.ResourceBundle;
 import java.util.ResourceBundle.Control;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.stream.Collectors;
 import java.util.UUID;
 
@@ -206,7 +207,7 @@ public class AppConfig {
 	}
     
     public Map<String, String> getPrefixed(String sPrefix) {
-        Map<String, String> result = new HashMap<>();
+        Map<String, String> result = new TreeMap<>();
         Enumeration<String> keys = props.getKeys();
         while (keys.hasMoreElements()) {
             String key = keys.nextElement();
