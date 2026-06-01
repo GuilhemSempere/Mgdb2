@@ -77,7 +77,7 @@ public class IntertekImport extends AbstractGenotypeImport<FileImportParameters>
 
     public boolean m_fCloseContextOpenAfterImport = false;
 
-    final static protected String validAlleleRegex = "[\\*ATGC-]+".intern();
+    final static protected String validAlleleRegex =  "([\\*ATGC-]+|INS|DEL)".intern();
 
     /**
      * Instantiates a new Intertek import.
@@ -240,6 +240,7 @@ public class IntertekImport extends AbstractGenotypeImport<FileImportParameters>
                     Map<String, String> allelesMap = new HashMap<>();
                     if (variant == null) {
                         variant = new VariantData(variantId);
+                        //arbitrary alleleX is ref allele
                         String ref = values[xColIndex];
                         String alt = values[yColIndex];
                         if (!ref.matches(validAlleleRegex)) {
@@ -250,24 +251,25 @@ public class IntertekImport extends AbstractGenotypeImport<FileImportParameters>
                         }
 
                         // handle INDEL case
-                        if (ref.equals("-")) {
+                        // handle insertion (-/A or -/INS or DEL/-)
+                        if ((ref.equals("-")  && (alt.matches("[ATGCatgc]+") || alt.equalsIgnoreCase("INS"))) || (ref.equalsIgnoreCase("DEL") && alt.equals("-"))) {
                             ref = "N";
                             alt = "NN";
                             variant.setType(Type.INDEL.toString());
-
                         }
-                        else if (alt.equals("-")) {
+                        // handle deletion (A/- or INS/- or -/DEL)
+                        else if (alt.matches("-") && (ref.matches("[ATGCatgc]+") || ref.equalsIgnoreCase("INS")) || (alt.equalsIgnoreCase("DEL") && ref.equals("DEL"))) {
                             ref = "NN";
                             alt = "N";
                             variant.setType(Type.INDEL.toString());
                         }
                         else
-                        	variant.setType(Type.SNP.toString());
-                        
+                            variant.setType(Type.SNP.toString());
+
                         variant.getKnownAlleles().add(ref);
                         variant.getKnownAlleles().add(alt);
-                        allelesMap.put(values[xColIndex], ref);
-                        allelesMap.put(values[yColIndex], alt);
+                        allelesMap.put(values[xColIndex], "0");
+                        allelesMap.put(values[yColIndex], "1");
                         variantIdsToSave.add(variantId);
                     }
                     else {
@@ -394,10 +396,9 @@ public class IntertekImport extends AbstractGenotypeImport<FileImportParameters>
 
                     String gtCode = null;
                     Map<String, String> variantAlleles = variantAllelesMap.get(variantId);
-                    String refAllele = variantAlleles.get(0);
                     if (!call.equals("NTC")) {
                         //NTC lines are not imported (control)
-                        //if genotype is ?, gtCode = null
+                        //if genotype is ? or Uncallable, gtCode = null
                         if (call.contains(":")) {
                             List<String> alleles = Arrays.asList(call.split(":"));
                             gtCode = alleles.stream()
