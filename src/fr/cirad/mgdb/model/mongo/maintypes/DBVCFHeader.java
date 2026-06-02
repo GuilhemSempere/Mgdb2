@@ -478,31 +478,123 @@ public class DBVCFHeader
 	}
 
 	private static VCFInfoHeaderLine getMostPermissiveInfo(VCFInfoHeaderLine line1, VCFInfoHeaderLine line2) {
-	    VCFHeaderLineCount count = getMostPermissiveCount(line1.getCountType(), line2.getCountType());
-	    VCFHeaderLineType type = getMostPermissiveType(line1.getType(), line2.getType());
-	    return new VCFInfoHeaderLine(line1.getID(), count, type, line1.getDescription());
+	    // Determine which line to use as the base
+	    VCFInfoHeaderLine baseLine;
+	    VCFInfoHeaderLine otherLine;
+	    
+	    // Prefer String type as most permissive
+	    if (line1.getType() == VCFHeaderLineType.String || line2.getType() == VCFHeaderLineType.String) {
+	        baseLine = line1.getType() == VCFHeaderLineType.String ? line1 : line2;
+	        otherLine = baseLine == line1 ? line2 : line1;
+	    } 
+	    // Then prefer Float over Integer
+	    else if (line1.getType() == VCFHeaderLineType.Float || line2.getType() == VCFHeaderLineType.Float) {
+	        baseLine = line1.getType() == VCFHeaderLineType.Float ? line1 : line2;
+	        otherLine = baseLine == line1 ? line2 : line1;
+	    }
+	    else {
+	        baseLine = line1;
+	        otherLine = line2;
+	    }
+	    
+	    // Handle count - if either is UNBOUNDED, result is UNBOUNDED
+	    VCFHeaderLineCount countType;
+	    int count = -1;
+	    
+	    if (baseLine.getCountType() == VCFHeaderLineCount.UNBOUNDED || 
+	        otherLine.getCountType() == VCFHeaderLineCount.UNBOUNDED) {
+	        countType = VCFHeaderLineCount.UNBOUNDED;
+	    }
+	    else if (baseLine.getCountType() == VCFHeaderLineCount.INTEGER && 
+	             otherLine.getCountType() == VCFHeaderLineCount.INTEGER) {
+	        // Use the larger count (more permissive)
+	        countType = VCFHeaderLineCount.INTEGER;
+	        count = Math.max(baseLine.getCount(), otherLine.getCount());
+	    }
+	    else {
+	        // Mixed count types - use the base line's count type
+	        countType = baseLine.getCountType();
+	        if (countType == VCFHeaderLineCount.INTEGER) {
+	            count = baseLine.getCount();
+	        }
+	    }
+	    
+	    // Create the header line with appropriate constructor
+	    if (countType == VCFHeaderLineCount.INTEGER) {
+	        return new VCFInfoHeaderLine(baseLine.getID(), count, 
+	            getMostPermissiveType(line1.getType(), line2.getType()), 
+	            baseLine.getDescription());
+	    } else {
+	        return new VCFInfoHeaderLine(baseLine.getID(), countType, 
+	            getMostPermissiveType(line1.getType(), line2.getType()), 
+	            baseLine.getDescription());
+	    }
 	}
 
 	private static VCFFormatHeaderLine getMostPermissiveFormat(VCFFormatHeaderLine line1, VCFFormatHeaderLine line2) {
-	    VCFHeaderLineCount count = getMostPermissiveCount(line1.getCountType(), line2.getCountType());
-	    VCFHeaderLineType type = getMostPermissiveType(line1.getType(), line2.getType());
-	    return new VCFFormatHeaderLine(line1.getID(), count, type, line1.getDescription());
+	    // Determine which line to use as the base
+	    VCFFormatHeaderLine baseLine;
+	    VCFFormatHeaderLine otherLine;
+	    
+	    // Prefer String type as most permissive
+	    if (line1.getType() == VCFHeaderLineType.String || line2.getType() == VCFHeaderLineType.String) {
+	        baseLine = line1.getType() == VCFHeaderLineType.String ? line1 : line2;
+	        otherLine = baseLine == line1 ? line2 : line1;
+	    } 
+	    // Then prefer Float over Integer
+	    else if (line1.getType() == VCFHeaderLineType.Float || line2.getType() == VCFHeaderLineType.Float) {
+	        baseLine = line1.getType() == VCFHeaderLineType.Float ? line1 : line2;
+	        otherLine = baseLine == line1 ? line2 : line1;
+	    }
+	    else {
+	        baseLine = line1;
+	        otherLine = line2;
+	    }
+	    
+	    // Handle count
+	    VCFHeaderLineCount countType;
+	    int count = -1;
+	    
+	    if (baseLine.getCountType() == VCFHeaderLineCount.UNBOUNDED || 
+	        otherLine.getCountType() == VCFHeaderLineCount.UNBOUNDED) {
+	        countType = VCFHeaderLineCount.UNBOUNDED;
+	    }
+	    else if (baseLine.getCountType() == VCFHeaderLineCount.INTEGER && 
+	             otherLine.getCountType() == VCFHeaderLineCount.INTEGER) {
+	        countType = VCFHeaderLineCount.INTEGER;
+	        count = Math.max(baseLine.getCount(), otherLine.getCount());
+	    }
+	    else {
+	        countType = baseLine.getCountType();
+	        if (countType == VCFHeaderLineCount.INTEGER) {
+	            count = baseLine.getCount();
+	        }
+	    }
+	    
+	    if (countType == VCFHeaderLineCount.INTEGER) {
+	        return new VCFFormatHeaderLine(baseLine.getID(), count,
+	            getMostPermissiveType(line1.getType(), line2.getType()),
+	            baseLine.getDescription());
+	    } else {
+	        return new VCFFormatHeaderLine(baseLine.getID(), countType,
+	            getMostPermissiveType(line1.getType(), line2.getType()),
+	            baseLine.getDescription());
+	    }
 	}
-	
+
 	private static VCFHeaderLineCount getMostPermissiveCount(VCFHeaderLineCount c1, VCFHeaderLineCount c2) {
-	    // If either is UNBOUNDED (.), the result must be UNBOUNDED
 	    if (c1 == VCFHeaderLineCount.UNBOUNDED || c2 == VCFHeaderLineCount.UNBOUNDED) {
 	        return VCFHeaderLineCount.UNBOUNDED;
 	    }
-	    return c1; // Default to first if they match or are simple integers
+	    // For INTEGER count, we need to preserve the actual count value
+	    // This method alone is insufficient - we need the actual count number
+	    return c1;
 	}
 
 	private static VCFHeaderLineType getMostPermissiveType(VCFHeaderLineType t1, VCFHeaderLineType t2) {
-	    // String is the most permissive type (can hold anything)
 	    if (t1 == VCFHeaderLineType.String || t2 == VCFHeaderLineType.String) {
 	        return VCFHeaderLineType.String;
 	    }
-	    // Float is more permissive than Integer
 	    if (t1 == VCFHeaderLineType.Float || t2 == VCFHeaderLineType.Float) {
 	        return VCFHeaderLineType.Float;
 	    }
