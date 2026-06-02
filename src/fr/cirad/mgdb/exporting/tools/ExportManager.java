@@ -52,6 +52,7 @@ import org.bson.codecs.configuration.CodecRegistry;
 import org.bson.codecs.pojo.IntKeyMapPropertyCodecProvider;
 import org.bson.codecs.pojo.PojoCodecProvider;
 import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.data.mongodb.core.aggregation.TypedAggregation;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
 
@@ -273,8 +274,11 @@ public class ExportManager
         ConcurrentSkipListSet<Integer> extractedChunks = new ConcurrentSkipListSet<>();
         
         try {
-	        MongoCollection<VariantRunData> runColl = mongoTemplate.getDb().withCodecRegistry(ExportManager.pojoCodecRegistry).getCollection(mongoTemplate.getCollectionName(VariantRunData.class), VariantRunData.class);
-	        while (markerCursor.hasNext()) {
+	        //MongoCollection<VariantRunData> runColl = mongoTemplate.getDb().withCodecRegistry(ExportManager.pojoCodecRegistry).getCollection(mongoTemplate.getCollectionName(VariantRunData.class), VariantRunData.class);
+	        //MongoCollection<VariantRunData> runColl = mongoTemplate.getDb().withCodecRegistry(ExportManager.pojoCodecRegistry).getCollection(mongoTemplate.getCollectionName(VariantRunData.class), VariantRunData.class);
+			MongoCollection<Document> runColl = mongoTemplate.getCollection(
+					mongoTemplate.getCollectionName(VariantRunData.class));
+			while (markerCursor.hasNext()) {
 	            if (progress.isAborted() || progress.getError() != null) {
 	        		for (Future<Void> t : chunkExportTasks)
 	        			if (t != null)
@@ -332,7 +336,12 @@ public class ExportManager
 	                				return;
 
 		            			long chunkProcessingStartTime = System.currentTimeMillis();
-		                        ArrayList<VariantRunData> runs = runColl.aggregate(chunkPipeline, VariantRunData.class).allowDiskUse(true).into(new ArrayList<>(chunkMarkerIDs.size())); // we don't use collation here because it leads to unexpected behaviour (sometimes fetches some additional variants to those in chunkMarkerIDs) => we'll have to sort each chunk by hand
+		                        //ArrayList<VariantRunData> runs = runColl.aggregate(chunkPipeline, VariantRunData.class).allowDiskUse(true).into(new ArrayList<>(chunkMarkerIDs.size())); // we don't use collation here because it leads to unexpected behaviour (sometimes fetches some additional variants to those in chunkMarkerIDs) => we'll have to sort each chunk by hand
+								ArrayList<Document> rawRuns = runColl.aggregate(chunkPipeline)
+										.allowDiskUse(true).into(new ArrayList<>(chunkMarkerIDs.size()));
+								ArrayList<VariantRunData> runs = rawRuns.stream()
+										.map(doc -> mongoTemplate.getConverter().read(VariantRunData.class, doc))
+										.collect(Collectors.toCollection(ArrayList::new));
 //								VariantRunData sample = runColl.find().first();
 //								runs.add(sample);
 		                        if (nNumberOfChunksUsedForSpeedEstimation != null) {  // chunkPipeline contains a $project stage that we need to assess: let's compare execution speed with and without it (best option depends on so many things that we can't find it out otherwise)
@@ -371,7 +380,7 @@ public class ExportManager
 		                			if (progress.isAborted() || progress.getError() != null)
 		                				return;
 	
-		                            varId = vrd.getId().getVariantId();
+		                            varId = vrd.getIdV3().getVariantId();
 		                            
 		                            if (previousVarId != null && !varId.equals(previousVarId)) {
 		                                chunkMarkerRunsToWrite.put(previousVarId, currentMarkerRuns);

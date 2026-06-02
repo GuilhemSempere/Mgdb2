@@ -409,13 +409,12 @@ public class DartImport extends AbstractGenotypeImport<FileImportParameters> {
 
                                     VariantRunData runToSave = addDartSeqDataToVariant(finalMongoTemplate, variant, finalAssembly == null ? null : finalAssembly.getId(), variantType, alleleIndexMap, dartFeature, finalProject, sRun, sampleIds, initialAlleleCount);
 
-                                    // FIXME: Use exact indexes
-                                    runToSave.getVariantAnnotation(project.getId(),project.getId()).put("AS", dartFeature.getAlleleSequence());
-                                    runToSave.getVariantAnnotation(project.getId(),project.getId()).put("SP", dartFeature.getSnpPos());
-                                    runToSave.getVariantAnnotation(project.getId(),project.getId()).put("CR", dartFeature.getCallRate());
-                                    runToSave.getVariantAnnotation(project.getId(),project.getId()).put("FHR", dartFeature.getFreqHomRef());
-                                    runToSave.getVariantAnnotation(project.getId(),project.getId()).put("FHS", dartFeature.getFreqHomSnp());
-                                    runToSave.getVariantAnnotation(project.getId(),project.getId()).put("FH", dartFeature.getFreqHets());
+                                    runToSave.getVariantAnnotation().put("AS", dartFeature.getAlleleSequence());
+                                    runToSave.getVariantAnnotation().put("SP", dartFeature.getSnpPos());
+                                    runToSave.getVariantAnnotation().put("CR", dartFeature.getCallRate());
+                                    runToSave.getVariantAnnotation().put("FHR", dartFeature.getFreqHomRef());
+                                    runToSave.getVariantAnnotation().put("FHS", dartFeature.getFreqHomSnp());
+                                    runToSave.getVariantAnnotation().put("FH", dartFeature.getFreqHets());
 
                                     for (Integer asmId : assemblyIDs) {
                                         ReferencePosition rp = variant.getReferencePosition(asmId);

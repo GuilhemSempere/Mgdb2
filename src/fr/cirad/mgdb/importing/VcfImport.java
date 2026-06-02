@@ -332,7 +332,7 @@ public class VcfImport extends AbstractGenotypeImport<VCFParameters> {
                                 VariantRunData runToSave = addVcfDataToVariant(finalMongoTemplate, header, variant, nAssemblyId, vcfEntry, finalProject, sRun, runIndex, sampleNamesInOrder, phasingGroups, finalEffectAnnotationPos, finalGeneIdAnnotationPos);
                                 if (!unsavedRuns.contains(runToSave)) {
                                     unsavedRuns.add(runToSave);
-                                    Collection<String> variantGenes = (Collection<String>) runToSave.getVariantAnnotation(projId,runIndex).get(VariantRunData.FIELDNAME_ADDITIONAL_INFO_EFFECT_GENE);
+                                    Collection<String> variantGenes = (Collection<String>) runToSave.getVariantAnnotation().get(VariantRunData.FIELDNAME_ADDITIONAL_INFO_EFFECT_GENE);
                                     if (variantGenes != null)
                                         distinctEncounteredGeneNames.addAll((Collection<? extends String>) variantGenes);
                                 }
@@ -592,17 +592,25 @@ public class VcfImport extends AbstractGenotypeImport<VCFParameters> {
 
         // New run information
         List<Integer> newGenotypeArray = vrd.getGenotypeArray().get(0).get(0);
+
         List<HashMap<String, Object>> newGenotypeAnnotationArray = null;
         if (vrd.getGenotypeAnnotationArray()!=null && !vrd.getGenotypeAnnotationArray().isEmpty()) {
             newGenotypeAnnotationArray = vrd.getGenotypeAnnotationArray().get(0).get(0);
         }
-        HashMap<String, Object> newVariantAnnotation = vrd.getVariantAnnotation(projectIndex, runIndex);
+
+        HashMap<String, Object> newVariantRunAnnotationArray = null;
+        if (vrd.getVariantRunAnnotation()!=null && !vrd.getVariantRunAnnotation().isEmpty()) {
+            newVariantRunAnnotationArray = vrd.getVariantRunAnnotation().get(0).get(0);
+        }
+
+        Map<String, Object> newVariantAnnotation = vrd.getVariantAnnotation();
+
 
         // Paths where new data will be set
         // FIXME: Make sure to use variables instead.
         String spPath = VariantRunData.FIELDNAME_SAMPLEGENOTYPES + "." + projectIndex + "." + runIndex;
         String aiPath = VariantRunData.SECTION_ADDITIONAL_INFO + "." + projectIndex + "." + runIndex;
-        String vaiPath = "vai." + projectIndex + "." + runIndex;
+        String vraPath = "vra" + "." + projectIndex + "." + runIndex;
 
         if (!mongoTemplate.exists(query, VariantRunData.class)) {
             try {
@@ -619,6 +627,7 @@ public class VcfImport extends AbstractGenotypeImport<VCFParameters> {
         Update update = new Update()
                 .set(VariantRunData.FIELDNAME_KNOWN_ALLELES, vrd.getKnownAlleles())
                 .set(VariantRunData.FIELDNAME_TYPE, vrd.getType())
+                .set(VariantRunData.FIELDNAME_POSITIONS,vrd.getPositions())
                 .set(spPath, newGenotypeArray);
 
         // initialize sp project slot if missing
@@ -661,31 +670,32 @@ public class VcfImport extends AbstractGenotypeImport<VCFParameters> {
             update.set(aiPath, newGenotypeAnnotationArray);
         }
 
-
-        if (newVariantAnnotation!=null && !newVariantAnnotation.isEmpty()) {
-            // initialize vai project slot if missing
+        if (newVariantRunAnnotationArray != null && !newVariantRunAnnotationArray.isEmpty()) {
+            // initialize vra project slot if missing
             mongoTemplate.updateFirst(
                     new Query(
                             Criteria.where("_id")
                                     .is(new org.bson.Document(VariantRunDataV3Id.FIELDNAME_VARIANT_ID, vrd.getIdV3().getVariantId()))
-                                    .and("vai." + projectIndex).exists(false)),
-                    new Update().set("vai." + projectIndex, new ArrayList<>()),
+                                    .and(  "vra." + projectIndex).exists(false)),
+                    new Update().push("vra").value(new ArrayList<>()),
                     VariantRunData.class);
 
-            // initialize vai run slot if missing
+            // initialize vra run slot if missing
             mongoTemplate.updateFirst(
                     new Query(
                             Criteria.where("_id")
                                     .is(new org.bson.Document(VariantRunDataV3Id.FIELDNAME_VARIANT_ID, vrd.getIdV3().getVariantId()))
-                                    .and("vai." + projectIndex + "." + runIndex).exists(false)),
-                    new Update().push("vai." + projectIndex).value(new HashMap<>()),
+                                    .and("vra." + projectIndex + "." + runIndex).exists(false)),
+                    new Update().push("vra." + projectIndex).value(new ArrayList<>()),
                     VariantRunData.class);
-            update.set(vaiPath, newVariantAnnotation);
+            update.set(vraPath, newVariantRunAnnotationArray);
         }
 
-
-
-
+        // vai is now a single HashMap, not a nested array
+        // Only overwrite if new annotation is non-null and non-empty
+        if (newVariantAnnotation != null && !newVariantAnnotation.isEmpty()) {
+            update.set("vai", newVariantAnnotation);
+        }
 
         mongoTemplate.updateFirst(query, update, VariantRunData.class);
     }
@@ -872,20 +882,28 @@ public class VcfImport extends AbstractGenotypeImport<VCFParameters> {
 
         VariantRunData vrd = new VariantRunData(new VariantRunDataV3Id(variantToFeed.getId()));
 
-        // main VCF fields that are stored as additional info in the DB
-        if (vc.isFullyDecoded())
-            vrd.getVariantAnnotation(project.getId(),runIndex).put(VariantData.FIELD_FULLYDECODED, true);
-        if (vc.hasLog10PError())
-            vrd.getVariantAnnotation(project.getId(),runIndex).put(VariantData.FIELD_PHREDSCALEDQUAL, vc.getPhredScaledQual());
-        if (!VariantData.FIELDVAL_SOURCE_MISSING.equals(vc.getSource()))
-            vrd.getVariantAnnotation(project.getId(),runIndex).put(VariantData.FIELD_SOURCE, vc.getSource());
-        if (vc.filtersWereApplied())
-            vrd.getVariantAnnotation(project.getId(),runIndex).put(VariantData.FIELD_FILTERS, vc.getFilters().size() > 0 ? Helper.arrayToCsv(",", vc.getFilters()) : VCFConstants.PASSES_FILTERS_v4);
 
         List<String> aiEffect = new ArrayList<String>(), aiGene = new ArrayList<String>();
 
         // new variant additional information to be added.
-        HashMap<String, Object> vai = new HashMap<>();
+        Map<String, Object> vai = vrd.getVariantAnnotation();
+
+        List<List<HashMap<String, Object>>> vra = null;
+        vra = new ArrayList<>();
+        vra.add(new ArrayList<>());
+        vra.get(0).add(new HashMap<>());
+
+
+        // main VCF fields that are stored as additional info in the DB
+        if (vc.isFullyDecoded())
+            vra.get(0).get(0).put(VariantData.FIELD_FULLYDECODED, true);
+        if (vc.hasLog10PError())
+            vra.get(0).get(0).put(VariantData.FIELD_PHREDSCALEDQUAL, vc.getPhredScaledQual());
+        if (!VariantData.FIELDVAL_SOURCE_MISSING.equals(vc.getSource()))
+            vra.get(0).get(0).put(VariantData.FIELD_SOURCE, vc.getSource());
+        if (vc.filtersWereApplied())
+            vra.get(0).get(0).put(VariantData.FIELD_FILTERS, vc.getFilters().size() > 0 ? Helper.arrayToCsv(",", vc.getFilters()) : VCFConstants.PASSES_FILTERS_v4);
+
 
         // actual VCF info fields
         Map<String, Object> attributes = vc.getAttributes();
@@ -909,6 +927,7 @@ public class VcfImport extends AbstractGenotypeImport<VCFParameters> {
                 }
                 vai.put(VariantRunData.FIELDNAME_ADDITIONAL_INFO_EFFECT_GENE, aiGene);
                 vai.put(VariantRunData.FIELDNAME_ADDITIONAL_INFO_EFFECT_NAME, aiEffect);
+                vai.put(ANNOTATION_FIELDNAME_ANN, effectAttr.toString());
                 for (String variantEffectAnnotation : aiEffect) {
                     if (variantEffectAnnotation != null && !project.getEffectAnnotations().contains(variantEffectAnnotation)) {
                         project.getEffectAnnotations().add(variantEffectAnnotation);
@@ -916,29 +935,38 @@ public class VcfImport extends AbstractGenotypeImport<VCFParameters> {
                 }
             }
 
-            Object attrVal = vc.getAttributes().get(key);
-            if (attrVal instanceof ArrayList) {
-                vai.put(key, Helper.arrayToCsv(",", (ArrayList) attrVal));
-            } else if (attrVal != null) {
-                if (attrVal instanceof Boolean && ((Boolean) attrVal).booleanValue()) {
-                    vai.put(key, (Boolean) attrVal);
-                } else {
-                    try {
-                        int intVal = Integer.valueOf(attrVal.toString());
-                        vai.put(key, intVal);
-                    } catch (NumberFormatException nfe1) {
+            else {
+
+                Object attrVal = vc.getAttributes().get(key);
+                if (attrVal instanceof ArrayList) {
+                    vra.get(0).get(0).put(key, Helper.arrayToCsv(",", (ArrayList) attrVal));
+                } else if (attrVal != null) {
+                    if (attrVal instanceof Boolean && ((Boolean) attrVal).booleanValue()) {
+                        vra.get(0).get(0).put(key, (Boolean) attrVal);
+                    } else {
                         try {
-                            double doubleVal = Double.valueOf(attrVal.toString());
-                            vai.put(key, doubleVal);
-                        } catch (NumberFormatException nfe2) {
-                            vai.put(key, attrVal.toString());
+                            int intVal = Integer.valueOf(attrVal.toString());
+                            vra.get(0).get(0).put(key, intVal);
+                        } catch (NumberFormatException nfe1) {
+                            try {
+                                double doubleVal = Double.valueOf(attrVal.toString());
+                                vra.get(0).get(0).put(key, doubleVal);
+                            } catch (NumberFormatException nfe2) {
+                                vra.get(0).get(0).put(key, attrVal.toString());
+                            }
                         }
                     }
                 }
             }
+
+
+
+            vrd.setVariantRunAnnotation(vra);
+
+
+
         }
-        if (!vai.isEmpty())
-            vrd.setAdditionalInfo(project.getId(), runIndex, vai);
+
         // genotype fields
         Iterator<Genotype> genotypes = vc.getGenotypesOrderedByName().iterator();
         Map<String, Integer> knownAlleleStringToIndexMap = new HashMap<>();

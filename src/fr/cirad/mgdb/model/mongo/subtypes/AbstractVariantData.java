@@ -168,13 +168,13 @@ abstract public class AbstractVariantData
     /** The additional info. */
     @BsonProperty("vai")
     @Field("vai")
-    private List<List<HashMap<String, Object>>>  variantAnnotation = new ArrayList<>();
+    private Map<String, Object>  variantAnnotation = new HashMap<>();
 
-    public void setVariantAnnotation(List<List<HashMap<String, Object>>> variantAnnotation) {
+    public void setVariantAnnotation(Map<String, Object> variantAnnotation) {
         this.variantAnnotation = variantAnnotation;
     }
 
-    public List<List<HashMap<String, Object>>> getVariantAnnotation() {
+    public Map<String, Object> getVariantAnnotation() {
         return this.variantAnnotation;
     }
 
@@ -551,51 +551,51 @@ abstract public class AbstractVariantData
         return new HashMap<>(); //FIXME
     }
 
-    public HashMap<String, Object> getVariantAnnotation(int projectIndex, int runIndex) {
-        if (variantAnnotation == null || variantAnnotation.size() <= projectIndex)
-            return new HashMap<>();
-        List<HashMap<String, Object>> runsForProject = variantAnnotation.get(projectIndex);
-        if (runsForProject == null || runsForProject.size() <= runIndex)
-            return new HashMap<>();
-        return runsForProject.get(runIndex);
-    }
+//    public HashMap<String, Object> getVariantAnnotation(int projectIndex, int runIndex) {
+//        if (variantAnnotation == null || variantAnnotation.size() <= projectIndex)
+//            return new HashMap<>();
+//        List<HashMap<String, Object>> runsForProject = variantAnnotation.get(projectIndex);
+//        if (runsForProject == null || runsForProject.size() <= runIndex)
+//            return new HashMap<>();
+//        return runsForProject.get(runIndex);
+//    }
 
-    /**
-     * Sets the additional info.
-     *
-     * @param additionalInfo the additional info
-     */
-    public void setAdditionalInfo(HashMap<String, Object> additionalInfo) {
-        Log.debug("setting variant additional info: " + additionalInfo );
-        List a = new ArrayList<>();
-        //a.add(getAdditionalInfo(1,0)); //FIXME
-        this.variantAnnotation.add(a);
-    }
+//    /**
+//     * Sets the additional info.
+//     *
+//     * @param additionalInfo the additional info
+//     */
+//    public void setAdditionalInfo(HashMap<String, Object> additionalInfo) {
+//        Log.debug("setting variant additional info: " + additionalInfo );
+//        List a = new ArrayList<>();
+//        //a.add(getAdditionalInfo(1,0)); //FIXME
+//        this.variantAnnotation.add(a);
+//    }
 
 //    public void setAdditionalInfo(List<List<HashMap<String, Object>>> additionalInfo) {
 //        this.additionalInfo = additionalInfo;
 //    }
 
-    public void setAdditionalInfo(int projectIndex, int runIndex, HashMap<String, Object> ai) {
-        Log.debug("setting variant additional info: " + ai );
-        if (variantAnnotation == null)
-            variantAnnotation = new ArrayList<>();
-
-        // Ensure the outer list has enough projects
-        while (variantAnnotation.size() <= projectIndex) {
-            variantAnnotation.add(new ArrayList<>());
-        }
-
-        List<HashMap<String, Object>> runsForProject = variantAnnotation.get(projectIndex);
-
-        // Ensure the list has enough runs
-        while (runsForProject.size() <= runIndex) {
-            runsForProject.add(null);
-        }
-
-        // Set the object for this project's run
-        runsForProject.set(runIndex, ai);
-    }
+//    public void setAdditionalInfo(int projectIndex, int runIndex, HashMap<String, Object> ai) {
+//        Log.debug("setting variant additional info: " + ai );
+//        if (variantAnnotation == null)
+//            variantAnnotation = new ArrayList<>();
+//
+//        // Ensure the outer list has enough projects
+//        while (variantAnnotation.size() <= projectIndex) {
+//            variantAnnotation.add(new ArrayList<>());
+//        }
+//
+//        List<HashMap<String, Object>> runsForProject = variantAnnotation.get(projectIndex);
+//
+//        // Ensure the list has enough runs
+//        while (runsForProject.size() <= runIndex) {
+//            runsForProject.add(null);
+//        }
+//
+//        // Set the object for this project's run
+//        runsForProject.set(runIndex, ai);
+//    }
 
 
     /**
@@ -782,6 +782,8 @@ abstract public class AbstractVariantData
         HashMap<Integer, SampleGenotype> sampleGenotypes = new HashMap<>();
         HashSet<VariantRunData> runsWhereDataWasFound = new HashSet<>();
 
+
+        // FIXME: make sure to iterate over the correct projects and runs
         // collect all genotypes from various runs for all individuals
         HashMap<Object/*genotype code*/, LinkedHashSet<Integer/*callSet*/>>[] individualGenotypes = new HashMap[individualPositions.size()];
         Integer knownAlleleCount = null;
@@ -793,16 +795,18 @@ abstract public class AbstractVariantData
                     if (projectGenotypeArray.isEmpty())
                         continue;
                     GenotypingProject project = mongoTemplate.findById(projectIdx, GenotypingProject.class);
+                    List<String> projectRuns = project.getRuns();
+                    int numberOfRunsForProject = projectRuns!=null? projectRuns.size() : 0;
 
 
-                    for (int runIdx = 0; runIdx <= 0; runIdx++) {
+                    for (int runIdx = 0; runIdx < numberOfRunsForProject; runIdx++) {
 
                         List<Integer> runGenotypeArray = projectGenotypeArray.get(runIdx);
                         List<HashMap<String,Object>> runGenotypeAnnotationArray = projectGenotypeAnnotationArray.get(runIdx);
                         System.out.println(runGenotypeAnnotationArray);
                         if (runGenotypeArray.isEmpty())
                             continue;
-                        String cuurentRun = project.getRuns().get(runIdx);
+                        String cuurentRun = projectRuns.get(runIdx);
                         for (Callset cs : callSetsToExport) {
                             if (cs.getProjectId() != projectIdx || cs.getRun() != cuurentRun)
                                 continue;
@@ -974,7 +978,7 @@ abstract public class AbstractVariantData
         }
 
         VariantRunData run = runsWhereDataWasFound.size() == 1 ? runsWhereDataWasFound.iterator().next() : null;    // if there is not exactly one run involved then we do not export meta-data
-        String source = run == null ? null : (String) run.getVariantAnnotation(projectIndex,runIndex).get(FIELD_SOURCE);
+        String source = run == null ? null : (String) run.getVariantAnnotation().get(FIELD_SOURCE);
 
         ReferencePosition referencePosition = getReferencePosition(nAssemblyId);
         long start = referencePosition != null ? referencePosition.getStartSite() : 0;
@@ -996,22 +1000,22 @@ abstract public class AbstractVariantData
         vcb.genotypes(genotypes);
         
         if (run != null) {
-            Boolean fullDecod = (Boolean) run.getVariantAnnotation(projectIndex,runIndex).get(FIELD_FULLYDECODED);
+            Boolean fullDecod = (Boolean) run.getVariantAnnotation().get(FIELD_FULLYDECODED);
             vcb.fullyDecoded(fullDecod != null && fullDecod);
     
-            String filters = (String) run.getVariantAnnotation(projectIndex,runIndex).get(FIELD_FILTERS);
+            String filters = (String) run.getVariantAnnotation().get(FIELD_FILTERS);
             if (filters != null)
                 vcb.filters(filters.split(","));
             else
                 vcb.filters(VCFConstants.UNFILTERED);
             
-            Number qual = (Number) run.getVariantAnnotation(projectIndex,runIndex).get(FIELD_PHREDSCALEDQUAL);
+            Number qual = (Number) run.getVariantAnnotation().get(FIELD_PHREDSCALEDQUAL);
             if (qual != null)
                 vcb.log10PError(qual.doubleValue() / -10.0D);
             
-            for (String attrName : run.getVariantAnnotation(projectIndex,runIndex).keySet())
+            for (String attrName : run.getVariantAnnotation().keySet())
                 if (!VariantRunData.FIELDNAME_ADDITIONAL_INFO_EFFECT_NAME.equals(attrName) && !VariantRunData.FIELDNAME_ADDITIONAL_INFO_EFFECT_GENE.equals(attrName) && !specificallyTreatedAdditionalInfoFields.contains(attrName))
-                    vcb.attribute(attrName, run.getVariantAnnotation(projectIndex,runIndex).get(attrName));
+                    vcb.attribute(attrName, run.getVariantAnnotation().get(attrName));
         }
         VariantContext vc = vcb.make();
         return vc;

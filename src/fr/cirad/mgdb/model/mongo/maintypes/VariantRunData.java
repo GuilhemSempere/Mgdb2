@@ -81,7 +81,7 @@ public class VariantRunData extends AbstractVariantData
 		this.genotypeArray = genotypeArray;
 	}
 
-	/** The genotypes array */
+	/** The genotypes annotation array */
 	@BsonProperty("ai")
 	@Field("ai")
 	private List<List<List<HashMap<String, Object>>>> genotypeAnnotationArray = new ArrayList<>();
@@ -92,6 +92,19 @@ public class VariantRunData extends AbstractVariantData
 
 	public void setGenotypeAnnotationArray (List<List<List<HashMap<String, Object>>>> genotypeAnnotationArray) {
 		this.genotypeAnnotationArray = genotypeAnnotationArray;
+	}
+
+	/** The variant run annotation array */
+	@BsonProperty("vra")
+	@Field("vra")
+	private List<List<HashMap<String, Object>>> variantRunAnnotation = new ArrayList<>();
+
+	public List<List<HashMap<String, Object>>> getVariantRunAnnotation() {
+		return variantRunAnnotation;
+	}
+
+	public void setVariantRunAnnotation (List<List<HashMap<String, Object>>> variantRunAnnotation) {
+		this.variantRunAnnotation = variantRunAnnotation;
 	}
 
 
@@ -105,7 +118,7 @@ public class VariantRunData extends AbstractVariantData
 	 * Instantiates a new variant run data.
 	 */
 	public VariantRunData(VariantRunDataV3Id id) {
-		setId(id);
+		this.idv=id;
 	}
 
 	/**
