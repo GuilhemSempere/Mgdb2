@@ -21,6 +21,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Timer;
@@ -33,7 +34,6 @@ import org.apache.log4j.Logger;
  */
 public class ProgressIndicator
 {
-	
 	private static final Logger LOG = Logger.getLogger(ProgressIndicator.class);
 	
 	static private final HashMap<String, ProgressIndicator> progressIndicators = new HashMap<String, ProgressIndicator>();
@@ -70,6 +70,9 @@ public class ProgressIndicator
 
 	/** The final message if any. */
 	private String m_finalMessage;
+	
+	/** The info. */
+	private LinkedHashMap<String, Object> info = null;
 
 	/** The us number format. */
 	static private NumberFormat usNumberFormat = NumberFormat.getNumberInstance(Locale.US);
@@ -316,6 +319,14 @@ public class ProgressIndicator
 		return m_finalMessage;
 	}
 	
+	public LinkedHashMap<String, Object> getInfo() {
+		return info;
+	}
+
+	public void setInfo(LinkedHashMap<String, Object> info) {
+		this.info = info;
+	}
+
 	/**
 	 * Gets by id.
 	 *
@@ -351,5 +362,11 @@ public class ProgressIndicator
 	 */
 	public void insertStep(String sStepLabel) {
 		m_stepLabels.add(m_currentStepNumber + 1, sStepLabel);
+	}
+
+	public void setInfoValue(String field, Object value) {
+		if (info == null)
+			info = new LinkedHashMap<>();
+		info.put(field, value);
 	}
 }
