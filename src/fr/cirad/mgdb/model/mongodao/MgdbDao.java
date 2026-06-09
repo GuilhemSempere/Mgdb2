@@ -259,11 +259,6 @@ public class MgdbDao {
         if (taggedVarColl.countDocuments() == 0)
             throw new Exception("An error occured while preparing database for searches, please check server logs");
     }
-    
-    // kept for backwards compatibility
-//    static public List<String> getVariantTypes(MongoTemplate mongoTemplate, Integer projId) {
-//    	return getVariantTypes(mongoTemplate, Arrays.asList(projId));
-//    }
 
     static public List<String> getVariantTypes(MongoTemplate mongoTemplate, Collection<Integer> projIDs) {
         Query q = new Query();
@@ -281,12 +276,11 @@ public class MgdbDao {
      * Ensures VariantData indexes are correct
      *
      * @param mongoTemplate the mongoTemplate
+     * @param variantColl the variant collection to ensure indexes on
      * @param mongoTemplate if false, skips synonym index creation if none such synonyms found in the first 100000 documents 
      */
-    public static int ensureVariantDataIndexes(MongoTemplate mongoTemplate, boolean fEvenIfNoSuchSynonyms) {
+	public static int ensureVariantDataIndexes(MongoTemplate mongoTemplate, MongoCollection<Document> variantColl, boolean fEvenIfNoSuchSynonyms) {
     	int nResult = 0;
-        MongoCollection<Document> variantColl = mongoTemplate.getCollection(mongoTemplate.getCollectionName(VariantData.class));
-        
         boolean fFoundTypeIndex = false;
         Collection<String> missingSynonymIndexes = new HashSet<>() {{ 
         	add(VariantData.FIELDNAME_SYNONYMS + "." + VariantData.FIELDNAME_SYNONYM_TYPE_ID_ILLUMINA);
@@ -329,6 +323,10 @@ public class MgdbDao {
 	            }
 	        }
         return nResult;
+	}
+
+    public static int ensureVariantDataIndexes(MongoTemplate mongoTemplate, boolean fEvenIfNoSuchSynonyms) {
+    	return ensureVariantDataIndexes(mongoTemplate, mongoTemplate.getCollection(mongoTemplate.getCollectionName(VariantData.class)), fEvenIfNoSuchSynonyms);
     }
 
     /**
