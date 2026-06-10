@@ -513,8 +513,7 @@ public class IntertekImport extends AbstractGenotypeImport<FileImportParameters>
 
         for (Integer asmId : assemblyIDs) {
             ReferencePosition rp = variant.getReferencePosition(asmId);
-            if (rp != null)
-                project.getContigs(asmId).add(rp.getSequence());
+            project.getContigs(asmId).add(rp == null ? "" : rp.getSequence());
         }
 
         vrd.setSampleGenotypes(sampleGenotypes);

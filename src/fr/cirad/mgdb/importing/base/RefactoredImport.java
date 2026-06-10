@@ -250,8 +250,7 @@ public abstract class RefactoredImport<T extends ImportParameters> extends Abstr
 
                                         for (Integer asmId : assemblyIDs) {
                                             ReferencePosition rp = variant.getReferencePosition(asmId);
-                                            if (rp != null)
-                                                project.getContigs(asmId).add(rp.getSequence());
+                                            project.getContigs(asmId).add(rp == null ? "" : rp.getSequence());
                                         }
 
                                         project.getVariantTypes().add(variant.getType());                    // it's a TreeSet so it will only be added if it's not already present

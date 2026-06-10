@@ -339,8 +339,7 @@ public class VcfImport extends AbstractGenotypeImport<VCFParameters> {
 
                                 for (Integer asmId : assemblyIDs) {
                                     ReferencePosition rp = variant.getReferencePosition(asmId);
-                                    if (rp != null)
-                                        finalProject.getContigs(asmId).add(rp.getSequence());
+                                    finalProject.getContigs(asmId).add(rp == null ? "" : rp.getSequence());
                                 }
                             }
 
