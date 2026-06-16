@@ -375,19 +375,21 @@ public class DArTagImport extends RefactoredImport<FileImportParameters> {
      * </ul>
      */
     static String normaliseGenotype(String raw) {
-        if (raw == null || raw.isEmpty() || "-".equals(raw))
+        if (raw == null || raw.isEmpty() || "-".equals(raw)) {
             return null;
+        }
 
         String[] parts = raw.split(":");
         if (parts.length == 1) {
-            // No colon: must be a collapsed homozygote provided as a single allele (e.g. "A")
+            // No colon: must be a single allele (e.g., "A")
             String allele = parts[0].trim().toUpperCase();
-            if (allele.isEmpty() || !allele.matches(validAlleleRegex)) {
-                if (!allele.isEmpty())
+            if (allele.isEmpty() || !allele.matches("[ATGC]")) {
+                if (!allele.isEmpty()) {
                     LOG.warn("Unrecognised DArTag genotype value: '" + raw + "' — treated as missing");
+                }
                 return null;
             }
-            return allele;    // RefactoredImport will expand to allele/allele using ploidy
+            return allele; // RefactoredImport will expand to allele/allele using ploidy
         }
 
         if (parts.length != 2 || parts[0].trim().isEmpty() || parts[1].trim().isEmpty()) {
@@ -398,9 +400,16 @@ public class DArTagImport extends RefactoredImport<FileImportParameters> {
         String a1 = parts[0].trim().toUpperCase();
         String a2 = parts[1].trim().toUpperCase();
 
-        if (a1.equals(a2))
-            return a1;        // collapsed homozygote: RefactoredImport will expand to a1/a1 using ploidy
-        else
+        // Check if both alleles are valid (A, T, G, or C)
+        if (!a1.matches("[ATGC]") || !a2.matches("[ATGC]")) {
+            LOG.warn("Unrecognised DArTag genotype value: '" + raw + "' — treated as missing");
+            return null;
+        }
+
+        if (a1.equals(a2)) {
+            return a1; // collapsed homozygote: RefactoredImport will expand to a1/a1 using ploidy
+        } else {
             return a1 + "/" + a2;
+        }
     }
 }
