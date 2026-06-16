@@ -131,7 +131,7 @@ public class PlinkImport extends RefactoredImport<PlinkImportParameters> {
     public static void main(String[] args) throws Exception
     {
         if (args.length < 7)
-            throw new Exception("You must pass 7 parameters as arguments: DATASOURCE name, PROJECT name, RUN name, TECHNOLOGY string, MAP file, and PED file, assembly name! An optional 8th parameter supports values '1' (empty project data before importing) and '2' (empty all variant data before importing, including marker list).");
+            throw new Exception("You must pass 7 parameters as arguments: DATASOURCE name, PROJECT name, RUN name, TECHNOLOGY string, PED file, MAP file, and assembly name! An optional 8th parameter supports values '1' (empty project data before importing) and '2' (empty all variant data before importing, including marker list).");
 
         File mapFile = new File(args[4]);
         if (!mapFile.exists() || mapFile.length() == 0)
