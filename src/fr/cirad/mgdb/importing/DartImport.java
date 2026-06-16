@@ -584,7 +584,7 @@ public class DartImport extends AbstractGenotypeImport<FileImportParameters> {
                 String genotypeCode = null;
                 Integer encodedGenotype = null;
                 if (genotype!=null && alleles != null && alleleIndexMap != null){
-                    encodedGenotype = GenotypeCodeManager.createGenotypeEncoding(alleles,alleleIndexMap,mongoTemplate);
+                    encodedGenotype = GenotypeCodeManager.createGenotypeEncoding(alleles,alleleIndexMap,mongoTemplate,new HashMap<>()); // FIXME: Add genotype code cache map
                     genotypeCode = !genotype.startsWith("N") ? alleles.stream().map(allele -> alleleIndexMap.get(allele)).sorted().map(index -> index.toString()).collect(Collectors.joining("/")):null;
                 }
                     genotypeCode = !genotype.startsWith("N") ? alleles.stream().map(allele -> alleleIndexMap.get(allele)).sorted().map(index -> index.toString()).collect(Collectors.joining("/")):null;

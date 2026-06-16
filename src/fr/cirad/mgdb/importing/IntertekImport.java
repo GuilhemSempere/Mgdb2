@@ -150,6 +150,7 @@ public class IntertekImport extends AbstractGenotypeImport<FileImportParameters>
     @Override
     protected long doImport(FileImportParameters params, MongoTemplate mongoTemplate, GenotypingProject project, ProgressIndicator progress, Integer createdProject) throws Exception {
         String sRun = params.getRun();
+        int projectIndex = project.getId();
         String assemblyName = params.getAssemblyName();
         Map<String, String> sampleToIndividualMap = params.getSampleToIndividualMap();
         boolean fSkipMonomorphic = params.isSkipMonomorphic();
@@ -435,7 +436,7 @@ public class IntertekImport extends AbstractGenotypeImport<FileImportParameters>
                             gtCode = alleles.stream()
                                     .map(al -> variantAlleles.get(al))
                                     .collect(Collectors.joining("/"));
-                            encodedGenotype = GenotypeCodeManager.createGenotypeEncoding(alleles,allelesMapForEncoding,mongoTemplate);
+                            encodedGenotype = GenotypeCodeManager.createGenotypeEncoding(alleles,allelesMapForEncoding,mongoTemplate,new HashMap<>()); // FIXME: Add genotype code cache map
                             if (nPloidy == 0) {
                                 nPloidy = alleles.size();
                                 project.setPloidyLevel(nPloidy);

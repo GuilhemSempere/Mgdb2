@@ -562,6 +562,7 @@ public void persistVariantsAndGenotypesV3(boolean fDBAlreadyContainsVariants, Mo
 	 */
 	private VariantRunData addHapMapDataToVariant(MongoTemplate mongoTemplate, VariantData variantToFeed, Integer nAssemblyId, Type variantType, Map<String, Integer> alleleIndexMap, RawHapMapFeature hmFeature, GenotypingProject project, String runName, int runIndex, List<String>individuals, int initialAlleleCount) throws Exception
 	{
+        int projectIndex = project.getId();
         boolean fSNP = variantType.equals(Type.SNP);
 
 		if (variantToFeed.getType() == null || Type.NO_VARIATION.toString().equals(variantToFeed.getType()))
@@ -576,7 +577,7 @@ public void persistVariantsAndGenotypesV3(boolean fDBAlreadyContainsVariants, Mo
 		if (variantToFeed.getKnownAlleles().size() == 0)
 			variantToFeed.setKnownAlleles(Arrays.stream(hmFeature.getAlleles()).collect(Collectors.toList()));
 
-		VariantRunData vrd = new VariantRunData(new VariantRunDataV3Id(variantToFeed.getId()));
+		VariantRunData vrd = new VariantRunData(variantToFeed.getId());
 		HashSet<Integer> ploidiesFound = new HashSet<>();
 
         List<List<List<Integer>>> genotypeArray = null;
@@ -613,7 +614,7 @@ public void persistVariantsAndGenotypesV3(boolean fDBAlreadyContainsVariants, Mo
             }
 
             try {
-                int numericCode = GenotypeCodeManager.createGenotypeEncoding(alleles, alleleIndexMap, mongoTemplate);
+                int numericCode = GenotypeCodeManager.createGenotypeEncoding(alleles, alleleIndexMap, mongoTemplate, new HashMap<>()); // FIXME: Add genotype code cache map
 
 
                 genotypeArray.get(0).get(0).add(numericCode);

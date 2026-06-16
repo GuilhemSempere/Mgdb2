@@ -322,7 +322,7 @@ public class ExportManager
 		                        BasicDBList matchAndList = new BasicDBList();
 		                        //if (!projectFilterList.isEmpty())
 		                            // matchAndList.add(projectFilterList.size() == 1 ? projectFilterList.get(0) : new BasicDBObject("$or", projectFilterList));
-		                        matchAndList.add(new BasicDBObject("_id." + VariantRunDataId.FIELDNAME_VARIANT_ID, new BasicDBObject("$in", chunkMarkerIDs)));
+		                        matchAndList.add(new BasicDBObject("_id", new BasicDBObject("$in", chunkMarkerIDs)));
 		
 		                        chunkPipeline.add(0, new BasicDBObject("$match", new BasicDBObject("$and", matchAndList)));
 	
@@ -380,7 +380,7 @@ public class ExportManager
 		                			if (progress.isAborted() || progress.getError() != null)
 		                				return;
 	
-		                            varId = vrd.getIdV3().getVariantId();
+		                            varId = vrd.getIdV3();
 		                            
 		                            if (previousVarId != null && !varId.equals(previousVarId)) {
 		                                chunkMarkerRunsToWrite.put(previousVarId, currentMarkerRuns);

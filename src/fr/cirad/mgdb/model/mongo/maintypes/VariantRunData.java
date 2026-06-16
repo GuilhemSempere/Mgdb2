@@ -16,10 +16,7 @@
  *******************************************************************************/
 package fr.cirad.mgdb.model.mongo.maintypes;
 
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.NoSuchElementException;
+import java.util.*;
 
 import fr.cirad.mgdb.model.mongo.subtypes.VariantRunDataV3Id;
 import org.bson.codecs.pojo.annotations.BsonIgnore;
@@ -62,7 +59,7 @@ public class VariantRunData extends AbstractVariantData
 	/** The id. */
 	@BsonProperty("_idv")
 	@Id
-	private VariantRunDataV3Id idv;
+	private String idv;
 
 	/** The sample genotypes. */
 	@BsonIgnore
@@ -117,7 +114,7 @@ public class VariantRunData extends AbstractVariantData
 	/**
 	 * Instantiates a new variant run data.
 	 */
-	public VariantRunData(VariantRunDataV3Id id) {
+	public VariantRunData(String id) {
 		this.idv=id;
 	}
 
@@ -145,7 +142,7 @@ public class VariantRunData extends AbstractVariantData
 	 * @return the id
 	 */
 
-	public VariantRunDataV3Id getIdV3() {
+	public String getIdV3() {
 		return idv;
 	}
 
@@ -163,13 +160,13 @@ public class VariantRunData extends AbstractVariantData
 	 *
 	 * @param id the new id
 	 */
-	public void setId(VariantRunDataV3Id id) {
+	public void setId(String id) {
 		this.idv = id;
 	}
 	
         @Override
 	public String getVariantId() {
-		return getIdV3().getVariantId();
+		return getIdV3();
 	}
 
 	/**

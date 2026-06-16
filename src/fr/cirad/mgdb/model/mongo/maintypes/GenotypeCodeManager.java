@@ -60,36 +60,42 @@ public class GenotypeCodeManager {
      * @param mongoTemplate  the MongoTemplate to use
      * @return the numeric genotype code
      */
-    public static synchronized Integer createGenotypeEncoding(List<String> alleles, Map<String, Integer> alleleIndexMap, MongoTemplate mongoTemplate) {
-
-        if (alleles.get(0)==null)
+    public static Integer createGenotypeEncoding(List<String> alleles, Map<String, Integer> alleleIndexMap, MongoTemplate mongoTemplate, Map<String, Integer> codeCache) {
+        if (alleles.get(0) == null)
             return null;
-        List<Integer> alleleIndices = alleles.stream()
-                .map(alleleIndexMap::get)
-                .collect(Collectors.toList());
-
-        boolean isHet = alleleIndices.stream().distinct().count() > 1;
-        String gtKey = alleleIndices.stream().sorted().map(Object::toString).collect(Collectors.joining("/"));
-
-        int code;
-
         if (alleleIndexMap.size() <= 2) {
-            // biallelic: code = sign x (ploidy x 100 + altCount)
+            List<Integer> alleleIndices = alleles.stream().map(alleleIndexMap::get).collect(Collectors.toList());
+            boolean isHet = alleleIndices.stream().distinct().count() > 1;
             int ploidy = alleles.size();
             int altCount = (int) alleleIndices.stream().filter(idx -> idx > 0).count();
             int value = ploidy * 100 + altCount;
-            code = isHet ? -value : value;
-        } else if (!isHet) {
-            code = findOrCreateHomCode(gtKey, mongoTemplate);
-        } else {
-            code = findOrCreateHetCode(gtKey, mongoTemplate);
+            return isHet ? -value : value;
         }
+        return createMultiallelicEncoding(alleles, alleleIndexMap, mongoTemplate, codeCache);
+    }
 
-        if (alleleIndexMap.size() > 2)
+    private static Integer createMultiallelicEncoding(List<String> alleles, Map<String, Integer> alleleIndexMap,
+                                                      MongoTemplate mongoTemplate, Map<String, Integer> codeCache) {
+        List<Integer> alleleIndices = alleles.stream().map(alleleIndexMap::get).collect(Collectors.toList());
+        boolean isHet = alleleIndices.stream().distinct().count() > 1;
+        String gtKey = alleleIndices.stream().sorted().map(Object::toString).collect(Collectors.joining("/"));
+
+        Integer cached = codeCache.get(gtKey);
+        if (cached != null)
+            return cached;
+
+        synchronized (GenotypeCodeManager.class) {
+            cached = codeCache.get(gtKey);
+            if (cached != null)
+                return cached;
+
+            int code = isHet ? findOrCreateHetCode(gtKey, mongoTemplate) : findOrCreateHomCode(gtKey, mongoTemplate);
             if (!mongoTemplate.exists(new Query(Criteria.where("_id").is(code)), GenotypeCode.class))
                 mongoTemplate.save(new GenotypeCode(code, gtKey));
 
-        return code;
+            codeCache.put(gtKey, code);
+            return code;
+        }
     }
 
     private static int findOrCreateHetCode(String gtKey, MongoTemplate mongoTemplate) {

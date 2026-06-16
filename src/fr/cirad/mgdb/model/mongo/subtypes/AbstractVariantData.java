@@ -32,6 +32,7 @@ import java.util.TreeSet;
 import java.util.stream.Collectors;
 
 import fr.cirad.mgdb.model.mongo.maintypes.*;
+import htsjdk.samtools.util.Tuple;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.log4j.Logger;
 import org.bson.codecs.pojo.annotations.BsonProperty;
@@ -771,7 +772,6 @@ abstract public class AbstractVariantData
 	 */
 	public VariantContext toVariantContext(MongoTemplate mongoTemplate, Collection<VariantRunData> runs, Integer nAssemblyId, boolean exportVariantIDs, Collection<Callset> callSetsToExport, Map<String, Integer> individualPositions, Map<String /*population*/, Collection<String>> individualsByPop, boolean workWithSamples, Map<String /*population*/, HashMap<String, Float>> annotationFieldThresholds, HashMap<Integer, Object> previousPhasingIds, OutputStream warningOS, String synonym) throws Exception
 	{
-        System.out.println("running to variant context");
         // FIXME
         int projectIndex = 1;
         int runIndex = 0;
@@ -803,14 +803,12 @@ abstract public class AbstractVariantData
 
                         List<Integer> runGenotypeArray = projectGenotypeArray.get(runIdx);
                         List<HashMap<String,Object>> runGenotypeAnnotationArray = projectGenotypeAnnotationArray.get(runIdx);
-                        System.out.println(runGenotypeAnnotationArray);
                         if (runGenotypeArray.isEmpty())
                             continue;
                         String cuurentRun = projectRuns.get(runIdx);
                         for (Callset cs : callSetsToExport) {
                             if (cs.getProjectId() != projectIdx || cs.getRun() != cuurentRun)
                                 continue;
-                            System.out.println("Exporting genotypes of callset: " + cs.getId() + " which is ranked: " + cs.getCallSetIndexInsideArray());
                             if (sRefAllele == null) {
                                 knownAlleleCount = run.getKnownAlleles().size();
                                 if (knownAlleleCount > 0)
@@ -850,8 +848,6 @@ abstract public class AbstractVariantData
                     }
                 }
             }
-
-        System.out.println("runs checked");
         List<String> aiExhaustiveList = sampleGenotypes.values().stream().map(sg -> sg.getAdditionalInfo().keySet()).flatMap(Collection::stream).distinct().toList();     
         LinkedHashSet<Allele> variantAlleles = new LinkedHashSet<>(knownAlleleCount == null ? 4 : getKnownAlleles().size());
         variantAlleles.add(Allele.create(sRefAllele, true));
@@ -998,7 +994,7 @@ abstract public class AbstractVariantData
         if (exportVariantIDs)
             vcb.id((synonym == null ? getVariantId() : synonym).toString());
         vcb.genotypes(genotypes);
-        
+        // FIXME: find a way to retrieve the variant's run annotation array taking into account the project and the run.
         if (run != null) {
             Boolean fullDecod = (Boolean) run.getVariantAnnotation().get(FIELD_FULLYDECODED);
             vcb.fullyDecoded(fullDecod != null && fullDecod);

@@ -646,7 +646,7 @@ public abstract class AbstractGenotypeImport<T extends ImportParameters> {
 	    if (variant.getKnownAlleles().size() > initialAlleleCount) {
 	    	new Thread() {
 	    		public void run() {
-			    	UpdateResult existingVrdAlleleUpdates = mongoTemplate.updateMulti(new Query(Criteria.where("_id." + VariantRunDataId.FIELDNAME_VARIANT_ID).is(variant.getId())), new Update().set(VariantData.FIELDNAME_KNOWN_ALLELES, variant.getKnownAlleles()), VariantRunData.class);
+			    	UpdateResult existingVrdAlleleUpdates = mongoTemplate.updateFirst(new Query(Criteria.where("_id").is(variant.getId())), new Update().set(VariantData.FIELDNAME_KNOWN_ALLELES, variant.getKnownAlleles()), VariantRunData.class);
 			    	if (existingVrdAlleleUpdates.getModifiedCount() > 0)
 						LOG.debug("Updated " + existingVrdAlleleUpdates.getModifiedCount() + " existing VRD entries for variant " + variant.getId() + " to reflect new known alleles");
 	    		}

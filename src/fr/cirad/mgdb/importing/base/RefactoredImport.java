@@ -360,7 +360,7 @@ public abstract class RefactoredImport<T extends ImportParameters> extends Abstr
                     SampleGenotype aGT = new SampleGenotype(genotype);
                     vrd.getSampleGenotypes().put(m_providedIdToCallsetMap.get(sIndOrSp).getId(), aGT);
                 }
-                Integer encodedGenotype = GenotypeCodeManager.createGenotypeEncoding(Arrays.asList(alleles[i]),alleleIndexMap,mongoTemplate);
+                Integer encodedGenotype = GenotypeCodeManager.createGenotypeEncoding(Arrays.asList(alleles[i]),alleleIndexMap,mongoTemplate,new HashMap<>()); // FIXME: Add genotype code cache map
                 List<List<List<Integer>>> genotypeArray = vrd.getGenotypeArray();
 
                 while (genotypeArray.size() <= projectIndex) {
