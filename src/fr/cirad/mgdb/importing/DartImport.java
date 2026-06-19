@@ -416,8 +416,7 @@ public class DartImport extends AbstractGenotypeImport<FileImportParameters> {
 
                                     for (Integer asmId : assemblyIDs) {
                                         ReferencePosition rp = variant.getReferencePosition(asmId);
-                                        if (rp != null)
-                                            finalProject.getContigs(asmId).add(rp.getSequence());
+                                        finalProject.getContigs(asmId).add(rp == null ? "" : rp.getSequence());
                                     }
 
                                     finalProject.getAlleleCounts().add(variant.getKnownAlleles().size());	// it's a TreeSet so it will only be added if it's not already present

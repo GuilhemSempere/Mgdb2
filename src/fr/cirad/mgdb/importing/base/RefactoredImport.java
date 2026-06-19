@@ -221,7 +221,7 @@ public abstract class RefactoredImport<T extends ImportParameters> extends Abstr
                                             if (fInconsistentData)
                                                 LOG.warn("Not adding inconsistent data: " + providedVariantId + " / " + individuals[nIndividualIndex]);
                                             else {
-                                                if (!m_fImportUnknownVariants && m_maxExpectedAlleleCount == 2 && variant.getKnownAlleles().size() == 2 && variant.getType().equals(Type.INDEL.toString()) && (Arrays.stream(genotype).filter(all -> "I".equalsIgnoreCase(all) || "D".equalsIgnoreCase(all))).count() > 0) {
+                                                if (!m_fImportUnknownVariants && m_maxExpectedAlleleCount != null && m_maxExpectedAlleleCount == 2 && variant.getKnownAlleles().size() == 2 && variant.getType().equals(Type.INDEL.toString()) && (Arrays.stream(genotype).filter(all -> "I".equalsIgnoreCase(all) || "D".equalsIgnoreCase(all))).count() > 0) {
                                                     // We are considering a biallelic INDEL for which we already know the alleles. We don't want to import unknown alleles in that case
                                                     if (variant.getKnownAlleles().get(0).length() == variant.getKnownAlleles().get(1).length())
                                                         LOG.warn("Unable to recognize INDEL alleles for variant " + variant.getVariantId() + " because both have the same length!");
@@ -250,8 +250,7 @@ public abstract class RefactoredImport<T extends ImportParameters> extends Abstr
 
                                         for (Integer asmId : assemblyIDs) {
                                             ReferencePosition rp = variant.getReferencePosition(asmId);
-                                            if (rp != null)
-                                                project.getContigs(asmId).add(rp.getSequence());
+                                            project.getContigs(asmId).add(rp == null ? "" : rp.getSequence());
                                         }
 
                                         project.getVariantTypes().add(variant.getType());                    // it's a TreeSet so it will only be added if it's not already present

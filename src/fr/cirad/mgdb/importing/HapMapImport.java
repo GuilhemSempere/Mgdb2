@@ -347,8 +347,7 @@ public class HapMapImport extends AbstractGenotypeImport<FileImportParameters> {
 
                                 for (Integer asmId : assemblyIDs) {
                                     ReferencePosition rp = variant.getReferencePosition(asmId);
-                                    if (rp != null)
-                                        finalProject.getContigs(asmId).add(rp.getSequence());
+                                    finalProject.getContigs(asmId).add(rp == null ? "" : rp.getSequence());
                                 }
 
                                 finalProject.getAlleleCounts().add(variant.getKnownAlleles().size());	// it's a TreeSet so it will only be added if it's not already present
@@ -466,15 +465,16 @@ public class HapMapImport extends AbstractGenotypeImport<FileImportParameters> {
 	 */
 	private VariantRunData addHapMapDataToVariant(MongoTemplate mongoTemplate, VariantData variantToFeed, Integer nAssemblyId, Type variantType, Map<String, Integer> alleleIndexMap, RawHapMapFeature hmFeature, GenotypingProject project, String runName, List<String>individuals, int initialAlleleCount) throws Exception
 	{
-        boolean fSNP = variantType.equals(Type.SNP);
+        boolean fNotSNP = !variantType.equals(Type.SNP) && !variantType.equals(Type.NO_VARIATION);
 
 		if (variantToFeed.getType() == null || Type.NO_VARIATION.toString().equals(variantToFeed.getType()))
 			variantToFeed.setType(variantType.toString());
 		else if (null != variantType && Type.NO_VARIATION != variantType && !variantToFeed.getType().equals(variantType.toString()))
 			throw new Exception("Variant type mismatch between existing data and data to import: " + variantToFeed.getId());
 
-        if (variantToFeed.getReferencePosition(nAssemblyId) == null)    // otherwise we leave it as it is (had some trouble with overridden end-sites)
-            variantToFeed.setReferencePosition(nAssemblyId, new ReferencePosition(hmFeature.getChr(), hmFeature.getStart(), (long) hmFeature.getEnd()));
+    	if (!"0".equals(hmFeature.getChr()) && hmFeature.getStart() > 0)
+    		if (variantToFeed.getReferencePosition(nAssemblyId) == null)    // otherwise we leave it as it is (had some trouble with overridden end-sites)
+        		variantToFeed.setReferencePosition(nAssemblyId, new ReferencePosition(hmFeature.getChr(), hmFeature.getStart(), (long) hmFeature.getEnd()));
 		
 		// take into account ref and alt alleles (if it's not too late)
 		if (variantToFeed.getKnownAlleles().size() == 0)
@@ -500,7 +500,7 @@ public class HapMapImport extends AbstractGenotypeImport<FileImportParameters> {
             }
             else if (alleleIndexMap.containsKey(genotype))
                 alleles = Collections.nCopies(project.getPloidyLevel(), genotype);    // must be a collapsed homozygous
-            else if (fSNP)
+            else if (!fNotSNP)
                 alleles = Arrays.asList(genotype.split(""));
             
             String sIndOrSpId = individuals.get(i);
