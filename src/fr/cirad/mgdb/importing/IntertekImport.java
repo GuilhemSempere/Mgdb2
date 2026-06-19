@@ -243,22 +243,22 @@ public class IntertekImport extends AbstractGenotypeImport<FileImportParameters>
                         //arbitrary alleleX is ref allele
                         String ref = values[xColIndex];
                         String alt = values[yColIndex];
-                        if (!ref.matches(validAlleleRegex)) {
-                            throw new Exception("Invalid ref allele '" + ref + "' provided for variant" + variantId);
-                        }
-                        if (!alt.matches(validAlleleRegex)) {
-                            throw new Exception("Invalid ref allele '" + alt + "' provided for variant" + variantId);
-                        }
+                                                
+                        if (ref.equals(alt))
+                            throw new Exception("Identical AlleleX and AlleleY alleles '" + ref + "' provided for variant " + variantId);
+                        if (!ref.matches(validAlleleRegex) && !alt.matches("INS") && !alt.matches("DEL"))	// any string is accepted as alternative to INS or DEL, and is treated as the absence of INDEL
+                            throw new Exception("Invalid AlleleX allele '" + ref + "' provided for variant " + variantId);
+                        if (!alt.matches(validAlleleRegex) && !ref.matches("INS") && !ref.matches("DEL"))	// any string is accepted as alternative to INS or DEL, and is treated as the absence of INDEL
+                            throw new Exception("Invalid AlleleY allele '" + alt + "' provided for variant " + variantId);
 
-                        // handle INDEL case
-                        // handle insertion (-/A or -/INS or DEL/-)
-                        if ((ref.equals("-")  && (alt.matches("[ATGCatgc]+") || alt.equalsIgnoreCase("INS"))) || (ref.equalsIgnoreCase("DEL") && alt.equals("-"))) {
+                        // handle insertion (-/TTA or <whatever>/INS or DEL/<whatever>)
+                        if ((ref.equals("-") && (alt.matches("[ATGCatgc]+")) || alt.equalsIgnoreCase("INS")) || (ref.equalsIgnoreCase("DEL"))) {
                             ref = "N";
                             alt = "NN";
                             variant.setType(Type.INDEL.toString());
                         }
-                        // handle deletion (A/- or INS/- or -/DEL)
-                        else if (alt.matches("-") && (ref.matches("[ATGCatgc]+") || ref.equalsIgnoreCase("INS")) || (alt.equalsIgnoreCase("DEL") && ref.equals("DEL"))) {
+                        // handle deletion (TTA/- or INS/<whatever> or <whatever>/DEL)
+                        else if ((alt.equals("-") && (ref.matches("[ATGCatgc]+")) || ref.equalsIgnoreCase("INS")) || (alt.equalsIgnoreCase("DEL"))) {
                             ref = "NN";
                             alt = "N";
                             variant.setType(Type.INDEL.toString());
@@ -284,14 +284,14 @@ public class IntertekImport extends AbstractGenotypeImport<FileImportParameters>
                                 int posX = altList.indexOf(alleleX);
                                 int posY = altList.indexOf(alleleY);
                                 if ((alleleX.equals(ref) && posY != -1) || (posX != -1 && alleleY.equals(ref))) {
-                                    String alt = posY != -1 ? altList.get(posY) : altList.get(posX);
                                     allelesMap.put(alleleX, "0");
                                     allelesMap.put(alleleY, posY != -1 ? String.valueOf(posY + 1) : String.valueOf(posX + 1));
                                     ambiguousVariants.add(variantId);
-                                } else {
-                                    throw new Exception("Given alleleX/alleleY (" + alleleX + "/" + alleleY + ") for variant " + variantId + " don't match with stored REF/ALT alleles " + ref + "/" + String.join("/", altList));
                                 }
-                            } else { //see if ref is equals to X or Y or their reverse-complement
+                                else
+                                    throw new Exception("Provided AlleleX / AlleleY (" + alleleX + "/" + alleleY + ") for variant " + variantId + " don't match with stored REF/ALT alleles " + ref + "/" + String.join("/", altList));
+                            }
+                            else { //see if ref is equals to X or Y or their reverse-complement
                                 int posX = altList.indexOf(alleleX);
                                 int posY = altList.indexOf(alleleY);
                                 int posRCX = altList.indexOf(reverseComplement(alleleX));
@@ -300,25 +300,24 @@ public class IntertekImport extends AbstractGenotypeImport<FileImportParameters>
                                 if (alleleX.equals(ref) && posY != -1 || reverseComplement(alleleX).equals(ref) && posRCY != -1) {
                                     allelesMap.put(alleleX, "0");
                                     allelesMap.put(alleleY, posY != -1 ? String.valueOf(posY + 1 ): String.valueOf(posRCY + 1));
-                                } else if (posX != -1 && alleleY.equals(ref) || posRCX != -1 && reverseComplement(alleleY).equals(ref) ) {
+                                }
+                                else if (posX != -1 && alleleY.equals(ref) || posRCX != -1 && reverseComplement(alleleY).equals(ref) ) {
                                     allelesMap.put(alleleX, posX != -1 ? String.valueOf(posX): String.valueOf(posRCX + 1 ));
                                     allelesMap.put(alleleY, "0");
-                                } else {
-                                    throw new Exception("Given alleleX/alleleY (" + alleleX + "/" + alleleY + ") for variant " + variantId + " don't match with stored REF/ALT alleles " + ref + "/" + String.join("/", altList));
                                 }
+                                else
+                                    throw new Exception("Provided AlleleX / AlleleY (" + alleleX + "/" + alleleY + ") for variant " + variantId + " don't match with stored REF/ALT alleles " + ref + "/" + String.join("/", altList));
                             }
-
-                        } else if (variant.getType().equals(Type.INDEL.toString())) {
-
+                        }
+                        else if (variant.getType().equals(Type.INDEL.toString())) {
                             String indelPart = null;
                             // Get inserted or deleted part
                             for (int a = 0; a < altList.size(); a++) {
                                 String alt = altList.get(a);
-                                if (alt.startsWith(ref)) { // insertion after
-                                    indelPart = alt.substring(ref.length());
-                                } else if (alt.endsWith(ref)) {// insertion before
-                                    indelPart = alt.substring(0, alt.length() - ref.length());
-                                }
+                                if (alt.startsWith(ref))
+                                    indelPart = alt.substring(ref.length()); // insertion after
+                                else if (alt.endsWith(ref))
+                                    indelPart = alt.substring(0, alt.length() - ref.length()); // insertion before
 
                                 if (indelPart != null) { //insertion
                                     if (alleleY.equals("-") && (indelPart.equals(alleleX) || reverseComplement(indelPart).equals(alleleX))) {
@@ -468,7 +467,7 @@ public class IntertekImport extends AbstractGenotypeImport<FileImportParameters>
                 saveChunk(variantsChunk, variantRunsChunk, existingVariantIDs, mongoTemplate, progress, saveService);
 
             if (!ambiguousVariants.isEmpty()) {
-                progress.markAsComplete("WARNING : Ambiguous matching between alleleX/alleleY and existing variant REF/ALT alleles for variants : " + String.join(",", ambiguousVariants));
+                progress.markAsComplete("WARNING : Ambiguous matching between alleleX/alleleY and existing variant REF/ALT alleles for variants: " + String.join(",", ambiguousVariants));
             }
 
         }
