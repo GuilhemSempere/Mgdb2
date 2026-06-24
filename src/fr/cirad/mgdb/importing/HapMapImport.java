@@ -374,8 +374,8 @@ public class HapMapImport extends AbstractGenotypeImport<FileImportParameters> {
                             }
                             catch (Exception e)
                             {
-                                LOG.error("Error occured importing variant number " + (totalProcessedVariantCount.get() + 1) + " (" + Type.SNP.toString() + ":" + hmFeature.getChr() + ":" + hmFeature.getStart() + ") ", e);
-                                throw new Exception("Error occured importing variant number " + (totalProcessedVariantCount.get() + 1) + " (" + Type.SNP.toString() + ":" + hmFeature.getChr() + ":" + hmFeature.getStart() + ") " + (e.getMessage().endsWith("\"index\" is null") ? "containing an invalid allele code" : e.getMessage()), e);
+                                progress.setError("Error occured importing variant number " + (totalProcessedVariantCount.get() + 1) + " (" + Type.SNP.toString() + ":" + hmFeature.getChr() + ":" + hmFeature.getStart() + ") " + (e.getMessage().endsWith("\"index\" is null") ? "containing an invalid allele code" : e.getMessage()));
+                                throw new Exception(progress.getError(), e);
                             }
                         }
                         if (unsavedVariants.size() > 0) {
@@ -383,7 +383,6 @@ public class HapMapImport extends AbstractGenotypeImport<FileImportParameters> {
                             progress.setCurrentStepProgress(totalProcessedVariantCount.get());
                         }
                     } catch (Throwable t) {
-                        progress.setError("Genotype import failed with error: " + t.getMessage());
                         LOG.error(progress.getError(), t);
                         return;
                     }
