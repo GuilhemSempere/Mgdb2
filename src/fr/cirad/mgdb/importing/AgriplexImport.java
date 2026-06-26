@@ -479,8 +479,6 @@ public class AgriplexImport extends RefactoredImport<FileImportParameters> {
                         int markerIndexInChunk = col - chunkFirstCol;
                         String markerId = markerIds[fChunkStart + markerIndexInChunk];
                         boolean isIndel = indelMarkers.contains(markerId);
-                        if (markerId.equals("IRRI_SNP9001"))
-                            System.out.println(formattedValue);
                         currentRowGenotypes[markerIndexInChunk] = normalizeGenotype(formattedValue, isIndel);
                     }
                 });
