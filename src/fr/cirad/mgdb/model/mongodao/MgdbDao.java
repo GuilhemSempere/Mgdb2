@@ -50,6 +50,7 @@ import org.brapi.v2.model.VariantSet;
 import org.bson.Document;
 import org.springframework.beans.factory.ObjectFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.aggregation.Aggregation;
@@ -71,6 +72,7 @@ import org.springframework.stereotype.Component;
 import com.mongodb.BasicDBObject;
 import com.mongodb.MongoCommandException;
 import com.mongodb.MongoNamespace;
+import com.mongodb.MongoWriteException;
 import com.mongodb.client.MongoCollection;
 import com.mongodb.client.MongoCursor;
 import com.mongodb.client.model.IndexOptions;
@@ -1090,15 +1092,25 @@ public class MgdbDao {
 	        	LOG.debug("Removed " + geneCacheRemovalResult.getDeletedCount() + " gene cache entries from module " + sModule);
 		}
 
-        new Thread() {
-            public void run() {
-                long nRemovedVrdCount = mongoTemplate.remove(new Query(Criteria.where("_id." + VariantRunDataId.FIELDNAME_PROJECT_ID).is(nProjectId)), VariantRunData.class).getDeletedCount();
-                if (nRemovedVrdCount > 0) {
-	                LOG.info("Removed " + nRemovedVrdCount + " VRD records for project " + nProjectId + " of module " + sModule);
-	    	        fAnythingRemoved.set(true);
-                }
-            }
-        }.start();	// we can do this asynchronously because even if we're re-importing with the same project name it's going to be assigned a new ID 
+		new Thread(() -> {
+		    try {
+		        long nRemovedVrdCount = mongoTemplate.remove(
+		            new Query(Criteria.where("_id." + VariantRunDataId.FIELDNAME_PROJECT_ID).is(nProjectId)),
+		            VariantRunData.class
+		        ).getDeletedCount();
+
+		        if (nRemovedVrdCount > 0) {
+		        	LOG.info("Removed " + nRemovedVrdCount + " VRD records for project " + nProjectId + " of module " + sModule);
+		            fAnythingRemoved.set(true);
+		        }
+		    }
+		    catch (DataIntegrityViolationException e) {
+		        if (isCollectionDroppedError(e))
+		            LOG.debug("Ignoring VRD cleanup failure because database/collection was dropped while cleanup was running");
+		        else
+		            LOG.error("Unexpected VRD cleanup failure", e);
+		    }
+		}).start();	// we can do this asynchronously because even if we're re-importing with the same project name it's going to be assigned a new ID 
         LOG.info("Launched async VRD cleanup for project " + nProjectId + " of module " + sModule);
         
         Update update = new Update();
@@ -1129,6 +1141,17 @@ public class MgdbDao {
         return true;
     }
 
+    private static boolean isCollectionDroppedError(Throwable t) {
+        while (t != null) {
+            if (t instanceof MongoWriteException) {
+                MongoWriteException mwe = (MongoWriteException) t;
+                if (mwe.getError() != null && mwe.getError().getCode() == 175)
+                    return true;
+            }
+            t = t.getCause();
+        }
+        return false;
+    }
 
     public static boolean removeRunAndRelatedRecords(String sModule, int nProjectId, String sRun) throws Exception {
     	return removeRunAndRelatedRecords(sModule, nProjectId, sRun, true);

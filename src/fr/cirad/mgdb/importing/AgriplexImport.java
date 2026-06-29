@@ -21,13 +21,7 @@ import java.io.FileWriter;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.URL;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
+import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -112,11 +106,11 @@ public class AgriplexImport extends RefactoredImport<FileImportParameters> {
     /** Number of markers (columns) processed per re-read of the genotype matrix. */
     private static final int MARKER_CHUNK_SIZE = 500;
 
-    /** Matches a single nucleotide genotype (collapsed homozygote). */
-    private static final Pattern HOMOZYGOTE_PATTERN = Pattern.compile("^[ACGTNacgtn]$");
+    /** Matches a sequence of nucleotides (collapsed homozygote). or "-" */
+    private static final Pattern HOMOZYGOTE_PATTERN = Pattern.compile("^[ACGTNacgtn]+|-$");
 
-    /** Matches two nucleotides separated by a slash, with optional surrounding whitespace. */
-    private static final Pattern HETEROZYGOTE_PATTERN = Pattern.compile("^\\s*([ACGTNacgtn])\\s*/\\s*([ACGTNacgtn])\\s*$");
+    /** Matches 2 sequences of nucleotides or "-" separated by a slash, with optional surrounding whitespace. */
+    private static final Pattern HETEROZYGOTE_PATTERN = Pattern.compile("^\\s*([ACGTNacgtn]+|-)\\s*/\\s*([ACGTNacgtn]+|-)\\s*$");
 
 //    /** Matches a Customer Marker ID of the form &lt;STRING&gt;_&lt;NUMBER&gt;, e.g. "chr01_194844". */
 //    private static final Pattern CUSTOMER_MARKER_ID_POSITION_PATTERN = Pattern.compile("^(.+)_([0-9]+)$");
@@ -201,7 +195,8 @@ public class AgriplexImport extends RefactoredImport<FileImportParameters> {
         progress.addStep(info);
         progress.moveToNextStep();
         LinkedHashMap<String, String> variantsAndPositions = new LinkedHashMap<>();
-        AgriplexSheetLayout layout = readMarkersAndPositions(genotypeFileURL, sheetName, variantsAndPositions);
+        Set<String> indelVariants = new HashSet<>();
+        AgriplexSheetLayout layout = readMarkersAndPositions(genotypeFileURL, sheetName, variantsAndPositions, indelVariants);
         if (variantsAndPositions.isEmpty()) {
             progress.setError("No marker found in sheet '" + sheetName + "'");
             return 0;
@@ -216,7 +211,7 @@ public class AgriplexImport extends RefactoredImport<FileImportParameters> {
         progress.moveToNextStep();
         Map<String, Type> nonSnpVariantTypeMap = new HashMap<>();
         ArrayList<String> individualNames = new ArrayList<>();
-        nPloidy = transposeGenotypeFile(genotypeFileURL, sheetName, layout, variantsAndPositions, rotatedFile, nPloidy, nonSnpVariantTypeMap, individualNames, fSkipMonomorphic, progress);
+        nPloidy = transposeGenotypeFile(genotypeFileURL, sheetName, layout, variantsAndPositions, rotatedFile, nPloidy, nonSnpVariantTypeMap, individualNames, fSkipMonomorphic, progress, indelVariants);
         if (params.getImportMode() == 0 && createdProject == null && project.getPloidyLevel() != nPloidy)
             throw new Exception("Ploidy levels differ between existing (" + project.getPloidyLevel() + ") and provided (" + nPloidy + ") data!");
         project.setPloidyLevel(nPloidy);
@@ -277,6 +272,10 @@ public class AgriplexImport extends RefactoredImport<FileImportParameters> {
         int sampleIdCol;
         /** 0-based column index of the first marker column. */
         int firstMarkerCol;
+        int allele1Row;
+        /** 0-based row index containing allele_1. */
+        int allele2Row;
+        /** 0-based row index containing allele_2. */
     }
 
 
@@ -284,7 +283,7 @@ public class AgriplexImport extends RefactoredImport<FileImportParameters> {
      * First pass over the file: locates the header block, builds the ordered
      * marker list and (when possible) their genomic positions.
      */
-    private AgriplexSheetLayout readMarkersAndPositions(URL fileURL, String sheetName, LinkedHashMap<String, String> variantsAndPositionsToFill) throws Exception {
+    private AgriplexSheetLayout readMarkersAndPositions(URL fileURL, String sheetName, LinkedHashMap<String, String> variantsAndPositionsToFill, Set<String> indelVariants) throws Exception {
         AgriplexSheetLayout layout = new AgriplexSheetLayout();
         layout.plateNameCol = -1;
         layout.headerRow = -1;
@@ -311,11 +310,15 @@ public class AgriplexImport extends RefactoredImport<FileImportParameters> {
         layout.markerIdRow = layout.headerRow - 2;
         layout.firstMarkerCol = layout.plateNameCol + 4;
         final int candidateCustomerMarkerIdRow = layout.markerIdRow - 1;
+        layout.allele1Row = layout.markerIdRow + 1;
+        layout.allele2Row = layout.markerIdRow + 2;
 
         // Step 2: read the marker-ID row, and (if present) the Customer Marker ID row
         Map<Integer, String> markerIdsByCol = new HashMap<>();
         Map<Integer, String> customerMarkerIdsByCol = new HashMap<>();
         boolean[] customerMarkerIdRowFound = new boolean[] { false };
+        Map<Integer, String> markerAllele1ByCol = new HashMap<>();
+        Map<Integer, String> markerAllele2ByCol = new HashMap<>();
 
         readSheet(fileURL, sheetName, new AbstractSheetContentsHandler() {
             @Override
@@ -323,14 +326,17 @@ public class AgriplexImport extends RefactoredImport<FileImportParameters> {
                 int[] colRow = colRowFromCellReference(cellReference);
                 int col = colRow[0], row = colRow[1];
 
-                if (row == layout.markerIdRow && col >= layout.firstMarkerCol && formattedValue != null && !formattedValue.trim().isEmpty())
+                if (row == layout.markerIdRow && col >= layout.firstMarkerCol && formattedValue != null && !formattedValue.trim().isEmpty()) {
                     markerIdsByCol.put(col, formattedValue.trim());
-
-                else if (row == candidateCustomerMarkerIdRow) {
+                } else if (row == candidateCustomerMarkerIdRow) {
                     if (col == layout.plateNameCol + 3 && "Customer Marker ID".equals(formattedValue))
                         customerMarkerIdRowFound[0] = true;
                     else if (col >= layout.firstMarkerCol && formattedValue != null && !formattedValue.trim().isEmpty())
                         customerMarkerIdsByCol.put(col, formattedValue.trim());
+                } else if (row == layout.allele1Row && col >= layout.firstMarkerCol && formattedValue != null && !formattedValue.trim().isEmpty()) {
+                    markerAllele1ByCol.put(col, formattedValue.trim());
+                } else if (row == layout.allele2Row && col >= layout.firstMarkerCol && formattedValue != null && !formattedValue.trim().isEmpty()) {
+                    markerAllele2ByCol.put(col, formattedValue.trim());
                 }
             }
         });
@@ -359,6 +365,9 @@ public class AgriplexImport extends RefactoredImport<FileImportParameters> {
 //            if (variantsAndPositionsToFill.containsKey(markerId))
 //                throw new Exception("Duplicate marker ID found: " + markerId);
 
+            if (markerAllele1ByCol.get(col).equals("-") || markerAllele2ByCol.get(col).equals("-")) {
+                indelVariants.add(markerId);
+            }
             variantsAndPositionsToFill.put(markerId, null);
         }
 
@@ -383,7 +392,7 @@ public class AgriplexImport extends RefactoredImport<FileImportParameters> {
      * @return the dataset's ploidy (2, since AgriPlex only ever provides
      *         single-nucleotide or two-allele genotypes)
      */
-    private int transposeGenotypeFile(URL fileURL, String sheetName, AgriplexSheetLayout layout, LinkedHashMap<String, String> variantsAndPositions, File outputFile, Integer nProvidedPloidy, Map<String, Type> nonSnpVariantTypeMapToFill, ArrayList<String> individualListToFill, boolean fSkipMonomorphic, ProgressIndicator progress) throws Exception {
+    private int transposeGenotypeFile(URL fileURL, String sheetName, AgriplexSheetLayout layout, LinkedHashMap<String, String> variantsAndPositions, File outputFile, Integer nProvidedPloidy, Map<String, Type> nonSnpVariantTypeMapToFill, ArrayList<String> individualListToFill, boolean fSkipMonomorphic, ProgressIndicator progress, Set<String> indelMarkers) throws Exception {
         long before = System.currentTimeMillis();
 
         String[] markerIds = variantsAndPositions.keySet().toArray(new String[variantsAndPositions.size()]);
@@ -407,6 +416,7 @@ public class AgriplexImport extends RefactoredImport<FileImportParameters> {
                 for (int i = 0; i < chunkSize; i++)
                     distinctAlleles[i] = new LinkedHashSet<>();
 
+                final int fChunkStart = chunkStart;
                 readSheet(fileURL, sheetName, new AbstractSheetContentsHandler() {
                     String currentSampleId = null;
                     boolean currentRowHasData = false;
@@ -467,7 +477,9 @@ public class AgriplexImport extends RefactoredImport<FileImportParameters> {
 
                         currentRowHasData = true;
                         int markerIndexInChunk = col - chunkFirstCol;
-                        currentRowGenotypes[markerIndexInChunk] = normalizeGenotype(formattedValue);
+                        String markerId = markerIds[fChunkStart + markerIndexInChunk];
+                        boolean isIndel = indelMarkers.contains(markerId);
+                        currentRowGenotypes[markerIndexInChunk] = normalizeGenotype(formattedValue, isIndel);
                     }
                 });
 
@@ -522,7 +534,7 @@ public class AgriplexImport extends RefactoredImport<FileImportParameters> {
      * or {@code null} for anything else (missing data: "-", "FAIL",
      * "MISSING", empty cell, or any other unrecognized content).
      */
-    static String normalizeGenotype(String rawValue) {
+    static String normalizeGenotype(String rawValue, boolean isIndel) {
         if (rawValue == null)
             return null;
 
@@ -530,12 +542,45 @@ public class AgriplexImport extends RefactoredImport<FileImportParameters> {
         if (value.isEmpty())
             return null;
 
-        if (HOMOZYGOTE_PATTERN.matcher(value).matches())
-            return value.toUpperCase();
+        if (HOMOZYGOTE_PATTERN.matcher(value).matches()) {
+            if (value.equals("-")) {
+                if (isIndel)
+                    return "N";
+                else
+                    return null; //missing data
+            } else if (isIndel) {
+                return "NN";
+            } else {
+                return value.toUpperCase();
+            }
+        }
 
         Matcher hetMatcher = HETEROZYGOTE_PATTERN.matcher(value);
-        if (hetMatcher.matches())
-            return hetMatcher.group(1).toUpperCase() + "/" + hetMatcher.group(2).toUpperCase();
+        if (hetMatcher.matches()) {
+            String gt;
+            if (hetMatcher.group(1).equals("-")) {
+                if (isIndel)
+                    gt = "N"; //e.g. -/A
+                else
+                    return null; // - means missing here
+            } else if (isIndel) {
+                gt = "NN"; //e.g. AT/-
+            } else {
+                gt = hetMatcher.group(1).toUpperCase(); //e.g. TT/AA
+            }
+            gt = gt + "/";
+            if (hetMatcher.group(2).equals("-")) {
+                if (isIndel)
+                    gt = gt + "N"; //e.g. A/-
+                else
+                    return null;
+            } else if (isIndel) {
+                gt = gt + "NN"; //e.g. -/AT
+            } else {
+                gt = gt + hetMatcher.group(2).toUpperCase(); //e.g. TT/AA
+            }
+            return gt;
+        }
 
         // Anything else ("-", "FAIL", "MISSING", multi-character strings, etc.) is missing data
         return null;
