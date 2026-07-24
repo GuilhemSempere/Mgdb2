@@ -70,12 +70,33 @@ public abstract class RefactoredImport<T extends ImportParameters> extends Abstr
         m_ploidy = ploidy;
     }
 
+    /**
+     * Task class for dispatching variant processing
+     */
+    private static class VariantTask {
+        public static final VariantTask POISON_PILL = new VariantTask(null, null, null, null, null);
+        
+        final String line;
+        final String providedVariantId;
+        final String canonicalVariantId;
+        final String sequence;
+        final Long bpPosition;
+        
+        VariantTask(String line, String providedVariantId, String canonicalVariantId,
+                    String sequence, Long bpPosition) {
+            this.line = line;
+            this.providedVariantId = providedVariantId;
+            this.canonicalVariantId = canonicalVariantId;
+            this.sequence = sequence;
+            this.bpPosition = bpPosition;
+        }
+    }
+
     public long importTempFileContents(ProgressIndicator progress, int nNConcurrentThreads, MongoTemplate mongoTemplate, Integer nAssemblyId, File tempFile, LinkedHashMap<String, String> providedVariantPositions, HashMap<String, String> existingVariantIDs, GenotypingProject project, String sRun, HashMap<String, ArrayList<String>> inconsistencies, LinkedHashMap<String, String> orderedIndividualToPopulationMap, Map<String, Type> nonSnpVariantTypeMap, HashSet<Integer> indexesOfLinesThatMustBeSkipped, boolean fSkipMonomorphic) throws Exception {
         String[] individuals = orderedIndividualToPopulationMap.keySet().toArray(new String[orderedIndividualToPopulationMap.size()]);
         final AtomicInteger count = new AtomicInteger(0);
+        final AtomicInteger ignoredVariants = new AtomicInteger(0);
 
-        // loop over each variation and write to DB
-        BufferedReader reader = null;
         try {
             String info = "Importing genotypes";
             LOG.info(info);
@@ -122,172 +143,140 @@ public abstract class RefactoredImport<T extends ImportParameters> extends Abstr
             if (!individualsWithoutPopulation.isEmpty() && populationCodesExpected())
                 LOG.warn("Unable to find population code for individuals: " + StringUtils.join(individualsWithoutPopulation, ", "));
 
-            reader = new BufferedReader(new FileReader(tempFile));
-
-            final BufferedReader finalReader = reader;
-
-            // Leave one thread dedicated to the saveChunk service, it looks empirically faster that way
-            int nImportThreads = Math.max(1, nNConcurrentThreads - 1);
-            Thread[] importThreads = new Thread[nImportThreads];
-            BlockingQueue<Runnable> saveServiceQueue = new LinkedBlockingQueue<Runnable>(saveServiceQueueLength(nNConcurrentThreads));
-            ExecutorService saveService = new ThreadPoolExecutor(1, saveServiceThreads(nNConcurrentThreads), 30, TimeUnit.SECONDS, saveServiceQueue, new ThreadPoolExecutor.CallerRunsPolicy());
-
             final Collection<Integer> assemblyIDs = mongoTemplate.findDistinct(new Query(), "_id", Assembly.class, Integer.class);
             if (assemblyIDs.isEmpty())
                 assemblyIDs.add(null);    // old-style, assembly-less DB
-            AtomicInteger nLineIndex = new AtomicInteger(-1), ignoredVariants = new AtomicInteger();
 
             final int projId = project.getId();
 
+            // --- DISPATCHER + QUEUE IMPLEMENTATION ---
+            
+            // Create worker queues
+            int nImportThreads = Math.max(1, nNConcurrentThreads - 1);
+            BlockingQueue<VariantTask>[] workerQueues = new BlockingQueue[nImportThreads];
+            for (int i = 0; i < nImportThreads; i++) {
+                workerQueues[i] = new LinkedBlockingQueue<>();
+            }
+
+            // Save service
+            BlockingQueue<Runnable> saveServiceQueue = new LinkedBlockingQueue<Runnable>(saveServiceQueueLength(nNConcurrentThreads));
+            ExecutorService saveService = new ThreadPoolExecutor(1, saveServiceThreads(nNConcurrentThreads), 30, TimeUnit.SECONDS, saveServiceQueue, new ThreadPoolExecutor.CallerRunsPolicy());
+
+            // Start workers
+            Thread[] importThreads = new Thread[nImportThreads];
             for (int threadIndex = 0; threadIndex < nImportThreads; threadIndex++) {
+                final int workerIndex = threadIndex;
                 importThreads[threadIndex] = new Thread() {
                     @Override
                     public void run() {
                         try {
-                            long processedVariants = 0;
-                            HashSet<VariantData> unsavedVariants = new HashSet<VariantData>();  // HashSet allows no duplicates
-                            HashSet<VariantRunData> unsavedRuns = new HashSet<VariantRunData>();
-                            while (progress.getError() == null && !progress.isAborted()) {
-                                String line;
-                                synchronized (finalReader) {
-                                    line = finalReader.readLine();
-                                    if (indexesOfLinesThatMustBeSkipped != null && indexesOfLinesThatMustBeSkipped.contains(nLineIndex.incrementAndGet()))
-                                        continue;    // this is a line containing only missing data, which we don't want to persist because there is at least one non-empty line on a synonym variant, that we would lose if we did
-                                }
-
-                                if (line == null)
-                                    break;
-
-                                String[] splitLine = line.split("\t");
-                                String providedVariantId = splitLine[0];
-
-                                String sequence = null;
-                                Long bpPosition = null;
-                                String pos = providedVariantPositions.get(providedVariantId);
-                                String[] seqAndPos = pos == null ? null : pos.split("\t");
-                                if (seqAndPos != null && seqAndPos.length == 2)
-                                    try {
-                                        bpPosition = Long.parseLong(seqAndPos[1].replace(",", ""));
-                                        sequence = seqAndPos[0];
-                                        if ("0".equals(sequence) || 0 == bpPosition) {
-                                            sequence = null;
-                                            bpPosition = null;
-                                        }
-                                    } catch (NumberFormatException nfe) {
-                                        LOG.warn("Unable to read position for variant " + providedVariantId + " - " + nfe.getMessage());
-                                    }
-
-                                String variantId = null;
-                                Type type = nonSnpVariantTypeMap.get(providedVariantId);    // SNP is the default type so we don't store it in nonSnpVariantTypeMap to make it as lightweight as possible
-                                for (String variantDescForPos : getIdentificationStrings(type == null ? Type.SNP.toString() : type.toString(), sequence, bpPosition, Arrays.asList(new String[]{providedVariantId}))) {
-                                    variantId = existingVariantIDs.get(variantDescForPos);
-                                    if (variantId != null) {
-                                        if (type != null && !variantId.equals(providedVariantId))
-                                            nonSnpVariantTypeMap.put(variantId, type);  // add the type to this existing variant ID so we don't miss it later on
-                                        break;
-                                    }
-                                }
-
-                                if (variantId == null && fSkipMonomorphic) {
-                                    String[] distinctGTs = Arrays.stream(splitLine, 1, splitLine.length).filter(gt -> !gt.isEmpty()).distinct().toArray(String[]::new);
-                                    if (distinctGTs.length == 0 || (distinctGTs.length == 1 && Arrays.stream(distinctGTs[0].split("/")).distinct().count() < 2))
-                                        continue; // skip non-variant positions that are not already known
-                                }
-
-                                if (variantId == null && !m_fImportUnknownVariants) {
-                                    LOG.warn("Skipping unknown variant: " + providedVariantId);
-                                    ignoredVariants.incrementAndGet();
-                                } else if (variantId != null && variantId.toString().startsWith("*")) {
-                                    LOG.warn("Skipping deprecated variant data: " + providedVariantId);
-                                    continue;
-                                } else {
-                                    VariantData variant = mongoTemplate.findById(variantId == null ? providedVariantId : variantId, VariantData.class);
-                                    if (variant == null)
-                                        variant = new VariantData((ObjectId.isValid(providedVariantId) ? "_" : "") + providedVariantId);
-
-                                    variant.getRuns().add(new Run(projId, sRun));
-
-                                    String[][] alleles = new String[individuals.length][m_ploidy];
-                                    int nIndividualIndex = 0;
-                                    while (nIndividualIndex < individuals.length) {
-                                        if (splitLine.length > nIndividualIndex + 1 && !"".equals(splitLine[nIndividualIndex + 1])) {    // if some genotypes are missing at the end of the line we assume they're just missing data (may happen when discovering individual list while reorganizing genotypes from one-genotype-per-line formats where missing data is not explicitly mentioned)
-                                            String[] genotype = splitLine[nIndividualIndex + 1].split("/");
-                                            boolean fInconsistentData = false;
-                                            if (inconsistencies != null && !inconsistencies.isEmpty()) {
-                                                ArrayList<String> inconsistentIndividuals = inconsistencies.get(variant.getId());
-                                                fInconsistentData = inconsistencies != null && !inconsistencies.isEmpty() && inconsistentIndividuals != null && inconsistentIndividuals.contains(individuals[nIndividualIndex]);
-                                            }
-
-                                            if (fInconsistentData)
-                                                LOG.warn("Not adding inconsistent data: " + providedVariantId + " / " + individuals[nIndividualIndex]);
-                                            else {
-                                                if (!m_fImportUnknownVariants && m_maxExpectedAlleleCount != null && m_maxExpectedAlleleCount == 2 && variant.getKnownAlleles().size() == 2 && variant.getType().equals(Type.INDEL.toString()) && (Arrays.stream(genotype).filter(all -> "I".equalsIgnoreCase(all) || "D".equalsIgnoreCase(all))).count() > 0) {
-                                                    // We are considering a biallelic INDEL for which we already know the alleles. We don't want to import unknown alleles in that case
-                                                    if (variant.getKnownAlleles().get(0).length() == variant.getKnownAlleles().get(1).length())
-                                                        LOG.warn("Unable to recognize INDEL alleles for variant " + variant.getVariantId() + " because both have the same length!");
-                                                    String shortAllele = variant.getKnownAlleles().get(0).length() > variant.getKnownAlleles().get(1).length() ? variant.getKnownAlleles().get(1) : variant.getKnownAlleles().get(0);
-                                                    String longAllele = shortAllele.equals(variant.getKnownAlleles().get(0)) ? variant.getKnownAlleles().get(1) : variant.getKnownAlleles().get(0);
-                                                    for (int i = 0; i < genotype.length; i++)
-                                                        genotype[i] = "I".equalsIgnoreCase(genotype[i]) ? longAllele : shortAllele;
-                                                }
-
-
-                                                alleles[nIndividualIndex] = genotype;
-                                            }
-                                        }
-                                        nIndividualIndex++;
-                                    }
-
-                                    VariantRunData runToSave = addDataToVariant(mongoTemplate, variant, nAssemblyId, sequence, bpPosition, orderedIndividualToPopulationMap, nonSnpVariantTypeMap, alleles, project, sRun, m_fImportUnknownVariants);
-                                    if (m_maxExpectedAlleleCount != null && variant.getKnownAlleles().size() > m_maxExpectedAlleleCount)
-                                        LOG.warn("Variant " + variant.getId() + " (" + providedVariantId + ") has more than " + m_maxExpectedAlleleCount + " alleles!");
-
-                                    if (variant.getKnownAlleles().size() > 0) {   // we only import data related to a variant if we know its alleles
-                                        if (!unsavedVariants.contains(variant))
-                                            unsavedVariants.add(variant);
-                                        if (!unsavedRuns.contains(runToSave))
-                                            unsavedRuns.add(runToSave);
-
-                                        for (Integer asmId : assemblyIDs) {
-                                            ReferencePosition rp = variant.getReferencePosition(asmId);
-                                            project.getContigs(asmId).add(rp == null ? "" : rp.getSequence());
-                                        }
-
-                                        project.getVariantTypes().add(variant.getType());                    // it's a TreeSet so it will only be added if it's not already present
-                                        project.getAlleleCounts().add(variant.getKnownAlleles().size());    // it's a TreeSet so it will only be added if it's not already present
-                                    } else {
-                                        ReferencePosition rp = nAssemblyId != null ? variant.getReferencePosition(nAssemblyId) : null;
-                                        LOG.info("Skipping variant " + providedVariantId + (rp != null ? " positioned at " + rp.getSequence() + ":" + rp.getStartSite() : "") + " because its alleles are not known (only missing data provided so far)");
-                                    }
-
-                                    if (processedVariants % nNumberOfVariantsToSaveAtOnce == 0) {
-                                        saveChunk(unsavedVariants, unsavedRuns, existingVariantIDs, mongoTemplate, progress, saveService);
-                                        unsavedVariants = new HashSet<VariantData>();
-                                        unsavedRuns = new HashSet<VariantRunData>();
-
-                                        progress.setCurrentStepProgress(count.get() * 100 / providedVariantPositions.size());
-                                    }
-                                }
-                                int newCount = count.incrementAndGet();
-                                if (newCount % (nNumberOfVariantsToSaveAtOnce * 50) == 0)
-                                    LOG.debug(newCount + " lines processed");
-                                processedVariants += 1;
-                            }
-
-                            persistVariantsAndGenotypes(!existingVariantIDs.isEmpty(), mongoTemplate, unsavedVariants, unsavedRuns);
+                            processVariantTasks(
+                                workerQueues[workerIndex],
+                                mongoTemplate,
+                                nAssemblyId,
+                                individuals,
+                                orderedIndividualToPopulationMap,
+                                nonSnpVariantTypeMap,
+                                project,
+                                sRun,
+                                nNumberOfVariantsToSaveAtOnce,
+                                assemblyIDs,
+                                progress,
+                                saveService,
+                                count,
+                                providedVariantPositions.size(),
+                                inconsistencies,
+                                m_maxExpectedAlleleCount,
+                                ignoredVariants,
+                                existingVariantIDs,
+                                fSkipMonomorphic,
+                                m_ploidy,
+                                m_fImportUnknownVariants
+                            );
                         } catch (Throwable t) {
-                            progress.setError("Genotypes import failed with " + t.getClass().getSimpleName() + ": " + t.getMessage());
+                            progress.setError("Worker " + workerIndex + " failed with " + t.getClass().getSimpleName() + ": " + t.getMessage());
                             LOG.error(progress.getError(), t);
-                            return;
                         }
                     }
                 };
-
                 importThreads[threadIndex].start();
             }
 
-            for (int i = 0; i < nImportThreads; i++)
+            // Dispatcher thread
+            Thread dispatcherThread = new Thread() {
+                @Override
+                public void run() {
+                    try (BufferedReader reader = new BufferedReader(new FileReader(tempFile))) {
+                        int lineIndex = -1;
+                        String line;
+                        while ((line = reader.readLine()) != null) {
+                            lineIndex++;
+                            
+                            if (indexesOfLinesThatMustBeSkipped != null && 
+                                indexesOfLinesThatMustBeSkipped.contains(lineIndex)) {
+                                continue;
+                            }
+                            
+                            String[] splitLine = line.split("\t");
+                            String providedVariantId = splitLine[0];
+                            
+                            // Use shared resolveVariantInfo method from AbstractGenotypeImport
+                            ResolvedVariantInfo resolvedInfo = resolveVariantInfo(
+                                providedVariantId,
+                                providedVariantPositions,
+                                existingVariantIDs,
+                                nonSnpVariantTypeMap,
+                                m_fImportUnknownVariants
+                            );
+                            
+                            if (resolvedInfo.canonicalVariantId == null && !m_fImportUnknownVariants) {
+                                ignoredVariants.incrementAndGet();
+                                continue;
+                            }
+                            
+                            if (fSkipMonomorphic && resolvedInfo.canonicalVariantId == null) {
+                                String[] distinctGTs = Arrays.stream(splitLine, 1, splitLine.length)
+                                    .filter(gt -> !gt.isEmpty())
+                                    .distinct()
+                                    .toArray(String[]::new);
+                                if (distinctGTs.length == 0 || 
+                                    (distinctGTs.length == 1 && Arrays.stream(distinctGTs[0].split("/")).distinct().count() < 2)) {
+                                    continue;
+                                }
+                            }
+                            
+                            String idToDispatch = resolvedInfo.canonicalVariantId != null ? 
+                                resolvedInfo.canonicalVariantId : providedVariantId;
+                            int workerIndex = Math.floorMod(idToDispatch.hashCode(), nImportThreads);
+                            
+                            VariantTask task = new VariantTask(
+                                line,
+                                providedVariantId,
+                                resolvedInfo.canonicalVariantId,
+                                resolvedInfo.sequence,
+                                resolvedInfo.bpPosition
+                            );
+                            
+                            workerQueues[workerIndex].put(task);
+                        }
+                        
+                        for (BlockingQueue<VariantTask> queue : workerQueues) {
+                            queue.put(VariantTask.POISON_PILL);
+                        }
+                        
+                    } catch (Exception e) {
+                        progress.setError("Dispatcher failed: " + e.getMessage());
+                        LOG.error(progress.getError(), e);
+                    }
+                }
+            };
+            dispatcherThread.start();
+
+            dispatcherThread.join();
+            for (int i = 0; i < nImportThreads; i++) {
                 importThreads[i].join();
+            }
+            
             saveService.shutdown();
             saveService.awaitTermination(Integer.MAX_VALUE, TimeUnit.DAYS);
 
@@ -297,15 +286,171 @@ public abstract class RefactoredImport<T extends ImportParameters> extends Abstr
             if (progress.getError() != null || progress.isAborted())
                 return count.get();
 
-            // save project data
             if (!project.getRuns().contains(sRun))
                 project.getRuns().add(sRun);
             mongoTemplate.save(project);
         } finally {
-            if (reader != null)
-                reader.close();
+            // cleanup
         }
         return count.get();
+    }
+
+    /**
+     * Worker method that processes variant tasks with caching
+     */
+    private void processVariantTasks(BlockingQueue<VariantTask> queue,
+            MongoTemplate mongoTemplate,
+            Integer nAssemblyId,
+            String[] individuals,
+            LinkedHashMap<String, String> orderedIndividualToPopulationMap,
+            Map<String, Type> nonSnpVariantTypeMap,
+            GenotypingProject project,
+            String sRun,
+            int chunkSize,
+            Collection<Integer> assemblyIDs,
+            ProgressIndicator progress,
+            ExecutorService saveService,
+            AtomicInteger count,
+            int totalVariants,
+            HashMap<String, ArrayList<String>> inconsistencies,
+            Integer maxExpectedAlleleCount,
+            AtomicInteger ignoredVariants,
+            HashMap<String, String> existingVariantIDs,
+            boolean fSkipMonomorphic,
+            int ploidy,
+            boolean importUnknownVariants) throws Exception {
+        
+        HashSet<VariantData> unsavedVariants = new HashSet<>();
+        HashSet<VariantRunData> unsavedRuns = new HashSet<>();
+        HashMap<String, VariantData> variantCache = new HashMap<>(); // Per-worker cache
+        
+        long processedVariants = 0;
+        
+        while (true) {
+            VariantTask task = queue.take();
+            if (task == VariantTask.POISON_PILL) {
+                break;
+            }
+            
+            String variantId = task.canonicalVariantId != null ? 
+                task.canonicalVariantId : task.providedVariantId;
+            
+            if (variantId != null && variantId.startsWith("*")) {
+                LOG.warn("Skipping deprecated variant data: " + task.providedVariantId);
+                continue;
+            }
+            
+            VariantData variant = variantCache.get(variantId);
+            if (variant == null) {
+                variant = mongoTemplate.findById(variantId, VariantData.class);
+                if (variant == null) {
+                    String id = ObjectId.isValid(variantId) ? "_" + variantId : variantId;
+                    variant = new VariantData(id);
+                }
+                variantCache.put(variantId, variant);
+            }
+            
+            variant.getRuns().add(new Run(project.getId(), sRun));
+            
+            String[] splitLine = task.line.split("\t");
+            String[][] alleles = new String[individuals.length][ploidy];
+            
+            int nIndividualIndex = 0;
+            while (nIndividualIndex < individuals.length) {
+                if (splitLine.length > nIndividualIndex + 1 && !"".equals(splitLine[nIndividualIndex + 1])) {
+                    String[] genotype = splitLine[nIndividualIndex + 1].split("/");
+                    boolean fInconsistentData = false;
+                    if (inconsistencies != null && !inconsistencies.isEmpty()) {
+                        ArrayList<String> inconsistentIndividuals = inconsistencies.get(variant.getId());
+                        fInconsistentData = inconsistencies != null && !inconsistencies.isEmpty() && 
+                            inconsistentIndividuals != null && inconsistentIndividuals.contains(individuals[nIndividualIndex]);
+                    }
+                    
+                    if (fInconsistentData) {
+                        LOG.warn("Not adding inconsistent data: " + task.providedVariantId + " / " + individuals[nIndividualIndex]);
+                    } else {
+                        if (!importUnknownVariants && maxExpectedAlleleCount != null && 
+                            maxExpectedAlleleCount == 2 && variant.getKnownAlleles().size() == 2 && 
+                            variant.getType().equals(Type.INDEL.toString()) && 
+                            (Arrays.stream(genotype).filter(all -> "I".equalsIgnoreCase(all) || "D".equalsIgnoreCase(all))).count() > 0) {
+                            
+                            if (variant.getKnownAlleles().get(0).length() == variant.getKnownAlleles().get(1).length()) {
+                                LOG.warn("Unable to recognize INDEL alleles for variant " + variant.getVariantId() + " because both have the same length!");
+                            }
+                            String shortAllele = variant.getKnownAlleles().get(0).length() > variant.getKnownAlleles().get(1).length() ? 
+                                variant.getKnownAlleles().get(1) : variant.getKnownAlleles().get(0);
+                            String longAllele = shortAllele.equals(variant.getKnownAlleles().get(0)) ? 
+                                variant.getKnownAlleles().get(1) : variant.getKnownAlleles().get(0);
+                            for (int i = 0; i < genotype.length; i++) {
+                                genotype[i] = "I".equalsIgnoreCase(genotype[i]) ? longAllele : shortAllele;
+                            }
+                        }
+                        alleles[nIndividualIndex] = genotype;
+                    }
+                }
+                nIndividualIndex++;
+            }
+            
+            VariantRunData runToSave = addDataToVariant(
+                mongoTemplate,
+                variant,
+                nAssemblyId,
+                task.sequence,
+                task.bpPosition,
+                orderedIndividualToPopulationMap,
+                nonSnpVariantTypeMap,
+                alleles,
+                project,
+                sRun,
+                importUnknownVariants
+            );
+            
+            if (maxExpectedAlleleCount != null && variant.getKnownAlleles().size() > maxExpectedAlleleCount) {
+                LOG.warn("Variant " + variant.getId() + " (" + task.providedVariantId + ") has more than " + maxExpectedAlleleCount + " alleles!");
+            }
+            
+            if (variant.getKnownAlleles().size() > 0) {
+                if (!unsavedVariants.contains(variant)) {
+                    unsavedVariants.add(variant);
+                }
+                if (!unsavedRuns.contains(runToSave)) {
+                    unsavedRuns.add(runToSave);
+                }
+                
+                for (Integer asmId : assemblyIDs) {
+                    ReferencePosition rp = variant.getReferencePosition(asmId);
+                    project.getContigs(asmId).add(rp == null ? "" : rp.getSequence());
+                }
+                project.getVariantTypes().add(variant.getType());
+                project.getAlleleCounts().add(variant.getKnownAlleles().size());
+            } else {
+                ReferencePosition rp = nAssemblyId != null ? variant.getReferencePosition(nAssemblyId) : null;
+                LOG.info("Skipping variant " + task.providedVariantId + 
+                    (rp != null ? " positioned at " + rp.getSequence() + ":" + rp.getStartSite() : "") + 
+                    " because its alleles are not known (only missing data provided so far)");
+            }
+            
+            int newCount = count.incrementAndGet();
+            processedVariants++;
+            
+            if (processedVariants % chunkSize == 0) {
+                saveChunk(unsavedVariants, unsavedRuns, existingVariantIDs, mongoTemplate, progress, saveService);
+                
+                variantCache.clear();
+                unsavedVariants = new HashSet<>();
+                unsavedRuns = new HashSet<>();
+                
+                progress.setCurrentStepProgress(newCount * 100 / totalVariants);
+            }
+            
+            if (processedVariants % (chunkSize * 50) == 0) {
+                LOG.debug(newCount + " lines processed by worker");
+            }
+        }
+        
+        if (!unsavedVariants.isEmpty()) {
+            persistVariantsAndGenotypes(!existingVariantIDs.isEmpty(), mongoTemplate, unsavedVariants, unsavedRuns);
+        }
     }
 
     protected boolean populationCodesExpected() {
@@ -315,15 +460,14 @@ public abstract class RefactoredImport<T extends ImportParameters> extends Abstr
     protected VariantRunData addDataToVariant(MongoTemplate mongoTemplate, VariantData variantToFeed, Integer nAssemblyId, String sequence, Long bpPos, LinkedHashMap<String, String> orderedIndOrSpToPopulationMap, Map<String, Type> nonSnpVariantTypeMap, String[][] alleles, GenotypingProject project, String runName, boolean fImportUnknownVariants) throws Exception {
         VariantRunData vrd = new VariantRunData(new VariantRunDataId(project.getId(), runName, variantToFeed.getId()));
 
-        // genotype fields
         AtomicInteger allIdx = new AtomicInteger(0);
-        Map<String, Integer> alleleIndexMap = variantToFeed.getKnownAlleles().stream().collect(Collectors.toMap(Function.identity(), t -> allIdx.getAndIncrement()));  // should be more efficient not to call indexOf too often...
+        Map<String, Integer> alleleIndexMap = variantToFeed.getKnownAlleles().stream().collect(Collectors.toMap(Function.identity(), t -> allIdx.getAndIncrement()));
         int i = -1, initialAlleleCount = variantToFeed.getKnownAlleles().size();
         for (String sIndOrSp : orderedIndOrSpToPopulationMap.keySet()) {
             i++;
 
             if (alleles[i][0] == null)
-                continue;  // Do not add missing genotypes
+                continue;
 
             for (int j = 0; j < alleles[i].length; j++) {
                 if (!alleles[i][j].matches(validAlleleRegex))
@@ -336,7 +480,7 @@ public abstract class RefactoredImport<T extends ImportParameters> extends Abstr
 
                 Integer alleleIndex = alleleIndexMap.get(alleles[i][j]);
                 if (alleleIndex != null)
-                    continue;    // we already have this one
+                    continue;
 
                 alleleIndex = variantToFeed.getKnownAlleles().size();
                 variantToFeed.getKnownAlleles().add(alleles[i][j]);
@@ -345,7 +489,7 @@ public abstract class RefactoredImport<T extends ImportParameters> extends Abstr
 
             try {
                 Stream<String> alleleStream;
-                if (alleles[i].length == 1 && m_ploidy > 1) {    // it's a collapsed homozygous that we need to expand
+                if (alleles[i].length == 1 && m_ploidy > 1) {
                     LinkedList<String> alleleList = new LinkedList<>();
                     while (alleleList.size() < m_ploidy)
                         alleleList.add(alleles[i][0]);
@@ -360,7 +504,7 @@ public abstract class RefactoredImport<T extends ImportParameters> extends Abstr
             }
         }
 
-        if (nAssemblyId != null && fImportUnknownVariants && variantToFeed.getReferencePosition(nAssemblyId) == null && sequence != null) // otherwise we leave it as it is (had some trouble with overridden end-sites)
+        if (nAssemblyId != null && fImportUnknownVariants && variantToFeed.getReferencePosition(nAssemblyId) == null && sequence != null)
             variantToFeed.setReferencePosition(nAssemblyId, new ReferencePosition(sequence, bpPos, !variantToFeed.getKnownAlleles().isEmpty() ? bpPos + variantToFeed.getKnownAlleles().iterator().next().length() - 1 : null));
 
         if (!alleleIndexMap.isEmpty()) {
@@ -373,7 +517,7 @@ public abstract class RefactoredImport<T extends ImportParameters> extends Abstr
         }
         
         if (project.getId() > 1 || project.getRuns().size() > 0)
-        	updateExistingVrdAlleles(mongoTemplate, initialAlleleCount, variantToFeed);
+            updateExistingVrdAlleles(mongoTemplate, initialAlleleCount, variantToFeed);
 
         vrd.setKnownAlleles(variantToFeed.getKnownAlleles());
         vrd.setPositions(variantToFeed.getPositions());
@@ -383,7 +527,6 @@ public abstract class RefactoredImport<T extends ImportParameters> extends Abstr
         return vrd;
     }
 
-    /* FIXME: this mechanism could be improved to "fill holes" when genotypes are provided for some synonyms but not others (currently we import them all so the last encountered one "wins", unless it's totally empty) */
     protected HashMap<String, ArrayList<String>> checkSynonymGenotypeConsistency(File variantOrientedFile, HashMap<String, String> existingVariantIDs, Collection<String> individualsInProvidedOrder, String outputPathAndPrefix, HashSet<Integer> emptyLineIndexesToFill) throws IOException {
         long b4 = System.currentTimeMillis();
         LOG.info("Checking genotype consistency between synonyms...");
@@ -392,7 +535,6 @@ public abstract class RefactoredImport<T extends ImportParameters> extends Abstr
         FileOutputStream inconsistencyFOS = new FileOutputStream(new File(outputPathAndPrefix + "-INCONSISTENCIES.txt"));
         HashMap<String /*existing variant id*/, ArrayList<String /*individual*/>> result = new HashMap<>();
 
-        // first pass: identify synonym lines
         Map<String, List<Integer>> variantLinePositions = new HashMap<>();
         int nCurrentLinePos = 0;
         try (Scanner scanner = new Scanner(variantOrientedFile)) {
@@ -406,22 +548,18 @@ public abstract class RefactoredImport<T extends ImportParameters> extends Abstr
                         variantLines = new ArrayList<>();
                         variantLinePositions.put(existingId, variantLines);
                     }
-                    ;
                     variantLines.add(nCurrentLinePos);
                 }
                 nCurrentLinePos++;
             }
         }
 
-
-        // only keep those with at least 2 synonyms
         Map<String /*variant id */, List<Integer> /*corresponding line positions*/> synonymLinePositions = variantLinePositions.entrySet().stream().filter(entry -> variantLinePositions.get(entry.getKey()).size() > 1).collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
-        variantLinePositions.clear();   // release memory as this object is not needed anymore
+        variantLinePositions.clear();
 
-        // hold all lines that will need to be compared to any other(s) in a map that makes them accessible by their line number
         HashMap<Integer, String> linesNeedingComparison = new HashMap<>();
         TreeSet<Integer> linesToReadForComparison = new TreeSet<>();
-        synonymLinePositions.values().stream().forEach(varPositions -> linesToReadForComparison.addAll(varPositions));  // incrementally sorted line numbers, simplifies re-reading
+        synonymLinePositions.values().stream().forEach(varPositions -> linesToReadForComparison.addAll(varPositions));
         nCurrentLinePos = 0;
         try (Scanner scanner = new Scanner(variantOrientedFile)) {
             for (int nLinePos : linesToReadForComparison) {
@@ -433,7 +571,6 @@ public abstract class RefactoredImport<T extends ImportParameters> extends Abstr
             }
         }
 
-        // for each variant with at least two synonyms, build an array (one cell per individual) containing Sets of (distinct) encountered genotypes: inconsistencies are found where these Sets contain several items
         for (String variantId : synonymLinePositions.keySet()) {
             HashMap<String /*genotype*/, HashSet<String> /*synonyms*/>[] individualGenotypeListArray = new HashMap[individualsInProvidedOrder.size()];
             List<Integer> linesToCompareForVariant = synonymLinePositions.get(variantId);
@@ -443,11 +580,11 @@ public abstract class RefactoredImport<T extends ImportParameters> extends Abstr
                 boolean fFoundAnyGenotypeInThisLine = false;
                 for (int individualIndex = 0; individualIndex < individualGenotypeListArray.length; individualIndex++) {
                     if (synAndGenotypes.length <= 1 + individualIndex)
-                        break;    // otherwise there's only missing data left for this synonym
+                        break;
 
                     String genotype = synAndGenotypes[1 + individualIndex];
                     if (genotype.isEmpty())
-                        continue;   // if genotype is unknown this should not keep us from considering others
+                        continue;
 
                     if (individualGenotypeListArray[individualIndex] == null)
                         individualGenotypeListArray[individualIndex] = new HashMap<>();
@@ -464,7 +601,7 @@ public abstract class RefactoredImport<T extends ImportParameters> extends Abstr
                 if (fFoundAnyGenotypeInThisLine)
                     fFoundAnyNonEmptyLineForThisVariant = true;
                 else if (fFoundAnyNonEmptyLineForThisVariant)
-                    emptyLineIndexesToFill.add(linesToCompareForVariant.get(nLineNumber)); // keep track of this empty line because if we don't skip it, saving it would wipe out genotypes we've got on other synonyms
+                    emptyLineIndexesToFill.add(linesToCompareForVariant.get(nLineNumber));
             }
 
             Iterator<String> indIt = individualsInProvidedOrder.iterator();

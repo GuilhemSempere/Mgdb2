@@ -1,19 +1,3 @@
-/*******************************************************************************
- * MGDB - Mongo Genotype DataBase
- * Copyright (C) 2016 - 2019, <CIRAD> <IRD>
- *
- * This program is free software: you can redistribute it and/or modify it under
- * the terms of the GNU Affero General Public License, version 3 as published by
- * the Free Software Foundation.
- *
- * This program is distributed in the hope that it will be useful, but WITHOUT
- * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS
- * FOR A PARTICULAR PURPOSE. See the GNU Affero General Public License for more
- * details.
- *
- * See <http://www.gnu.org/licenses/agpl.html> for details about GNU General
- * Public License V3.
- *******************************************************************************/
 package fr.cirad.mgdb.importing;
 
 import java.io.BufferedInputStream;
@@ -37,7 +21,6 @@ import java.util.Set;
 import java.util.Spliterator;
 import java.util.Spliterators;
 import java.util.concurrent.BlockingQueue;
-import java.util.concurrent.ConcurrentLinkedDeque;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ThreadPoolExecutor;
@@ -93,14 +76,8 @@ import htsjdk.variant.vcf.VCFHeader;
 import htsjdk.variant.vcf.VCFHeaderLineType;
 import htsjdk.variant.vcf.VCFInfoHeaderLine;
 
-/**
- * The Class VcfImport.
- */
 public class VcfImport extends AbstractGenotypeImport<VCFParameters> {
 
-    /**
-     * The Constant LOG.
-     */
     private static final Logger LOG = Logger.getLogger(VariantData.class);
 
     public static final String ANNOTATION_FIELDNAME_EFF = "EFF";
@@ -111,50 +88,25 @@ public class VcfImport extends AbstractGenotypeImport<VCFParameters> {
     private FeatureReader<VariantContext> reader;
     private Iterator<VariantContext> variantIterator;
 
-    /**
-     * The m_process id.
-     */
-    //private String m_processID;
-
-    /**
-     * Instantiates a new vcf import.
-     */
     public VcfImport() {
         this("random_process_" + System.currentTimeMillis() + "_" + Math.random());
     }
 
-    /**
-     * Instantiates a new vcf import.
-     */
     public VcfImport(boolean fCloseContextAfterImport, boolean fAllowNewAssembly) {
         this();
-    	m_fCloseContextAfterImport = fCloseContextAfterImport;
+        m_fCloseContextAfterImport = fCloseContextAfterImport;
         m_fAllowNewAssembly = fAllowNewAssembly;
     }
 
-    /**
-     * Instantiates a new vcf import.
-     *
-     * @param processID the process id
-     */
     public VcfImport(String processID) {
         m_processID = processID;
     }
 
-    /**
-     * Instantiates a new vcf import.
-     */
     public VcfImport(String processID, boolean fCloseContextAfterImport) {
         this(processID);
-    	m_fCloseContextAfterImport = fCloseContextAfterImport;
+        m_fCloseContextAfterImport = fCloseContextAfterImport;
     }
 
-    /**
-     * The main method.
-     *
-     * @param args the arguments
-     * @throws Exception the exception
-     */
     public static void main(String[] args) throws Exception {
         if (args.length < 6)
             throw new Exception("You must pass 6 parameters as arguments: DATASOURCE name, PROJECT name, RUN name, TECHNOLOGY string, VCF file, and assembly name! An optional 7th parameter supports values '1' (empty project data before importing) and '2' (empty all variant data before importing, including marker list)");
@@ -188,10 +140,20 @@ public class VcfImport extends AbstractGenotypeImport<VCFParameters> {
     }
 
     /**
-     *
-     *
-     *
+     * Task class for dispatching variant processing
      */
+    private static class VariantTask {
+        public static final VariantTask POISON_PILL = new VariantTask(null, null);
+        
+        final VariantContextHologram vcfEntry;
+        final String variantId;
+        
+        VariantTask(VariantContextHologram vcfEntry, String variantId) {
+            this.vcfEntry = vcfEntry;
+            this.variantId = variantId;
+        }
+    }
+
     @Override
     protected long doImport(VCFParameters params, MongoTemplate mongoTemplate, GenotypingProject project, ProgressIndicator progress, Integer projectId) throws Exception {
         String sModule = params.getModule();
@@ -208,7 +170,7 @@ public class VcfImport extends AbstractGenotypeImport<VCFParameters> {
                 String desc = headerLine.getDescription().replaceAll("\\(", "").replaceAll("\\)", "");
                 desc = desc.substring(1 + desc.indexOf(":")).replace("'", "");
                 String[] fields = desc.split("\\|");
-                for (int i = 0; i<fields.length; i++) {
+                for (int i = 0; i < fields.length; i++) {
                     String trimmedField = fields[i].trim();
                     if (/*EFF*/ "Gene_Name".equals(trimmedField) || /*EFF*/ "Gene_ID".equals(trimmedField) || /*CSQ or ANN*/ "Gene".equals(trimmedField)) {
                         geneIdAnnotationPos = i;
@@ -242,7 +204,6 @@ public class VcfImport extends AbstractGenotypeImport<VCFParameters> {
         Assembly assembly = createAssemblyIfNeeded(mongoTemplate, assemblyName);
         HashMap<String, String> existingVariantIDs = buildSynonymToIdMapForExistingVariants(mongoTemplate, true, assembly == null ? null : assembly.getId());
 
-        int nNumberOfVariantsToSaveAtOnce = -1;
         variantIterator = reader.iterator();
         progress.addStep("Processing variant lines");
         progress.moveToNextStep();
@@ -252,134 +213,161 @@ public class VcfImport extends AbstractGenotypeImport<VCFParameters> {
 
         int nNConcurrentThreads = Math.max(1, Runtime.getRuntime().availableProcessors());
 
+        // --- DISPATCHER + QUEUE IMPLEMENTATION ---
+        
+        int nImportThreads = Math.max(1, nNConcurrentThreads - 1);
+        @SuppressWarnings("unchecked")
+        BlockingQueue<VariantTask>[] workerQueues = new BlockingQueue[nImportThreads];
+        for (int i = 0; i < nImportThreads; i++) {
+            workerQueues[i] = new LinkedBlockingQueue<>();
+        }
+
         BlockingQueue<Runnable> saveServiceQueue = new LinkedBlockingQueue<Runnable>(saveServiceQueueLength(nNConcurrentThreads));
         ExecutorService saveService = new ThreadPoolExecutor(1, saveServiceThreads(nNConcurrentThreads), 30, TimeUnit.SECONDS, saveServiceQueue, new ThreadPoolExecutor.CallerRunsPolicy());
         final Collection<Integer> assemblyIDs = mongoTemplate.findDistinct(new Query(), "_id", Assembly.class, Integer.class);
         if (assemblyIDs.isEmpty())
-            assemblyIDs.add(null);	// old-style, assembly-less DB
+            assemblyIDs.add(null);
 
-        List<VariantContextHologram> vcChunk = new ArrayList<>();
-        HashMap<String /*individual*/, Comparable> phasingGroups = new HashMap<String /*individual*/, Comparable>();
-        final ConcurrentLinkedDeque<Thread> importThreads = new ConcurrentLinkedDeque<>();
-        final MongoTemplate finalMongoTemplate = mongoTemplate;
         final GenotypingProject finalProject = project;
-        final int finalEffectAnnotationPos = effectAnnotationPos, finalGeneIdAnnotationPos = geneIdAnnotationPos;
-        boolean fDbAlreadyContainedVariants = mongoTemplate.findOne(new Query() {{ fields().include("_id"); }}, VariantData.class) != null;
+        final MongoTemplate finalMongoTemplate = mongoTemplate;
+        final Integer nAssemblyId = assembly == null ? null : assembly.getId();
+        final int projId = project.getId();
+        final int finalEffectAnnotationPos = effectAnnotationPos;
+        final int finalGeneIdAnnotationPos = geneIdAnnotationPos;
+        HashMap<String, Comparable> phasingGroups = new HashMap<>();
+        HashSet<String> distinctEncounteredGeneNames = new HashSet<>();
+
         createCallSetsSamplesIndividuals(header.getSampleNamesInOrder(), mongoTemplate, project.getId(), sRun, sampleToIndividualMap, progress);
         setSamplesPersisted(true);
 
-        // loop over each variation
-        final Integer nAssemblyId = assembly == null ? null : assembly.getId();
-        final int projId = project.getId();
-        HashSet<String> distinctEncounteredGeneNames = new HashSet<>();
-        while (variantIterator.hasNext()) {
-            if (progress.getError() != null || progress.isAborted())
-                break;
-
-            VariantContext vcfEntry = variantIterator.next();
-            if (vcfEntry.getCommonInfo().hasAttribute(""))
-                vcfEntry.getCommonInfo().removeAttribute("");   // working around cases where the info field accidentally ends with a semicolon
-            vcChunk.add(new VariantContextHologram(vcfEntry));
-            if (nNumberOfVariantsToSaveAtOnce == -1) {
-                nNumberOfVariantsToSaveAtOnce = (int) (vcfEntry.getSampleNames().isEmpty() ? nMaxChunkSize : Math.max(1, Math.ceil((float) nMaxChunkSize / (/*nNConcurrentThreads * */vcfEntry.getSampleNames().size()))));
-                LOG.info("Importing project '" + sProject + "' into " + sModule + " by chunks of size " + nNumberOfVariantsToSaveAtOnce + " using " + nNConcurrentThreads + " threads");
-            }
-
-            if (vcChunk.size() == nNumberOfVariantsToSaveAtOnce || !variantIterator.hasNext()) {
-                final List<VariantContextHologram> vcChunkToImport = vcChunk;
-                Thread t = new Thread() {
-                    public void run() {
-                        try
-                        {
-                            List<VariantData> unsavedVariants = new ArrayList<>();
-                            List<VariantRunData> unsavedRuns = new ArrayList<>();
-                            for (VariantContextHologram vcfEntry : vcChunkToImport) {
-                                if (progress.getError() != null || progress.isAborted())
-                                    return;
-
-                                String variantId = null;
-                                for (String variantDescForPos : getIdentificationStrings(vcfEntry.getType().toString(), vcfEntry.getContig(), (long) vcfEntry.getStart(), Arrays.asList(new String[] {vcfEntry.getID()})))
-                                {
-                                    variantId = existingVariantIDs.get(variantDescForPos);
-                                    if (variantId != null)
-                                        break;
-                                }
-
-                                if (variantId == null && fSkipMonomorphic) {
-                                    String[] distinctGTs = StreamSupport.stream(Spliterators.spliteratorUnknownSize(vcfEntry.getGenotypesOrderedByName().iterator(), Spliterator.ORDERED), false).map(gt -> gt.getGenotypeString()).filter(gt -> gt.charAt(0) != '.').distinct().toArray(String[]::new);
-                                    if (distinctGTs.length == 0 || (distinctGTs.length == 1 && Arrays.stream(distinctGTs[0].split("/")).distinct().count() < 2))
-                                        continue; // skip non-variant positions that are not already known
-                                }
-
-                                VariantData variant = variantId == null || !fDbAlreadyContainedVariants ? null : finalMongoTemplate.findById(variantId, VariantData.class);
-                                if (variant == null) {
-                                    if (vcfEntry.hasID()) {
-                                        variant = new VariantData((ObjectId.isValid(vcfEntry.getID()) ? "_" : "") + vcfEntry.getID());
-                                        totalProcessedVariantCount.getAndIncrement();
-                                    }
-                                    else
-                                        variant = new VariantData(generatedIdBaseString + String.format(String.format("%09x", totalProcessedVariantCount.getAndIncrement())));
-                                }
-                                else
-                                    totalProcessedVariantCount.getAndIncrement();
-
-                                variant.getRuns().add(new Run(projId, sRun));
-
-                                unsavedVariants.add(variant);
-                                VariantRunData runToSave = addVcfDataToVariant(finalMongoTemplate, header, variant, nAssemblyId, vcfEntry, finalProject, sRun, phasingGroups, finalEffectAnnotationPos, finalGeneIdAnnotationPos);
-                                if (!unsavedRuns.contains(runToSave)) {
-                                    unsavedRuns.add(runToSave);
-                                    Collection<String> variantGenes = (Collection<String>) runToSave.getAdditionalInfo().get(VariantRunData.FIELDNAME_ADDITIONAL_INFO_EFFECT_GENE);
-                                    if (variantGenes != null)
-                                        distinctEncounteredGeneNames.addAll((Collection<? extends String>) variantGenes);
-                                }
-
-                                finalProject.getAlleleCounts().add(variant.getKnownAlleles().size());    // it's a Set so it will only be added if it's not already present
-                                finalProject.getVariantTypes().add(vcfEntry.getType().toString());   // it's a Set so it will only be added if it's not already present
-
-                                for (Integer asmId : assemblyIDs) {
-                                    ReferencePosition rp = variant.getReferencePosition(asmId);
-                                    finalProject.getContigs(asmId).add(rp == null ? "" : rp.getSequence());
-                                }
-                            }
-
-                            saveChunk(unsavedVariants, unsavedRuns, existingVariantIDs, finalMongoTemplate, progress, saveService);
-                            progress.setCurrentStepProgress(totalProcessedVariantCount.get());
-                            if (!importThreads.contains(this) && progress.getCurrentStepProgress() % (vcChunkToImport.size()*50) == 0)
-                                LOG.debug(progress.getCurrentStepProgress() + " lines processed");
-                        }
-                        catch (Exception e)
-                        {
-                            progress.setError("Error occured importing variant number " + (totalProcessedVariantCount.get() + 1) + " (" + vcfEntry.getType().toString() + ":" + vcfEntry.getContig() + ":" + vcfEntry.getStart() + "): " + e.getMessage());
-                            LOG.error("Error", e);
-                        }
-                        finally {
-                            importThreads.remove(this);
-                        }
+        // Start workers
+        Thread[] importThreads = new Thread[nImportThreads];
+        for (int threadIndex = 0; threadIndex < nImportThreads; threadIndex++) {
+            final int workerIndex = threadIndex;
+            importThreads[threadIndex] = new Thread() {
+                @Override
+                public void run() {
+                    try {
+                        processVariantTasks(
+                            workerQueues[workerIndex],
+                            finalMongoTemplate,
+                            nAssemblyId,
+                            finalProject,
+                            sRun,
+                            assemblyIDs,
+                            progress,
+                            saveService,
+                            totalProcessedVariantCount,
+                            existingVariantIDs,
+                            fSkipMonomorphic,
+                            header,
+                            finalEffectAnnotationPos,
+                            finalGeneIdAnnotationPos,
+                            phasingGroups,
+                            distinctEncounteredGeneNames
+                        );
+                    } catch (Throwable t) {
+                        progress.setError("Worker " + workerIndex + " failed: " + t.getMessage());
+                        LOG.error(progress.getError(), t);
                     }
-                };
-
-                if (importThreads.size() < nNConcurrentThreads - 1) {
-                    importThreads.add(t);
-                    t.start();
                 }
-                else
-                    t.run();
-
-                vcChunk = new ArrayList<>();
-            }
+            };
+            importThreads[threadIndex].start();
         }
+
+        try {
+            int chunkSize = 0;
+            
+            while (variantIterator.hasNext() && progress.getError() == null && !progress.isAborted()) {
+                VariantContext vcfEntry = variantIterator.next();
+                
+                if (vcfEntry.getCommonInfo().hasAttribute(""))
+                    vcfEntry.getCommonInfo().removeAttribute("");
+                
+                VariantContextHologram hologram = new VariantContextHologram(vcfEntry);
+                
+                if (chunkSize == 0) {
+                    chunkSize = (int) (vcfEntry.getSampleNames().isEmpty() ? 
+                        nMaxChunkSize : 
+                        Math.max(1, Math.ceil((float) nMaxChunkSize / vcfEntry.getSampleNames().size())));
+                    LOG.info("Importing by chunks of size " + chunkSize);
+                }
+                
+                // --- VARIANT RESOLUTION ---
+                String variantId = null;
+                String contig = hologram.getContig();
+                long start = hologram.getStart();
+                Type type = hologram.getType();
+                
+                boolean hasValidId = hologram.hasID() && !".".equals(hologram.getID()) && !hologram.getID().isEmpty();
+                List<String> idAndSynonyms = hasValidId ? Arrays.asList(new String[]{hologram.getID()}) : null;
+
+                try {
+                    for (String variantDescForPos : getIdentificationStrings(
+                            hologram.getType().toString(), 
+                            hologram.getContig(), 
+                            (long) hologram.getStart(), 
+                            idAndSynonyms)) {
+                        variantId = existingVariantIDs.get(variantDescForPos);
+                        if (variantId != null) break;
+                    }
+                } catch (Exception e) {
+                    LOG.debug("Cannot build identification strings: " + e.getMessage());
+                }
+
+                if (variantId == null) {
+                    if (hasValidId) {
+                        variantId = (ObjectId.isValid(hologram.getID()) ? "_" : "") + hologram.getID();
+                    } else {
+                        variantId = generatedIdBaseString + String.format("%09x", totalProcessedVariantCount.getAndIncrement());
+                    }
+                }
+                
+                // Check if monomorphic and should skip
+                if (fSkipMonomorphic && !existingVariantIDs.containsKey(variantId)) {
+                    String[] distinctGTs = StreamSupport.stream(
+                        Spliterators.spliteratorUnknownSize(
+                            hologram.getGenotypesOrderedByName().iterator(), 
+                            Spliterator.ORDERED), false)
+                        .map(gt -> gt.getGenotypeString())
+                        .filter(gt -> gt.charAt(0) != '.')
+                        .distinct()
+                        .toArray(String[]::new);
+                    if (distinctGTs.length == 0 || 
+                        (distinctGTs.length == 1 && Arrays.stream(distinctGTs[0].split("/")).distinct().count() < 2)) {
+                        continue;
+                    }
+                }
+                
+                // Route to worker based on variant ID hash
+                int workerIndex = Math.floorMod(variantId.hashCode(), nImportThreads);
+                
+                VariantTask task = new VariantTask(hologram, variantId);
+                workerQueues[workerIndex].put(task);
+            }
+            
+            // Send poison pills to all workers
+            for (BlockingQueue<VariantTask> queue : workerQueues) {
+                queue.put(VariantTask.POISON_PILL);
+            }
+            
+        } catch (Exception e) {
+            progress.setError("Dispatcher failed: " + e.getMessage());
+            LOG.error(progress.getError(), e);
+        }
+
+        // Wait for workers to finish
+        for (int i = 0; i < nImportThreads; i++)
+            importThreads[i].join();
+
         reader.close();
-
-        for (Thread t : importThreads)
-            t.join();
-
         saveService.shutdown();
         saveService.awaitTermination(Integer.MAX_VALUE, TimeUnit.DAYS);
 
         if (progress.getError() != null || progress.isAborted())
             return 0;
 
+        // Build gene list cache
         if (!distinctEncounteredGeneNames.isEmpty()) {
             progress.addStep("Building gene list cache");
             progress.moveToNextStep();
@@ -398,8 +386,138 @@ public class VcfImport extends AbstractGenotypeImport<VCFParameters> {
                 LOG.info("Database " + sModule + ": " + wr.getModifiedCount() + " documents updated in " + MgdbDao.COLLECTION_NAME_GENE_CACHE);
         }
 
-        //LOG.info("VcfImport took " + (System.currentTimeMillis() - before) / 1000 + "s for " + totalProcessedVariantCount + " records");
         return totalProcessedVariantCount.get();
+    }
+
+    /**
+     * Worker method that processes variant tasks with caching
+     */
+    private void processVariantTasks(
+            BlockingQueue<VariantTask> queue,
+            MongoTemplate mongoTemplate,
+            Integer nAssemblyId,
+            GenotypingProject project,
+            String sRun,
+            Collection<Integer> assemblyIDs,
+            ProgressIndicator progress,
+            ExecutorService saveService,
+            AtomicInteger totalProcessedVariantCount,
+            HashMap<String, String> existingVariantIDs,
+            boolean fSkipMonomorphic,
+            VCFHeader header,
+            int effectAnnotationPos,
+            int geneIdAnnotationPos,
+            HashMap<String, Comparable> phasingGroups,
+            HashSet<String> distinctEncounteredGeneNames) throws Exception {
+        
+        HashSet<VariantData> unsavedVariants = new HashSet<>();
+        HashSet<VariantRunData> unsavedRuns = new HashSet<>();
+        HashMap<String, VariantData> variantCache = new HashMap<>();
+        
+        int chunkSize = 0;
+        long processedVariants = 0;
+        int localChunkSize = 0;
+        
+        while (true) {
+            VariantTask task = queue.take();
+            if (task == VariantTask.POISON_PILL) {
+                break;
+            }
+            
+            String variantId = task.variantId;
+            
+            // Get or load variant from cache
+            VariantData variant = variantCache.get(variantId);
+            if (variant == null) {
+                variant = mongoTemplate.findById(variantId, VariantData.class);
+                if (variant == null) {
+                    String id = ObjectId.isValid(variantId) ? "_" + variantId : variantId;
+                    variant = new VariantData(id);
+                }
+                variantCache.put(variantId, variant);
+            }
+            
+            // --- SAFETY CHECK: Verify position matches ---
+            // If the dispatcher gave us a variant that doesn't match the position,
+            // something went wrong. Skip it.
+            if (nAssemblyId != null && task.vcfEntry != null) {
+                ReferencePosition pos = variant.getReferencePosition(nAssemblyId);
+                if (pos != null) {
+                    String vcfContig = task.vcfEntry.getContig();
+                    long vcfStart = task.vcfEntry.getStart();
+                    
+                    if (!pos.getSequence().equals(vcfContig) || pos.getStartSite() != vcfStart) {
+                        LOG.warn("Position mismatch for " + variantId + ": DB has " + 
+                            pos.getSequence() + ":" + pos.getStartSite() + ", VCF has " + 
+                            vcfContig + ":" + vcfStart + ". Skipping this variant.");
+                        continue;
+                    }
+                }
+            }
+            
+            // Add run to variant
+            variant.getRuns().add(new Run(project.getId(), sRun));
+            
+            // Process the variant
+            VariantRunData runToSave = addVcfDataToVariant(
+                mongoTemplate,
+                header,
+                variant,
+                nAssemblyId,
+                task.vcfEntry,
+                project,
+                sRun,
+                phasingGroups,
+                effectAnnotationPos,
+                geneIdAnnotationPos,
+                distinctEncounteredGeneNames
+            );
+            
+            // Track the variant
+            if (variant.getKnownAlleles().size() > 0) {
+                if (!unsavedVariants.contains(variant)) {
+                    unsavedVariants.add(variant);
+                }
+                if (!unsavedRuns.contains(runToSave)) {
+                    unsavedRuns.add(runToSave);
+                }
+                
+                for (Integer asmId : assemblyIDs) {
+                    ReferencePosition rp = variant.getReferencePosition(asmId);
+                    project.getContigs(asmId).add(rp == null ? "" : rp.getSequence());
+                }
+                project.getVariantTypes().add(variant.getType());
+                project.getAlleleCounts().add(variant.getKnownAlleles().size());
+            }
+            
+            int newCount = totalProcessedVariantCount.incrementAndGet();
+            processedVariants++;
+            
+            if (chunkSize == 0) {
+                int sampleCount = project.getRuns().size();
+                chunkSize = Math.max(1, nMaxChunkSize / Math.max(1, sampleCount));
+                localChunkSize = chunkSize;
+                LOG.debug("Worker using chunk size: " + chunkSize);
+            }
+            
+            if (processedVariants % localChunkSize == 0) {
+                saveChunk(unsavedVariants, unsavedRuns, existingVariantIDs, mongoTemplate, progress, saveService);
+                
+                variantCache.clear();
+                unsavedVariants = new HashSet<>();
+                unsavedRuns = new HashSet<>();
+                
+                progress.setCurrentStepProgress(newCount);
+            }
+            
+            if (processedVariants % (localChunkSize * 50) == 0) {
+                LOG.debug(newCount + " lines processed by worker");
+            }
+        }
+        
+        if (!unsavedVariants.isEmpty()) {
+            persistVariantsAndGenotypes(!existingVariantIDs.isEmpty(), mongoTemplate, unsavedVariants, unsavedRuns);
+        }
     }
 
     private static class SeekableByteChannelAdapter implements SeekableByteChannel {
@@ -449,7 +567,7 @@ public class VcfImport extends AbstractGenotypeImport<VCFParameters> {
         
         @Override
         public long size() throws IOException {
-            return -1; // Unknown size for decompressed stream
+            return -1;
         }
         
         @Override
@@ -471,7 +589,6 @@ public class VcfImport extends AbstractGenotypeImport<VCFParameters> {
         }
     }
     
-    // Helper class to wrap InputStream as SeekableByteChannel
     private static class NonSeekableByteChannel implements SeekableByteChannel {
         private final InputStream inputStream;
         private long position = 0;
@@ -546,9 +663,7 @@ public class VcfImport extends AbstractGenotypeImport<VCFParameters> {
         String urlString = params.getMainFileUrl().toString();
         boolean fIsRemoteFile = !urlString.startsWith("file:/");
         
-        // 1. Initialize the appropriate Codec
         final FeatureCodec codec = params.isBCF() ? new RelaxedBCF2Codec() : new VCFCodec();
-
         boolean fIsCompressed;
         
         if (params.isBCF()) {
@@ -562,13 +677,12 @@ public class VcfImport extends AbstractGenotypeImport<VCFParameters> {
             fIsCompressed = (byte1 == 0x1f && byte2 == 0x8b);
             
             this.reader = new FlexibleBCFReader(params.getMainFileUrl(), codec, fIsCompressed);
-        }
-        else {
+        } else {
             fIsCompressed = urlString.toLowerCase().endsWith(".gz");
             
             if (!fIsRemoteFile || !fIsCompressed)
-                this.reader = AbstractFeatureReader.getFeatureReader(urlString, codec, false);	// plain HTSJDK handles this fine
-            else {	// Remote compressed VCF - use custom iterator with 8KB alignment (working around HTSJDK bug)
+                this.reader = AbstractFeatureReader.getFeatureReader(urlString, codec, false);
+            else {
                 this.reader = (FeatureReader<VariantContext>) new TribbleIndexedFeatureReader<VariantContext, LineIterator>(urlString, codec, false) {
                     @Override
                     public CloseableTribbleIterator<VariantContext> iterator() {
@@ -579,7 +693,6 @@ public class VcfImport extends AbstractGenotypeImport<VCFParameters> {
                             codec.readHeader(lineIterator);
                             
                             return new CloseableTribbleIterator<VariantContext>() {
-                                // Reusable wrapper that presents a single line as a LineIterator
                                 private final SingleLineIterator singleLineIterator = new SingleLineIterator();
                                 
                                 @Override
@@ -613,7 +726,6 @@ public class VcfImport extends AbstractGenotypeImport<VCFParameters> {
                                 @Override
                                 public java.util.Iterator<VariantContext> iterator() { return this; }
                                 
-                                // Inner class for reusable single-line iterator
                                 final class SingleLineIterator implements LineIterator {
                                     private String currentLine;
                                     private boolean consumed;
@@ -656,24 +768,19 @@ public class VcfImport extends AbstractGenotypeImport<VCFParameters> {
             }
         }
 
-        // 3. Start iteration
         this.variantIterator = reader.iterator();
     }
 
     @Override
-    protected void closeResource() throws IOException {
-
-    }
+    protected void closeResource() throws IOException {}
 
     @Override
     protected Integer findPloidyLevel(MongoTemplate mongoTemplate, Integer nPloidyParam, ProgressIndicator progress) throws IOException {
         Iterator<VariantContext> variantIterator = reader.iterator();
         int nPloidy = 0, i = 0;
-        while (variantIterator.hasNext() && i++ < 100 && nPloidy == 0)
-        {
+        while (variantIterator.hasNext() && i++ < 100 && nPloidy == 0) {
             VariantContext vcfEntry = variantIterator.next();
-            if (vcfEntry.getCommonInfo().getAttribute("CNV") == null)
-            {
+            if (vcfEntry.getCommonInfo().getAttribute("CNV") == null) {
                 nPloidy = vcfEntry.getMaxPloidy(0);
                 LOG.info("Found ploidy level of " + nPloidy + " for " + vcfEntry.getType() + " variant " + vcfEntry.getContig() + ":" + vcfEntry.getStart());
                 break;
@@ -682,26 +789,34 @@ public class VcfImport extends AbstractGenotypeImport<VCFParameters> {
         return nPloidy;
     }
 
-	/**
-     * Adds the vcf data to variant.
-     *
-     * @param mongoTemplate the mongo template
-     * @param header the VCF Header
-     * @param variantToFeed the variant to feed
-     * @param nAssemblyId the assembly id
-     * @param vc the VariantContextHologram
-     * @param project the project
-     * @param runName the run name
-     * @param phasingGroup the phasing group
-     * @param effectAnnotationPos the effect annotation pos
-     * @param geneIdAnnotationPos the gene name annotation pos
-     * @return the variant run data
-     * @throws Exception the exception
-     */
-    private VariantRunData addVcfDataToVariant(MongoTemplate mongoTemplate, VCFHeader header, VariantData variantToFeed, Integer nAssemblyId, VariantContextHologram vc, GenotypingProject project, String runName, HashMap<String /*individual*/, Comparable> phasingGroup, int effectAnnotationPos, int geneIdAnnotationPos) throws Exception
-    {
-    	int initialAlleleCount = variantToFeed.getKnownAlleles().size();
-    	
+    private VariantRunData addVcfDataToVariant(
+            MongoTemplate mongoTemplate,
+            VCFHeader header,
+            VariantData variantToFeed,
+            Integer nAssemblyId,
+            VariantContextHologram vc,
+            GenotypingProject project,
+            String runName,
+            HashMap<String, Comparable> phasingGroup,
+            int effectAnnotationPos,
+            int geneIdAnnotationPos,
+            HashSet<String> distinctEncounteredGeneNames) throws Exception {
+        
+        int initialAlleleCount = variantToFeed.getKnownAlleles().size();
+        
+        // Safety check: verify the variant matches the position
+        if (nAssemblyId != null && vc != null) {
+            ReferencePosition pos = variantToFeed.getReferencePosition(nAssemblyId);
+            if (pos != null) {
+                if (!pos.getSequence().equals(vc.getContig()) || pos.getStartSite() != vc.getStart()) {
+                    throw new Exception("Variant position mismatch: DB has " + 
+                        pos.getSequence() + ":" + pos.getStartSite() + 
+                        ", VCF has " + vc.getContig() + ":" + vc.getStart() +
+                        " for variant " + variantToFeed.getId());
+                }
+            }
+        }
+        
         if (variantToFeed.getType() == null || Type.NO_VARIATION.toString().equals(variantToFeed.getType()))
             variantToFeed.setType(vc.getType().toString());
         else if (null != vc.getType() && Type.NO_VARIATION != vc.getType() && !variantToFeed.getType().equals(vc.getType().toString()))
@@ -719,12 +834,15 @@ public class VcfImport extends AbstractGenotypeImport<VCFParameters> {
                 knownAlleleList.add(vcAllele);
         variantToFeed.setKnownAlleles(knownAlleleList);
 
-        if (variantToFeed.getReferencePosition(nAssemblyId) == null) // otherwise we leave it as it is (had some trouble with overridden end-sites)
+        if (variantToFeed.getReferencePosition(nAssemblyId) == null)
             variantToFeed.setReferencePosition(nAssemblyId, new ReferencePosition(vc.getContig(), vc.getStart(), (long) vc.getEnd()));
 
         VariantRunData vrd = new VariantRunData(new VariantRunDataId(project.getId(), runName, variantToFeed.getId()));
 
-        // main VCF fields that are stored as additional info in the DB
+        Map<String, Integer> knownAlleleStringToIndexMap = new HashMap<>();
+        for (int i = 0; i < knownAlleleList.size(); i++)
+            knownAlleleStringToIndexMap.put(knownAlleleList.get(i), i);
+
         if (vc.isFullyDecoded())
             vrd.getAdditionalInfo().put(VariantData.FIELD_FULLYDECODED, true);
         if (vc.hasLog10PError())
@@ -734,9 +852,8 @@ public class VcfImport extends AbstractGenotypeImport<VCFParameters> {
         if (vc.filtersWereApplied())
             vrd.getAdditionalInfo().put(VariantData.FIELD_FILTERS, vc.getFilters().size() > 0 ? Helper.arrayToCsv(",", vc.getFilters()) : VCFConstants.PASSES_FILTERS_v4);
 
-        List<String> aiEffect = new ArrayList<String>(), aiGene = new ArrayList<String>();
+        List<String> aiEffect = new ArrayList<>(), aiGene = new ArrayList<>();
 
-        // actual VCF info fields
         Map<String, Object> attributes = vc.getAttributes();
         for (String key : attributes.keySet()) {
             if (geneIdAnnotationPos != -1 && (ANNOTATION_FIELDNAME_EFF.equals(key) || ANNOTATION_FIELDNAME_ANN.equals(key) || ANNOTATION_FIELDNAME_CSQ.equals(key))) {
@@ -745,10 +862,10 @@ public class VcfImport extends AbstractGenotypeImport<VCFParameters> {
                 for (String effect : effectList) {
                     for (String effectDesc : effect.split(",")) {
                         String sEffect = null;
-                        int parenthesisPos = !ANNOTATION_FIELDNAME_EFF.equals(key) ? -1 /* parenthesis can also be used in ANN or CSQ, but differently */ : effectDesc.indexOf("(");
+                        int parenthesisPos = !ANNOTATION_FIELDNAME_EFF.equals(key) ? -1 : effectDesc.indexOf("(");
                         List<String> fields = Helper.split(effectDesc.substring(parenthesisPos + 1).replaceAll("\\)", ""), "|");
                         if (parenthesisPos > 0)
-                            sEffect = effectDesc.substring(0, parenthesisPos);  // snpEff version < 4.1
+                            sEffect = effectDesc.substring(0, parenthesisPos);
                         else if (effectAnnotationPos != -1)
                             sEffect = fields.get(effectAnnotationPos);
                         if (sEffect != null)
@@ -763,6 +880,8 @@ public class VcfImport extends AbstractGenotypeImport<VCFParameters> {
                         project.getEffectAnnotations().add(variantEffectAnnotation);
                     }
                 }
+                if (aiGene != null)
+                    distinctEncounteredGeneNames.addAll(aiGene);
             }
 
             Object attrVal = vc.getAttributes().get(key);
@@ -787,12 +906,7 @@ public class VcfImport extends AbstractGenotypeImport<VCFParameters> {
             }
         }
 
-        // genotype fields
         Iterator<Genotype> genotypes = vc.getGenotypesOrderedByName().iterator();
-        Map<String, Integer> knownAlleleStringToIndexMap = new HashMap<>();
-        for (int i=0; i<knownAlleleList.size(); i++)
-            knownAlleleStringToIndexMap.put(knownAlleleList.get(i), i);
-
         while (genotypes.hasNext()) {
             Genotype genotype = genotypes.next();
 
@@ -803,11 +917,13 @@ public class VcfImport extends AbstractGenotypeImport<VCFParameters> {
             if (phasedGroup == null || (!isPhased && !genotype.isNoCall()))
                 phasingGroup.put(sIndOrSpId, variantToFeed.getId());
 
-            List<String> gtAllelesAsStrings = genotype.getAlleles().stream().map(allele -> allele.getBaseString()).collect(Collectors.toList());
+            List<String> gtAllelesAsStrings = genotype.getAlleles().stream()
+                .map(allele -> allele.getBaseString())
+                .collect(Collectors.toList());
 
             String gtCode = VariantData.rebuildVcfFormatGenotype(knownAlleleStringToIndexMap, gtAllelesAsStrings, isPhased, false);
             if ("1/0".equals(gtCode))
-                gtCode = "0/1"; // convert to "0/1" so that MAF queries can work reliably
+                gtCode = "0/1";
 
             SampleGenotype aGT = new SampleGenotype(gtCode);
             if (isPhased) {
@@ -820,12 +936,12 @@ public class VcfImport extends AbstractGenotypeImport<VCFParameters> {
             if (genotype.hasDP()) {
                 aGT.getAdditionalInfo().put(VariantData.GT_FIELD_DP, genotype.getDP());
             }
-            boolean fSkipPlFix = false; // for performance
+            boolean fSkipPlFix = false;
             if (genotype.hasAD()) {
                 int[] adArray = genotype.getAD(), originalAdArray = adArray;
                 adArray = VariantData.fixAdFieldValue(adArray, vc.getAlleles(), knownAlleleList);
                 if (originalAdArray == adArray)
-                    fSkipPlFix = true;  // if AD was correct then PL is too
+                    fSkipPlFix = true;
                 aGT.getAdditionalInfo().put(VariantData.GT_FIELD_AD, Helper.arrayToCsv(",", adArray));
             }
             if (genotype.hasPL()) {
@@ -850,13 +966,13 @@ public class VcfImport extends AbstractGenotypeImport<VCFParameters> {
             if (genotype.isFiltered())
                 aGT.getAdditionalInfo().put(VariantData.FIELD_FILTERS, genotype.getFilters());
 
-            if (genotype.isCalled() || !aGT.getAdditionalInfo().isEmpty())  // otherwise there's no point in persisting an empty object
-            	vrd.getSampleGenotypes().put(m_providedIdToCallsetMap.get(sIndOrSpId).getId(), aGT);
+            if (genotype.isCalled() || !aGT.getAdditionalInfo().isEmpty())
+                vrd.getSampleGenotypes().put(m_providedIdToCallsetMap.get(sIndOrSpId).getId(), aGT);
         }
 
         if (project.getId() > 1 || project.getRuns().size() > 0)
-        	updateExistingVrdAlleles(mongoTemplate, initialAlleleCount, variantToFeed);
-        
+            updateExistingVrdAlleles(mongoTemplate, initialAlleleCount, variantToFeed);
+
         vrd.setKnownAlleles(variantToFeed.getKnownAlleles());
         vrd.setPositions(variantToFeed.getPositions());
         vrd.setReferencePosition(variantToFeed.getReferencePosition());
@@ -865,15 +981,9 @@ public class VcfImport extends AbstractGenotypeImport<VCFParameters> {
         return vrd;
     }
 
-    /**
-     *
-     * @author sempere
-     * This is some kind of DAO for VariantContext, needed because the latter is not thread-safe
-     *
-     */
     static public class VariantContextHologram {
         private Type type;
-        private List<Allele>  alleles;
+        private List<Allele> alleles;
         private Iterable<Genotype> genotypesOrderedByName;
         private Map<String, Object> attributes;
         private boolean filtersWereApplied;
@@ -912,94 +1022,23 @@ public class VcfImport extends AbstractGenotypeImport<VCFParameters> {
             reference = vc.getReference();
         }
 
-        public boolean hasID() {
-            return hasID;
-        }
-
-        public boolean isVariant() {
-            return isVariant;
-        }
-
-        public String getID() {
-            return id;
-        }
-
-        public Type getType() {
-            return type;
-        }
-
-        public List<Allele>  getAlleles() {
-            return alleles;
-        }
-
-        public Iterable<Genotype> getGenotypesOrderedByName() {
-            return genotypesOrderedByName;
-        }
-
-        public Map<String, Object> getAttributes() {
-            return attributes;
-        }
-
-        public boolean filtersWereApplied() {
-            return filtersWereApplied;
-        }
-
-        public Set<String> getFilters() {
-            return filters;
-        }
-
-        public double getPhredScaledQual() {
-            return phredScaledQual;
-        }
-
-        public String getSource() {
-            return source;
-        }
-
-        public boolean hasLog10PError() {
-            return hasLog10PError;
-        }
-
-        public boolean isFullyDecoded() {
-            return isFullyDecoded;
-        }
-
-        public long getStart() {
-            return start;
-        }
-
-        public long getEnd() {
-            return end;
-        }
-
-        public String getContig() {
-            return contig;
-        }
-
-        public List<Allele> getAlternateAlleles() {
-            return alternateAlleles;
-        }
-
-        public Allele getReference() {
-            return reference;
-        }
-
+        public boolean hasID() { return hasID; }
+        public boolean isVariant() { return isVariant; }
+        public String getID() { return id; }
+        public Type getType() { return type; }
+        public List<Allele> getAlleles() { return alleles; }
+        public Iterable<Genotype> getGenotypesOrderedByName() { return genotypesOrderedByName; }
+        public Map<String, Object> getAttributes() { return attributes; }
+        public boolean filtersWereApplied() { return filtersWereApplied; }
+        public Set<String> getFilters() { return filters; }
+        public double getPhredScaledQual() { return phredScaledQual; }
+        public String getSource() { return source; }
+        public boolean hasLog10PError() { return hasLog10PError; }
+        public boolean isFullyDecoded() { return isFullyDecoded; }
+        public long getStart() { return start; }
+        public long getEnd() { return end; }
+        public String getContig() { return contig; }
+        public List<Allele> getAlternateAlleles() { return alternateAlleles; }
+        public Allele getReference() { return reference; }
     }
-
-//    public static void printGenotypes(int j, int k, String genotype)
-//    {
-//       if (genotype.length()==k)
-//       {
-//           LOG.info("genotype " + genotype + " has length " + k);
-//       }
-//       else
-//       {
-//           for (int a=0; a<j; ++a)
-//           {
-//               String s = "" + (char)(a+65);
-//               s += genotype;
-//               printGenotypes(a+1, k, s);
-//           }
-//       }
-//    }
 }

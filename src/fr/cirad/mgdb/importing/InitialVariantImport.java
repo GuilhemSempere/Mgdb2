@@ -27,6 +27,7 @@ import java.util.Collection;
 import java.util.Date;
 import java.util.List;
 import java.util.TreeSet;
+import java.util.concurrent.ConcurrentSkipListSet;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -151,7 +152,7 @@ public class InitialVariantImport {
 //          if (Helper.estimDocCount(mongoTemplate, VariantData.class) > 0)
 //          	throw new Exception("There are already some variants in this database!");
             
-            MongoCollection<Document> varColl = mongoTemplate.getCollection(mongoTemplate.getCollectionName(VariantData.class)), vrdColl = mongoTemplate.getCollection(mongoTemplate.getCollectionName(VariantRunData.class));
+            MongoCollection<Document> varColl = mongoTemplate.getCollection(mongoTemplate.getCollectionName(VariantData.class));
             boolean fUpdateExistingList = Helper.estimDocCount(sModule, VariantData.class) > 0;
             String backupCollName = !fUpdateExistingList ? null : varColl.getNamespace().getCollectionName() + "_backup_" + new SimpleDateFormat("yyyy-MM-dd_HH-mm-ss").format(new Date());
             if (fUpdateExistingList)
@@ -367,7 +368,7 @@ public class InitialVariantImport {
 	                    	executor.execute(new Thread() {
 	                    		public void run() {
 		                		Collection<String> sequencesUsed = finalMongoTemplate.findDistinct(new Query(Criteria.where("_id." + VariantRunDataId.FIELDNAME_PROJECT_ID).is(project.getId())), VariantData.FIELDNAME_POSITIONS + "." + assembly.getId() + "." + ReferencePosition.FIELDNAME_SEQUENCE, VariantRunData.class, String.class);
-		                		project.getContigs().put(assembly.getId(), new TreeSet<>(sequencesUsed));
+		                		project.getContigs().put(assembly.getId(), new ConcurrentSkipListSet<>(sequencesUsed));
                                 LOG.debug("Updated used sequence list for project '" + project.getName() + "' and assembly '" + assembly.getName() + "' -> " + sequencesUsed);
 		                	}
 	                    });

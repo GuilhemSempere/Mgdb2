@@ -23,6 +23,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeSet;
+import java.util.concurrent.ConcurrentSkipListSet;
 
 import org.springframework.data.annotation.Id;
 import org.springframework.data.annotation.TypeAlias;
@@ -171,13 +172,13 @@ public class GenotypingProject {
      * The sequences.
      */
     @Field(FIELDNAME_SEQUENCES)
-    private TreeSet<String> sequences = new TreeSet<String>(new AlphaNumericComparator());
+    private ConcurrentSkipListSet<String> sequences = new ConcurrentSkipListSet<String>(new AlphaNumericComparator());
     
     /**
      * The sequences.
      */
     @Field(FIELDNAME_CONTIGS) /*TODO: not backwards compatible*/
-    private Map<Integer, TreeSet<String>> contigs = new HashMap<>();
+    private Map<Integer, ConcurrentSkipListSet<String>> contigs = new HashMap<>();
 
     /**
      * The allele counts.
@@ -386,7 +387,7 @@ public class GenotypingProject {
      *
      * @return the contigs by assembly ID
      */
-    public Map<Integer, TreeSet<String>> getContigs() {
+    public Map<Integer, ConcurrentSkipListSet<String>> getContigs() {
         return contigs;
     }
 
@@ -395,13 +396,13 @@ public class GenotypingProject {
      *
      * @return the contigs for a given assembly ID
      */
-    public TreeSet<String> getContigs(Integer nAssemblyId) {
+    public ConcurrentSkipListSet<String> getContigs(Integer nAssemblyId) {
     	if (nAssemblyId == null)
     		return sequences;
 
-        TreeSet<String> seqs = contigs.get(nAssemblyId);
+    	ConcurrentSkipListSet<String> seqs = contigs.get(nAssemblyId);
         if (seqs == null) {
-            seqs = new TreeSet<String>(new AlphaNumericComparator());
+            seqs = new ConcurrentSkipListSet<String>(new AlphaNumericComparator());
             contigs.put(nAssemblyId, seqs);
         }
         return seqs;

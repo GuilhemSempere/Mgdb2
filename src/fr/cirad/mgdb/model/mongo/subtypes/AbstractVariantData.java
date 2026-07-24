@@ -836,7 +836,7 @@ abstract public class AbstractVariantData
             stop = start + sRefAllele.length() - 1;
         }
         String chr = referencePosition == null ? null : referencePosition.getSequence();
-        VariantContextBuilder vcb = new VariantContextBuilder(source != null ? source : FIELDVAL_SOURCE_MISSING, chr != null ? chr : "", start, stop, variantAlleles);
+        VariantContextBuilder vcb = new VariantContextBuilder(source != null ? source : FIELDVAL_SOURCE_MISSING, chr != null ? chr : "0", start, stop, variantAlleles);
         if (exportVariantIDs)
             vcb.id((synonym == null ? getVariantId() : synonym).toString());
         vcb.genotypes(genotypes);

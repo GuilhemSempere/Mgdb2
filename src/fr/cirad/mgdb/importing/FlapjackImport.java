@@ -130,7 +130,7 @@ public class FlapjackImport extends RefactoredImport<FlapjackImportParameters> {
                 args[2], //sRun
                 args[3], //sTechnology
                 null, // nPloidy
-                args[5], //assemblyName
+                args[6], //assemblyName
                 null, //sampleToIndividualMap
                 false,//fSkipMonomorphic
                 mode, //importMode

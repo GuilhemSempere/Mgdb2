@@ -151,15 +151,14 @@ public class PlinkImport extends RefactoredImport<PlinkImportParameters> {
             LOG.warn("Unable to parse input mode. Using default (0): overwrite run if exists.");
         }
         PlinkImport instance = new PlinkImport();
-        //instance.setMaxExpectedAlleleCount(2);
-        //instance.importToMongo(args[0], args[1], args[2], args[3], new File(args[4]).toURI().toURL(), new File(args[5]), null, false, true, args[6], mode);
+        instance.setMaxExpectedAlleleCount(2);
         PlinkImportParameters params = new PlinkImportParameters(
                 args[0], //sModule
                 args[1], //sProject
                 args[2], //sRun
                 args[3], //sTechnology
                 null, // nPloidy
-                args[5], //assemblyName
+                args[6], //assemblyName
                 null, //sampleToIndividualMap
                 false,//fSkipMonomorphic
                 mode,//importMode
@@ -167,7 +166,7 @@ public class PlinkImport extends RefactoredImport<PlinkImportParameters> {
                 new File(args[5]).toURI().toURL(),
                 false
         );
-        new PlinkImport().importToMongo(params);
+        instance.importToMongo(params);
 
     }
 
