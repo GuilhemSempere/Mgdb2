@@ -28,7 +28,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Scanner;
-import java.util.concurrent.ExecutorService;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 
@@ -72,7 +71,7 @@ public abstract class AbstractGenotypeImport<T extends ImportParameters> {
 
     private static final Logger LOG = Logger.getLogger(AbstractGenotypeImport.class);
 
-    protected static final int nMaxChunkSize = 20000;
+    protected static final int nMaxChunkSize = 30000;
 
     private boolean m_fAllowDbDropIfNoGenotypingData = true;
     public boolean m_fCloseContextAfterImport = false;
@@ -271,37 +270,10 @@ public abstract class AbstractGenotypeImport<T extends ImportParameters> {
         boolean fLooksLikePreprocessedVariantList = firstId != null && firstId.endsWith("001") && mongoTemplate.count(new Query(Criteria.where("_id").not().regex("^\\*?" + StringUtils.getCommonPrefix(new String[] {firstId, lastId}) + ".*")), VariantData.class) == 0;
         return !fLooksLikePreprocessedVariantList;
     }
-
-    protected void saveChunk(final Collection<VariantData> unsavedVariants, final Collection<VariantRunData> unsavedRuns, HashMap<String, String> existingVariantIDs, MongoTemplate finalMongoTemplate, ProgressIndicator progress, ExecutorService saveService) throws InterruptedException {
-        if (progress.getError() != null || progress.isAborted())
-            return;
-
-        Thread insertionThread = new Thread() {
-            @Override
-            public void run() {
-                try {
-                    persistVariantsAndGenotypes(!existingVariantIDs.isEmpty(), finalMongoTemplate, unsavedVariants, unsavedRuns);
-                } catch (InterruptedException e) {
-                    progress.setError(e.getMessage());
-                    LOG.error(e);
-                }
-            }
-        };
-
-        saveService.execute(insertionThread);
-    }
-
-    protected int saveServiceQueueLength(int nConcurrentThreads) {
-        return nConcurrentThreads * 6;
-    }
-
-    protected int saveServiceThreads(int nConcurrentThreads) {
-        return nConcurrentThreads * 3;
-    }
-
+    
     public void persistVariantsAndGenotypes(boolean fDBAlreadyContainsVariants, MongoTemplate mongoTemplate, Collection<VariantData> unsavedVariants, Collection<VariantRunData> unsavedRuns) throws InterruptedException
     {
-        Thread vdAsyncThread = new Thread() {    // using 2 threads is faster when calling save, but slower when calling insert
+        Thread vdAsyncThread = new Thread() {
             public void run() {
                 if (!fDBAlreadyContainsVariants) {    // we benefit from the fact that it's the first variant import into this database to use bulk insert which is much faster
                     mongoTemplate.insert(unsavedVariants, VariantData.class);
@@ -319,6 +291,7 @@ public abstract class AbstractGenotypeImport<T extends ImportParameters> {
         };
         vdAsyncThread.start();
 
+        // using 2 threads is faster when calling save, but slower when calling insert
         List<VariantRunData> syncList = new ArrayList<>(), asyncList = new ArrayList<>();
         int i = 0;
         for (VariantRunData vrd : unsavedRuns)
@@ -482,7 +455,7 @@ public abstract class AbstractGenotypeImport<T extends ImportParameters> {
             if (importType.endsWith("Parameters")) {
                 importType = importType.substring(0, importType.length() - "Parameters".length());
             }
-            LOG.info(importType + " Import took " + (System.currentTimeMillis() - before) / 1000 + "s for " + count + " records");
+            LOG.info(getClass().getSimpleName() + " took " + (System.currentTimeMillis() - before) / 1000 + "s for " + count + " records");
 
             return createdProject;
 

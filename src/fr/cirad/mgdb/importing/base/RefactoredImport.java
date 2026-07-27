@@ -19,10 +19,7 @@ import java.util.Map;
 import java.util.Scanner;
 import java.util.TreeSet;
 import java.util.concurrent.BlockingQueue;
-import java.util.concurrent.ExecutorService;
 import java.util.concurrent.LinkedBlockingQueue;
-import java.util.concurrent.ThreadPoolExecutor;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -94,7 +91,7 @@ public abstract class RefactoredImport<T extends ImportParameters> extends Abstr
 
     public long importTempFileContents(ProgressIndicator progress, int nNConcurrentThreads, MongoTemplate mongoTemplate, Integer nAssemblyId, File tempFile, LinkedHashMap<String, String> providedVariantPositions, HashMap<String, String> existingVariantIDs, GenotypingProject project, String sRun, HashMap<String, ArrayList<String>> inconsistencies, LinkedHashMap<String, String> orderedIndividualToPopulationMap, Map<String, Type> nonSnpVariantTypeMap, HashSet<Integer> indexesOfLinesThatMustBeSkipped, boolean fSkipMonomorphic) throws Exception {
         String[] individuals = orderedIndividualToPopulationMap.keySet().toArray(new String[orderedIndividualToPopulationMap.size()]);
-        final AtomicInteger count = new AtomicInteger(0);
+        final AtomicInteger totalWrittenVariantCount = new AtomicInteger(0);
         final AtomicInteger ignoredVariants = new AtomicInteger(0);
 
         try {
@@ -104,8 +101,8 @@ public abstract class RefactoredImport<T extends ImportParameters> extends Abstr
             progress.moveToNextStep();
             progress.setPercentageEnabled(true);
 
-            final int nNumberOfVariantsToSaveAtOnce = Math.max(1, nMaxChunkSize / individuals.length);
-            LOG.info("Importing by chunks of size " + nNumberOfVariantsToSaveAtOnce);
+            final int chunkSize = Math.max(1, Math.min(1000, (int) Math.ceil((float) nMaxChunkSize / Math.max(1, individuals.length))));
+            LOG.info("Importing by chunks of size " + chunkSize);
 
             LinkedHashSet<String> individualsWithoutPopulation = new LinkedHashSet<>();
             for (String sIndOrSpId : orderedIndividualToPopulationMap.keySet()) {
@@ -152,15 +149,12 @@ public abstract class RefactoredImport<T extends ImportParameters> extends Abstr
             // --- DISPATCHER + QUEUE IMPLEMENTATION ---
             
             // Create worker queues
-            int nImportThreads = Math.max(1, nNConcurrentThreads - 1);
+            int nImportThreads = Math.max(1, (nNConcurrentThreads - 1) / 2);
+            @SuppressWarnings("unchecked")
             BlockingQueue<VariantTask>[] workerQueues = new BlockingQueue[nImportThreads];
             for (int i = 0; i < nImportThreads; i++) {
                 workerQueues[i] = new LinkedBlockingQueue<>();
             }
-
-            // Save service
-            BlockingQueue<Runnable> saveServiceQueue = new LinkedBlockingQueue<Runnable>(saveServiceQueueLength(nNConcurrentThreads));
-            ExecutorService saveService = new ThreadPoolExecutor(1, saveServiceThreads(nNConcurrentThreads), 30, TimeUnit.SECONDS, saveServiceQueue, new ThreadPoolExecutor.CallerRunsPolicy());
 
             // Start workers
             Thread[] importThreads = new Thread[nImportThreads];
@@ -179,11 +173,10 @@ public abstract class RefactoredImport<T extends ImportParameters> extends Abstr
                                 nonSnpVariantTypeMap,
                                 project,
                                 sRun,
-                                nNumberOfVariantsToSaveAtOnce,
+                                chunkSize,
                                 assemblyIDs,
                                 progress,
-                                saveService,
-                                count,
+                                totalWrittenVariantCount,
                                 providedVariantPositions.size(),
                                 inconsistencies,
                                 m_maxExpectedAlleleCount,
@@ -260,9 +253,8 @@ public abstract class RefactoredImport<T extends ImportParameters> extends Abstr
                             workerQueues[workerIndex].put(task);
                         }
                         
-                        for (BlockingQueue<VariantTask> queue : workerQueues) {
+                        for (BlockingQueue<VariantTask> queue : workerQueues)
                             queue.put(VariantTask.POISON_PILL);
-                        }
                         
                     } catch (Exception e) {
                         progress.setError("Dispatcher failed: " + e.getMessage());
@@ -277,14 +269,11 @@ public abstract class RefactoredImport<T extends ImportParameters> extends Abstr
                 importThreads[i].join();
             }
             
-            saveService.shutdown();
-            saveService.awaitTermination(Integer.MAX_VALUE, TimeUnit.DAYS);
-
             if (ignoredVariants.get() > 0)
                 LOG.warn("Number of ignored variants: " + ignoredVariants);
 
             if (progress.getError() != null || progress.isAborted())
-                return count.get();
+                return totalWrittenVariantCount.get();
 
             if (!project.getRuns().contains(sRun))
                 project.getRuns().add(sRun);
@@ -292,11 +281,11 @@ public abstract class RefactoredImport<T extends ImportParameters> extends Abstr
         } finally {
             // cleanup
         }
-        return count.get();
+        return totalWrittenVariantCount.get();
     }
 
     /**
-     * Worker method that processes variant tasks with caching
+     * Worker method that processes variant tasks
      */
     private void processVariantTasks(BlockingQueue<VariantTask> queue,
             MongoTemplate mongoTemplate,
@@ -309,8 +298,7 @@ public abstract class RefactoredImport<T extends ImportParameters> extends Abstr
             int chunkSize,
             Collection<Integer> assemblyIDs,
             ProgressIndicator progress,
-            ExecutorService saveService,
-            AtomicInteger count,
+            AtomicInteger totalWrittenVariantCount,
             int totalVariants,
             HashMap<String, ArrayList<String>> inconsistencies,
             Integer maxExpectedAlleleCount,
@@ -322,19 +310,17 @@ public abstract class RefactoredImport<T extends ImportParameters> extends Abstr
         
         HashSet<VariantData> unsavedVariants = new HashSet<>();
         HashSet<VariantRunData> unsavedRuns = new HashSet<>();
-        HashMap<String, VariantData> variantCache = new HashMap<>(); // Per-worker cache
-        
-        long processedVariants = 0;
+        HashMap<String, VariantData> variantCache = new HashMap<>();
+        int workerProcessed = 0;
         
         while (true) {
             VariantTask task = queue.take();
-            if (task == VariantTask.POISON_PILL) {
+            if (task == VariantTask.POISON_PILL || progress.getError() != null || progress.isAborted()) {
                 break;
             }
             
-            String variantId = task.canonicalVariantId != null ? 
-                task.canonicalVariantId : task.providedVariantId;
-            
+            String variantId = task.canonicalVariantId != null ? task.canonicalVariantId : task.providedVariantId;
+                
             if (variantId != null && variantId.startsWith("*")) {
                 LOG.warn("Skipping deprecated variant data: " + task.providedVariantId);
                 continue;
@@ -429,27 +415,24 @@ public abstract class RefactoredImport<T extends ImportParameters> extends Abstr
                     (rp != null ? " positioned at " + rp.getSequence() + ":" + rp.getStartSite() : "") + 
                     " because its alleles are not known (only missing data provided so far)");
             }
+                
             
-            int newCount = count.incrementAndGet();
-            processedVariants++;
-            
-            if (processedVariants % chunkSize == 0) {
-                saveChunk(unsavedVariants, unsavedRuns, existingVariantIDs, mongoTemplate, progress, saveService);
+            if (workerProcessed % chunkSize == 0 && !unsavedVariants.isEmpty()) {
+                persistVariantsAndGenotypes(!existingVariantIDs.isEmpty(), mongoTemplate, 
+                    unsavedVariants, unsavedRuns);
+                progress.setCurrentStepProgress(totalWrittenVariantCount.addAndGet(unsavedVariants.size()) * 100 / totalVariants);
                 
                 variantCache.clear();
                 unsavedVariants = new HashSet<>();
                 unsavedRuns = new HashSet<>();
-                
-                progress.setCurrentStepProgress(newCount * 100 / totalVariants);
-            }
-            
-            if (processedVariants % (chunkSize * 50) == 0) {
-                LOG.debug(newCount + " lines processed by worker");
             }
         }
         
+        // Save remaining
         if (!unsavedVariants.isEmpty()) {
-            persistVariantsAndGenotypes(!existingVariantIDs.isEmpty(), mongoTemplate, unsavedVariants, unsavedRuns);
+            persistVariantsAndGenotypes(!existingVariantIDs.isEmpty(), mongoTemplate, 
+                unsavedVariants, unsavedRuns);
+            progress.setCurrentStepProgress(totalWrittenVariantCount.addAndGet(unsavedVariants.size()) * 100 / totalVariants);
         }
     }
 

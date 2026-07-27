@@ -189,27 +189,24 @@ public class HapMapImport extends AbstractGenotypeImport<FileImportParameters> {
         HashMap<String, String> existingVariantIDs = buildSynonymToIdMapForExistingVariants(mongoTemplate, true, assembly == null ? null : assembly.getId());
 
         String generatedIdBaseString = Long.toHexString(System.currentTimeMillis());
-        AtomicInteger totalProcessedVariantCount = new AtomicInteger(0);
+        AtomicInteger totalParsedVariantCount = new AtomicInteger(0);
+        AtomicInteger totalWrittenVariantCount = new AtomicInteger(0);
         final ArrayList<String> sampleIds = new ArrayList<>();
         progress.addStep("Processing variant lines");
         progress.moveToNextStep();
 
         int nNConcurrentThreads = Math.max(1, nNumProc);
-        LOG.debug("Importing project '" + params.getProject() + "' into " + params.getModule() + " using " + nNConcurrentThreads + " threads");
-
-        Iterator<RawHapMapFeature> it = reader.iterator();
+        int nImportThreads = Math.max(1, (nNConcurrentThreads - 1) / 1);
+        LOG.debug("Importing project '" + params.getProject() + "' into " + params.getModule() + " using " + nImportThreads + " threads");
         
         // --- DISPATCHER + QUEUE IMPLEMENTATION ---
         
-        int nImportThreads = Math.max(1, nNConcurrentThreads - 1);
         @SuppressWarnings("unchecked")
         BlockingQueue<VariantTask>[] workerQueues = new BlockingQueue[nImportThreads];
         for (int i = 0; i < nImportThreads; i++) {
             workerQueues[i] = new LinkedBlockingQueue<>();
         }
 
-        BlockingQueue<Runnable> saveServiceQueue = new LinkedBlockingQueue<Runnable>(saveServiceQueueLength(nNConcurrentThreads));
-        ExecutorService saveService = new ThreadPoolExecutor(1, saveServiceThreads(nNConcurrentThreads), 30, TimeUnit.SECONDS, saveServiceQueue, new ThreadPoolExecutor.CallerRunsPolicy());
         final Collection<Integer> assemblyIDs = mongoTemplate.findDistinct(new Query(), "_id", Assembly.class, Integer.class);
         if (assemblyIDs.isEmpty())
             assemblyIDs.add(null);
@@ -236,8 +233,8 @@ public class HapMapImport extends AbstractGenotypeImport<FileImportParameters> {
                             sRun,
                             assemblyIDs,
                             progress,
-                            saveService,
-                            totalProcessedVariantCount,
+                            totalParsedVariantCount,
+                            totalWrittenVariantCount,
                             existingVariantIDs,
                             params.isSkipMonomorphic(),
                             sampleIds,
@@ -254,6 +251,7 @@ public class HapMapImport extends AbstractGenotypeImport<FileImportParameters> {
 
         // --- DISPATCHER RUNS IN MAIN THREAD ---
         try {
+            Iterator<RawHapMapFeature> it = reader.iterator();
             boolean samplesInitialized = false;
             
             while (it.hasNext() && progress.getError() == null && !progress.isAborted()) {
@@ -271,9 +269,7 @@ public class HapMapImport extends AbstractGenotypeImport<FileImportParameters> {
                 }
                 
                 try {
-                    Type variantType = determineType(Arrays.stream(hmFeature.getAlleles())
-                        .map(allele -> Allele.create(allele))
-                        .collect(Collectors.toList()));
+                    Type variantType = determineType(Arrays.stream(hmFeature.getAlleles()).map(allele -> Allele.create(allele)).collect(Collectors.toList()));
                     
                     String sFeatureName = hmFeature.getName().trim();
                     
@@ -299,7 +295,7 @@ public class HapMapImport extends AbstractGenotypeImport<FileImportParameters> {
                         if (hasValidId) {
                             variantId = (ObjectId.isValid(sFeatureName) ? "_" : "") + sFeatureName;
                         } else {
-                            variantId = generatedIdBaseString + String.format("%09x", totalProcessedVariantCount.getAndIncrement());
+                            variantId = generatedIdBaseString + String.format("%09x", totalParsedVariantCount.getAndIncrement());
                         }
                     }
                     
@@ -326,9 +322,8 @@ public class HapMapImport extends AbstractGenotypeImport<FileImportParameters> {
                 }
             }
             
-            for (BlockingQueue<VariantTask> queue : workerQueues) {
+            for (BlockingQueue<VariantTask> queue : workerQueues)
                 queue.put(VariantTask.POISON_PILL);
-            }
             
         } catch (Exception e) {
             progress.setError("Dispatcher failed: " + e.getMessage());
@@ -341,17 +336,15 @@ public class HapMapImport extends AbstractGenotypeImport<FileImportParameters> {
         }
 
         reader.close();
-        saveService.shutdown();
-        saveService.awaitTermination(Integer.MAX_VALUE, TimeUnit.DAYS);
 
         if (progress.getError() != null || progress.isAborted())
             return 0;
 
-        return totalProcessedVariantCount.get();
+        return totalWrittenVariantCount.get();
     }
 
     /**
-     * Worker method that processes variant tasks with caching
+     * Worker method that processes variant tasks
      */
     private void processVariantTasks(
             BlockingQueue<VariantTask> queue,
@@ -361,8 +354,8 @@ public class HapMapImport extends AbstractGenotypeImport<FileImportParameters> {
             String sRun,
             Collection<Integer> assemblyIDs,
             ProgressIndicator progress,
-            ExecutorService saveService,
-            AtomicInteger totalProcessedVariantCount,
+            AtomicInteger totalParsedVariantCount,
+            AtomicInteger totalWrittenVariantCount,
             HashMap<String, String> existingVariantIDs,
             boolean fSkipMonomorphic,
             ArrayList<String> sampleIds,
@@ -372,9 +365,8 @@ public class HapMapImport extends AbstractGenotypeImport<FileImportParameters> {
         HashSet<VariantRunData> unsavedRuns = new HashSet<>();
         HashMap<String, VariantData> variantCache = new HashMap<>();
         
-        int chunkSize = Math.max(1, nMaxChunkSize / Math.max(1, sampleIds.size()));
-        long processedVariants = 0;
-        int localChunkSize = chunkSize;
+        final int chunkSize = Math.max(1, Math.min(1000, (int) Math.ceil((float) nMaxChunkSize / Math.max(1, sampleIds.size()))));
+        int workerProcessed = 0;
         
         while (true) {
             VariantTask task = queue.take();
@@ -384,7 +376,6 @@ public class HapMapImport extends AbstractGenotypeImport<FileImportParameters> {
             
             String variantId = task.variantId;
             
-            // Get or load variant from cache - NO POSITION VERIFICATION
             VariantData variant = variantCache.get(variantId);
             if (variant == null) {
                 variant = mongoTemplate.findById(variantId, VariantData.class);
@@ -395,21 +386,18 @@ public class HapMapImport extends AbstractGenotypeImport<FileImportParameters> {
                 variantCache.put(variantId, variant);
             }
             
-            // Add run to variant
             variant.getRuns().add(new Run(project.getId(), sRun));
             
-            // Process the variant
             VariantRunData runToSave = addHapMapDataToVariant(
-                mongoTemplate,
-                variant,
-                nAssemblyId,
-                task.hmFeature,
-                project,
-                sRun,
-                sampleIds
-            );
+                    mongoTemplate,
+                    variant,
+                    nAssemblyId,
+                    task.hmFeature,
+                    project,
+                    sRun,
+                    sampleIds
+                );
             
-            // Track the variant
             if (variant.getKnownAlleles().size() > 0) {
                 if (!unsavedVariants.contains(variant)) {
                     unsavedVariants.add(variant);
@@ -425,27 +413,26 @@ public class HapMapImport extends AbstractGenotypeImport<FileImportParameters> {
                 project.getVariantTypes().add(variant.getType());
                 project.getAlleleCounts().add(variant.getKnownAlleles().size());
             }
+                        
+            workerProcessed++;
             
-            int newCount = totalProcessedVariantCount.incrementAndGet();
-            processedVariants++;
-            
-            if (processedVariants % localChunkSize == 0) {
-                saveChunk(unsavedVariants, unsavedRuns, existingVariantIDs, mongoTemplate, progress, saveService);
+            if (workerProcessed % chunkSize == 0 && !unsavedVariants.isEmpty()) {
+                // Save DIRECTLY - no saveService!
+                persistVariantsAndGenotypes(!existingVariantIDs.isEmpty(), mongoTemplate, 
+                    unsavedVariants, unsavedRuns);
+                progress.setCurrentStepProgress(totalWrittenVariantCount.addAndGet(unsavedVariants.size()));
                 
                 variantCache.clear();
                 unsavedVariants = new HashSet<>();
                 unsavedRuns = new HashSet<>();
-                
-                progress.setCurrentStepProgress(newCount);
-            }
-            
-            if (processedVariants % (localChunkSize * 50) == 0) {
-                LOG.debug(newCount + " lines processed by worker");
             }
         }
         
+        // Save remaining
         if (!unsavedVariants.isEmpty()) {
-            persistVariantsAndGenotypes(!existingVariantIDs.isEmpty(), mongoTemplate, unsavedVariants, unsavedRuns);
+            persistVariantsAndGenotypes(!existingVariantIDs.isEmpty(), mongoTemplate, 
+                unsavedVariants, unsavedRuns);
+            progress.setCurrentStepProgress(totalWrittenVariantCount.addAndGet(unsavedVariants.size()));
         }
     }
 

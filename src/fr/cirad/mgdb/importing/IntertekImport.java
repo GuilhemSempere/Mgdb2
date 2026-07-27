@@ -31,15 +31,10 @@ import java.util.Map;
 import java.util.Scanner;
 import java.util.Set;
 import java.util.concurrent.BlockingQueue;
-import java.util.concurrent.ExecutorService;
 import java.util.concurrent.LinkedBlockingQueue;
-import java.util.concurrent.ThreadPoolExecutor;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
-import fr.cirad.mgdb.importing.parameters.FileImportParameters;
-import fr.cirad.mgdb.model.mongo.maintypes.*;
 import org.apache.log4j.Logger;
 import org.bson.types.ObjectId;
 import org.springframework.data.mongodb.core.MongoTemplate;
@@ -48,6 +43,14 @@ import org.springframework.data.mongodb.core.query.Query;
 import com.opencsv.CSVReader;
 
 import fr.cirad.mgdb.importing.base.AbstractGenotypeImport;
+import fr.cirad.mgdb.importing.parameters.FileImportParameters;
+import fr.cirad.mgdb.model.mongo.maintypes.Assembly;
+import fr.cirad.mgdb.model.mongo.maintypes.DBVCFHeader;
+import fr.cirad.mgdb.model.mongo.maintypes.GenotypingProject;
+import fr.cirad.mgdb.model.mongo.maintypes.GenotypingSample;
+import fr.cirad.mgdb.model.mongo.maintypes.Individual;
+import fr.cirad.mgdb.model.mongo.maintypes.VariantData;
+import fr.cirad.mgdb.model.mongo.maintypes.VariantRunData;
 import fr.cirad.mgdb.model.mongo.subtypes.AbstractVariantData;
 import fr.cirad.mgdb.model.mongo.subtypes.Callset;
 import fr.cirad.mgdb.model.mongo.subtypes.ReferencePosition;
@@ -207,14 +210,12 @@ public class IntertekImport extends AbstractGenotypeImport<FileImportParameters>
             workerQueues[i] = new LinkedBlockingQueue<>();
         }
 
-        BlockingQueue<Runnable> saveServiceQueue = new LinkedBlockingQueue<Runnable>(saveServiceQueueLength(nNConcurrentThreads));
-        ExecutorService saveService = new ThreadPoolExecutor(1, saveServiceThreads(nNConcurrentThreads), 30, TimeUnit.SECONDS, saveServiceQueue, new ThreadPoolExecutor.CallerRunsPolicy());
-        
         final GenotypingProject finalProject = project;
         final MongoTemplate finalMongoTemplate = mongoTemplate;
         final Assembly finalAssembly = assembly;
         String generatedIdBaseString = Long.toHexString(System.currentTimeMillis());
-        AtomicInteger totalProcessedVariantCount = new AtomicInteger(0);
+        AtomicInteger totalParsedVariantCount = new AtomicInteger(0);
+        AtomicInteger totalWrittenVariantCount = new AtomicInteger(0);
 
         // Start workers
         Thread[] importThreads = new Thread[nImportThreads];
@@ -232,8 +233,8 @@ public class IntertekImport extends AbstractGenotypeImport<FileImportParameters>
                             sRun,
                             assemblyIDs,
                             progress,
-                            saveService,
-                            existingVariantIDs
+                            existingVariantIDs,
+                            totalWrittenVariantCount
                         );
                     } catch (Throwable t) {
                         progress.setError("Worker " + workerIndex + " failed: " + t.getMessage());
@@ -298,7 +299,7 @@ public class IntertekImport extends AbstractGenotypeImport<FileImportParameters>
                         if (hasValidId) {
                             variantId = (ObjectId.isValid(providedVariantId) ? "_" : "") + providedVariantId;
                         } else {
-                            variantId = generatedIdBaseString + String.format("%09x", totalProcessedVariantCount.getAndIncrement());
+                            variantId = generatedIdBaseString + String.format("%09x", totalParsedVariantCount.getAndIncrement());
                         }
                         variant = new VariantData(variantId);
                         
@@ -539,18 +540,13 @@ public class IntertekImport extends AbstractGenotypeImport<FileImportParameters>
                 }
             }
             
-            // Send poison pills
-            for (BlockingQueue<VariantTask> queue : workerQueues) {
+            for (BlockingQueue<VariantTask> queue : workerQueues)
                 queue.put(VariantTask.POISON_PILL);
-            }
 
             // Wait for workers to complete
             for (Thread t : importThreads) {
                 t.join();
             }
-
-            saveService.shutdown();
-            saveService.awaitTermination(Integer.MAX_VALUE, TimeUnit.DAYS);
 
             if (!ambiguousVariants.isEmpty()) {
                 progress.markAsComplete("WARNING : Ambiguous matching between alleleX/alleleY and existing variant REF/ALT alleles for variants: " + String.join(",", ambiguousVariants));
@@ -580,8 +576,8 @@ public class IntertekImport extends AbstractGenotypeImport<FileImportParameters>
             String sRun,
             Collection<Integer> assemblyIDs,
             ProgressIndicator progress,
-            ExecutorService saveService,
-            HashMap<String, String> existingVariantIDs) throws Exception {
+            HashMap<String, String> existingVariantIDs,
+            AtomicInteger totalWrittenVariantCount) throws Exception {
         
         HashSet<VariantData> unsavedVariants = new HashSet<>();
         HashSet<VariantRunData> unsavedRuns = new HashSet<>();
@@ -640,8 +636,9 @@ public class IntertekImport extends AbstractGenotypeImport<FileImportParameters>
             
             processedVariants++;
             
+            
             if (processedVariants % localChunkSize == 0) {
-                saveChunk(unsavedVariants, unsavedRuns, existingVariantIDs, mongoTemplate, progress, saveService);
+                persistVariantsAndGenotypes(!existingVariantIDs.isEmpty(), mongoTemplate, unsavedVariants, unsavedRuns);
                 
                 variantCache.clear();
                 unsavedVariants = new HashSet<>();

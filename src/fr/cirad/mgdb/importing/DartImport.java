@@ -15,10 +15,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Scanner;
 import java.util.concurrent.BlockingQueue;
-import java.util.concurrent.ExecutorService;
 import java.util.concurrent.LinkedBlockingQueue;
-import java.util.concurrent.ThreadPoolExecutor;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -245,27 +242,26 @@ public class DartImport extends AbstractGenotypeImport<FileImportParameters> {
         HashMap<String, String> existingVariantIDs = buildSynonymToIdMapForExistingVariants(mongoTemplate, true, assembly == null ? null : assembly.getId());
 
         String generatedIdBaseString = Long.toHexString(System.currentTimeMillis());
-        AtomicInteger totalProcessedVariantCount = new AtomicInteger(0);
+        AtomicInteger totalParsedVariantCount = new AtomicInteger(0);
+        AtomicInteger totalWrittenVariantCount = new AtomicInteger(0);
         final ArrayList<String> sampleIds = new ArrayList<>();
         progress.addStep("Processing variant lines");
         progress.moveToNextStep();
 
         int nNConcurrentThreads = Math.max(1, nNumProc);
-        LOG.debug("Importing project '" + sProject + "' into " + sModule + " using " + nNConcurrentThreads + " threads");
+        int nImportThreads = Math.max(1, (nNConcurrentThreads - 1) / 2);
+        LOG.debug("Importing project '" + sProject + "' into " + sModule + " using " + nImportThreads + " threads");
 
         DartIterator dataReader = getDartInfo(params.getMainFileUrl());
         
         // --- DISPATCHER + QUEUE IMPLEMENTATION ---
         
-        int nImportThreads = Math.max(1, nNConcurrentThreads - 1);
         @SuppressWarnings("unchecked")
         BlockingQueue<VariantTask>[] workerQueues = new BlockingQueue[nImportThreads];
         for (int i = 0; i < nImportThreads; i++) {
             workerQueues[i] = new LinkedBlockingQueue<>();
         }
 
-        BlockingQueue<Runnable> saveServiceQueue = new LinkedBlockingQueue<Runnable>(saveServiceQueueLength(nNConcurrentThreads));
-        ExecutorService saveService = new ThreadPoolExecutor(1, saveServiceThreads(nNConcurrentThreads), 30, TimeUnit.SECONDS, saveServiceQueue, new ThreadPoolExecutor.CallerRunsPolicy());
         final Collection<Integer> assemblyIDs = mongoTemplate.findDistinct(new Query(), "_id", Assembly.class, Integer.class);
         if (assemblyIDs.isEmpty())
             assemblyIDs.add(null);
@@ -304,8 +300,8 @@ public class DartImport extends AbstractGenotypeImport<FileImportParameters> {
                             sRun,
                             assemblyIDs,
                             progress,
-                            saveService,
-                            totalProcessedVariantCount,
+                            totalParsedVariantCount,
+                            totalWrittenVariantCount,
                             existingVariantIDs,
                             fSkipMonomorphic,
                             sampleIds,
@@ -368,7 +364,7 @@ public class DartImport extends AbstractGenotypeImport<FileImportParameters> {
                             if (hasValidId) {
                                 variantId = (ObjectId.isValid(sFeatureName) ? "_" : "") + sFeatureName;
                             } else {
-                                variantId = generatedIdBaseString + String.format("%09x", totalProcessedVariantCount.getAndIncrement());
+                                variantId = generatedIdBaseString + String.format("%09x", totalParsedVariantCount.getAndIncrement());
                             }
                         }
                         
@@ -396,9 +392,8 @@ public class DartImport extends AbstractGenotypeImport<FileImportParameters> {
                 }
             }
             
-            for (BlockingQueue<VariantTask> queue : workerQueues) {
+            for (BlockingQueue<VariantTask> queue : workerQueues)
                 queue.put(VariantTask.POISON_PILL);
-            }
             
         } catch (Exception e) {
             progress.setError("Dispatcher failed: " + e.getMessage());
@@ -411,17 +406,15 @@ public class DartImport extends AbstractGenotypeImport<FileImportParameters> {
         }
 
         dataReader.close();
-        saveService.shutdown();
-        saveService.awaitTermination(Integer.MAX_VALUE, TimeUnit.DAYS);
 
         if (progress.getError() != null || progress.isAborted())
             return 0;
 
-        return totalProcessedVariantCount.get();
+        return totalParsedVariantCount.get();
     }
 
     /**
-     * Worker method that processes variant tasks with caching
+     * Worker method that processes variant tasks
      */
     private void processVariantTasks(
             BlockingQueue<VariantTask> queue,
@@ -431,8 +424,8 @@ public class DartImport extends AbstractGenotypeImport<FileImportParameters> {
             String sRun,
             Collection<Integer> assemblyIDs,
             ProgressIndicator progress,
-            ExecutorService saveService,
-            AtomicInteger totalProcessedVariantCount,
+            AtomicInteger totalParsedVariantCount,
+            AtomicInteger totalWrittenVariantCount,
             HashMap<String, String> existingVariantIDs,
             boolean fSkipMonomorphic,
             ArrayList<String> sampleIds,
@@ -442,15 +435,13 @@ public class DartImport extends AbstractGenotypeImport<FileImportParameters> {
         HashSet<VariantRunData> unsavedRuns = new HashSet<>();
         HashMap<String, VariantData> variantCache = new HashMap<>();
         
-        int chunkSize = Math.max(1, nMaxChunkSize / Math.max(1, sampleIds.size()));
-        long processedVariants = 0;
-        int localChunkSize = chunkSize;
+        final int chunkSize = Math.max(1, Math.min(1000, (int) Math.ceil((float) nMaxChunkSize / Math.max(1, sampleIds.size()))));
+        int workerProcessed = 0;
         
         while (true) {
             VariantTask task = queue.take();
-            if (task == VariantTask.POISON_PILL) {
+            if (task == VariantTask.POISON_PILL || progress.getError() != null || progress.isAborted()) 
                 break;
-            }
             
             String variantId = task.variantId;
             
@@ -497,26 +488,23 @@ public class DartImport extends AbstractGenotypeImport<FileImportParameters> {
                 project.getAlleleCounts().add(variant.getKnownAlleles().size());
             }
             
-            int newCount = totalProcessedVariantCount.incrementAndGet();
-            processedVariants++;
-            
-            if (processedVariants % localChunkSize == 0) {
-                saveChunk(unsavedVariants, unsavedRuns, existingVariantIDs, mongoTemplate, progress, saveService);
+            workerProcessed++;            
+            if (workerProcessed % chunkSize == 0 && !unsavedVariants.isEmpty()) {
+                persistVariantsAndGenotypes(!existingVariantIDs.isEmpty(), mongoTemplate, 
+                    unsavedVariants, unsavedRuns);
+                progress.setCurrentStepProgress(totalWrittenVariantCount.addAndGet(unsavedVariants.size()));
                 
                 variantCache.clear();
                 unsavedVariants = new HashSet<>();
                 unsavedRuns = new HashSet<>();
-                
-                progress.setCurrentStepProgress(newCount);
-            }
-            
-            if (processedVariants % (localChunkSize * 50) == 0) {
-                LOG.debug(newCount + " lines processed by worker");
             }
         }
         
+        // Save remaining
         if (!unsavedVariants.isEmpty()) {
-            persistVariantsAndGenotypes(!existingVariantIDs.isEmpty(), mongoTemplate, unsavedVariants, unsavedRuns);
+            persistVariantsAndGenotypes(!existingVariantIDs.isEmpty(), mongoTemplate, 
+                unsavedVariants, unsavedRuns);
+            progress.setCurrentStepProgress(totalWrittenVariantCount.addAndGet(unsavedVariants.size()));
         }
     }
 
