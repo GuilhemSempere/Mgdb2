@@ -1,8 +1,5 @@
 package fr.cirad.mgdb.importing;
 
-import java.util.ArrayList;
-import java.util.HashMap;
-
 public class DartInfo {
 
     private String alleleID;
