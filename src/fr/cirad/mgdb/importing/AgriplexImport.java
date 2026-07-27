@@ -16,11 +16,15 @@
  *******************************************************************************/
 package fr.cirad.mgdb.importing;
 
+import java.io.BufferedWriter;
 import java.io.File;
 import java.io.FileWriter;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.URL;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -31,6 +35,7 @@ import javax.xml.parsers.SAXParserFactory;
 import org.apache.log4j.Logger;
 import org.apache.poi.openxml4j.opc.OPCPackage;
 import org.apache.poi.ss.usermodel.DataFormatter;
+import org.apache.poi.xssf.eventusermodel.ReadOnlySharedStringsTable;
 import org.apache.poi.xssf.eventusermodel.XSSFReader;
 import org.apache.poi.xssf.eventusermodel.XSSFSheetXMLHandler;
 import org.apache.poi.xssf.eventusermodel.XSSFSheetXMLHandler.SheetContentsHandler;
@@ -278,7 +283,6 @@ public class AgriplexImport extends RefactoredImport<FileImportParameters> {
         /** 0-based row index containing allele_2. */
     }
 
-
     /**
      * First pass over the file: locates the header block, builds the ordered
      * marker list and (when possible) their genomic positions.
@@ -288,43 +292,25 @@ public class AgriplexImport extends RefactoredImport<FileImportParameters> {
         layout.plateNameCol = -1;
         layout.headerRow = -1;
 
-        // Step 1: locate the "Plate name" cell
-        readSheet(fileURL, sheetName, new AbstractSheetContentsHandler() {
-            @Override
-            public void cell(String cellReference, String formattedValue, XSSFComment comment) {
-                if (layout.plateNameCol != -1)
-                    return; // already found
-
-                if ("Plate name".equals(formattedValue)) {
-                    int[] colRow = colRowFromCellReference(cellReference);
-                    layout.plateNameCol = colRow[0];
-                    layout.headerRow = colRow[1];
-                }
-            }
-        });
-
-        if (layout.plateNameCol == -1)
-            throw new Exception("Could not find a 'Plate name' cell in sheet '" + sheetName + "'");
-
-        layout.sampleIdCol = layout.plateNameCol + 2;
-        layout.markerIdRow = layout.headerRow - 2;
-        layout.firstMarkerCol = layout.plateNameCol + 4;
-        final int candidateCustomerMarkerIdRow = layout.markerIdRow - 1;
-        layout.allele1Row = layout.markerIdRow + 1;
-        layout.allele2Row = layout.markerIdRow + 2;
-
-        // Step 2: read the marker-ID row, and (if present) the Customer Marker ID row
         Map<Integer, String> markerIdsByCol = new HashMap<>();
         Map<Integer, String> customerMarkerIdsByCol = new HashMap<>();
-        boolean[] customerMarkerIdRowFound = new boolean[] { false };
+        boolean[] customerMarkerIdRowFound = new boolean[]{false};
         Map<Integer, String> markerAllele1ByCol = new HashMap<>();
         Map<Integer, String> markerAllele2ByCol = new HashMap<>();
 
+        // Buffer cells from rows we see before "Plate name" is found,
+        // so we can replay them once the layout row indices are known.
+        // Key: [col, row], Value: formattedValue
+        List<int[]> bufferedCellCoords = new ArrayList<>();
+        List<String> bufferedCellValues = new ArrayList<>();
+
         readSheet(fileURL, sheetName, new AbstractSheetContentsHandler() {
-            @Override
-            public void cell(String cellReference, String formattedValue, XSSFComment comment) {
-                int[] colRow = colRowFromCellReference(cellReference);
-                int col = colRow[0], row = colRow[1];
+
+            private void processCell(int col, int row, String formattedValue) {
+                if (row > layout.headerRow)
+                    return; // past the header block, nothing left to collect
+
+                final int candidateCustomerMarkerIdRow = layout.markerIdRow - 1;
 
                 if (row == layout.markerIdRow && col >= layout.firstMarkerCol && formattedValue != null && !formattedValue.trim().isEmpty()) {
                     markerIdsByCol.put(col, formattedValue.trim());
@@ -339,41 +325,59 @@ public class AgriplexImport extends RefactoredImport<FileImportParameters> {
                     markerAllele2ByCol.put(col, formattedValue.trim());
                 }
             }
+
+            @Override
+            public void cell(String cellReference, String formattedValue, XSSFComment comment) {
+                int[] colRow = colRowFromCellReference(cellReference);
+                int col = colRow[0], row = colRow[1];
+
+                if (layout.plateNameCol == -1) {
+                    // Layout not yet known — buffer this cell
+                    bufferedCellCoords.add(new int[]{col, row});
+                    bufferedCellValues.add(formattedValue);
+
+                    if ("Plate name".equals(formattedValue)) {
+                        layout.plateNameCol = col;
+                        layout.headerRow = row;
+                        layout.sampleIdCol = col + 2;
+                        layout.markerIdRow = row - 2;
+                        layout.firstMarkerCol = col + 4;
+                        layout.allele1Row = row - 1;
+                        layout.allele2Row = row;
+
+                        // Replay all buffered cells now that row indices are known
+                        for (int i = 0; i < bufferedCellCoords.size(); i++)
+                            processCell(bufferedCellCoords.get(i)[0], bufferedCellCoords.get(i)[1], bufferedCellValues.get(i));
+
+                        bufferedCellCoords.clear();
+                        bufferedCellValues.clear();
+                    }
+                    return;
+                }
+
+                processCell(col, row, formattedValue);
+            }
         });
 
+        if (layout.plateNameCol == -1)
+            throw new Exception("Could not find a 'Plate name' cell in sheet '" + sheetName + "'");
+
         if (!customerMarkerIdRowFound[0])
-            customerMarkerIdsByCol.clear();    // the row we read wasn't actually a Customer Marker ID row
+            customerMarkerIdsByCol.clear();
 
         if (markerIdsByCol.isEmpty())
             throw new Exception("No marker ID found at row " + (layout.markerIdRow + 1) + " of sheet '" + sheetName + "'");
 
-        // Build the ordered marker list (in column order) along with positions when available
         List<Integer> orderedCols = markerIdsByCol.keySet().stream().sorted().collect(Collectors.toList());
         for (Integer col : orderedCols) {
             String markerId = markerIdsByCol.get(col);
-//            String position = "0\t0";    // unplaced by default
-//
-//            String customerMarkerId = customerMarkerIdsByCol.get(col);
-//            if (customerMarkerId != null) {
-//                Matcher matcher = CUSTOMER_MARKER_ID_POSITION_PATTERN.matcher(customerMarkerId);
-//                if (matcher.matches())
-//                    position = matcher.group(1) + "\t" + matcher.group(2);
-//                else
-//                    LOG.warn("Customer Marker ID '" + customerMarkerId + "' for marker '" + markerId + "' does not match <STRING>_<NUMBER>, marker will be imported as unplaced");
-//            }
-//
-//            if (variantsAndPositionsToFill.containsKey(markerId))
-//                throw new Exception("Duplicate marker ID found: " + markerId);
-
-            if (markerAllele1ByCol.get(col).equals("-") || markerAllele2ByCol.get(col).equals("-")) {
+            if (markerAllele1ByCol.get(col).equals("-") || markerAllele2ByCol.get(col).equals("-"))
                 indelVariants.add(markerId);
-            }
             variantsAndPositionsToFill.put(markerId, null);
         }
 
         return layout;
     }
-
 
     /**
      * Second pass(es) over the file: rotates the sample-oriented genotype
@@ -395,132 +399,97 @@ public class AgriplexImport extends RefactoredImport<FileImportParameters> {
     private int transposeGenotypeFile(URL fileURL, String sheetName, AgriplexSheetLayout layout, LinkedHashMap<String, String> variantsAndPositions, File outputFile, Integer nProvidedPloidy, Map<String, Type> nonSnpVariantTypeMapToFill, ArrayList<String> individualListToFill, boolean fSkipMonomorphic, ProgressIndicator progress, Set<String> indelMarkers) throws Exception {
         long before = System.currentTimeMillis();
 
-        String[] markerIds = variantsAndPositions.keySet().toArray(new String[variantsAndPositions.size()]);
+        String[] markerIds = variantsAndPositions.keySet().toArray(new String[0]);
         int markerCount = markerIds.length;
-        int ploidy = 2;    // AgriPlex genotypes are at most diploid (single nucleotide or X/Y)
+        int ploidy = 2;    // AgriPlex genotypes are typically diploid (single nucleotide or X/Y)
 
-        FileWriter outputWriter = new FileWriter(outputFile);
-        try {
-            for (int chunkStart = 0; chunkStart < markerCount; chunkStart += MARKER_CHUNK_SIZE) {
-                int chunkSize = Math.min(MARKER_CHUNK_SIZE, markerCount - chunkStart);
-                final int chunkFirstCol = layout.firstMarkerCol + chunkStart;
-                final int chunkLastCol = chunkFirstCol + chunkSize - 1;
-                final boolean fFirstChunk = chunkStart == 0;
+        // One StringBuilder per marker, built in a single pass
+        final StringBuilder[] transposed = new StringBuilder[markerCount];
+        for (int i = 0; i < markerCount; i++)
+            transposed[i] = new StringBuilder();
 
-                final StringBuilder[] transposed = new StringBuilder[chunkSize];
-                for (int i = 0; i < chunkSize; i++)
-                    transposed[i] = new StringBuilder();
+        @SuppressWarnings("unchecked")
+        final Set<String>[] distinctAlleles = new LinkedHashSet[markerCount];
+        for (int i = 0; i < markerCount; i++)
+            distinctAlleles[i] = new LinkedHashSet<>();
 
-                @SuppressWarnings("unchecked")
-                final Set<String>[] distinctAlleles = new LinkedHashSet[chunkSize];
-                for (int i = 0; i < chunkSize; i++)
-                    distinctAlleles[i] = new LinkedHashSet<>();
+        readSheet(fileURL, sheetName, new AbstractSheetContentsHandler() {
+            String currentSampleId = null;
+            boolean currentRowHasData = false;
+            final String[] currentRowGenotypes = new String[markerCount];
 
-                final int fChunkStart = chunkStart;
-                readSheet(fileURL, sheetName, new AbstractSheetContentsHandler() {
-                    String currentSampleId = null;
-                    boolean currentRowHasData = false;
-                    final String[] currentRowGenotypes = new String[chunkSize];
-
-                    @Override
-                    public void startRow(int rowNum) {
-                        if (rowNum > layout.headerRow) {
-                            currentSampleId = null;
-                            currentRowHasData = false;
-                            java.util.Arrays.fill(currentRowGenotypes, null);
-                        }
-                    }
-
-                    @Override
-                    public void endRow(int rowNum) {
-                        if (rowNum <= layout.headerRow)
-                            return;
-
-                        if (currentSampleId == null || currentSampleId.trim().isEmpty()) {
-                            if (currentRowHasData)
-                                LOG.warn("Skipping row " + (rowNum + 1) + ": no Sample_ID found");
-                            return;    // skip blank / incomplete rows entirely (no entries appended)
-                        }
-
-                        if (fFirstChunk)
-                            individualListToFill.add(currentSampleId.trim());
-
-                        // Commit exactly one entry per marker of this chunk for this sample,
-                        // padding markers that had no cell at all in this row (entirely empty
-                        // cells are not reported by the SAX handler)
-                        for (int i = 0; i < chunkSize; i++) {
-                            transposed[i].append("\t");
-                            if (currentRowGenotypes[i] != null) {
-                                transposed[i].append(currentRowGenotypes[i]);
-                                for (String allele : currentRowGenotypes[i].split("/"))
-                                    distinctAlleles[i].add(allele);
-                            }
-                        }
-                    }
-
-                    @Override
-                    public void cell(String cellReference, String formattedValue, XSSFComment comment) {
-                        int[] colRow = colRowFromCellReference(cellReference);
-                        int col = colRow[0], row = colRow[1];
-
-                        if (row <= layout.headerRow)
-                            return;
-
-                        if (col == layout.sampleIdCol) {
-                            currentSampleId = formattedValue;
-                            currentRowHasData = true;
-                            return;
-                        }
-
-                        if (col < chunkFirstCol || col > chunkLastCol)
-                            return;
-
-                        currentRowHasData = true;
-                        int markerIndexInChunk = col - chunkFirstCol;
-                        String markerId = markerIds[fChunkStart + markerIndexInChunk];
-                        boolean isIndel = indelMarkers.contains(markerId);
-                        currentRowGenotypes[markerIndexInChunk] = normalizeGenotype(formattedValue, isIndel);
-                    }
-                });
-
-                if (fFirstChunk && individualListToFill.isEmpty())
-                    throw new Exception("No sample found in sheet '" + sheetName + "'");
-
-                // Write this chunk's marker lines to the output file
-                for (int i = 0; i < chunkSize; i++) {
-                    int markerIndex = chunkStart + i;
-                    String variantName = markerIds[markerIndex];
-                    String variantLine = transposed[i].length() > 0 ? transposed[i].substring(1) : "";  // skip leading tab
-
-                    if (!distinctAlleles[i].isEmpty()) {
-                        List<Allele> alleleList = distinctAlleles[i].stream()
-                                .map(allele -> {
-                                    try {
-                                        return Allele.create(allele);
-                                    } catch (IllegalArgumentException e) {
-                                        throw new IllegalArgumentException("Variant " + variantName + " - allele " + allele + " - " + e.getClass().getName() + ": " + e.getMessage());
-                                    }
-                                })
-                                .collect(Collectors.toList());
-
-                        Type variantType = determineType(alleleList);
-                        if (variantType != Type.SNP)
-                            nonSnpVariantTypeMapToFill.put(variantName, variantType);
-                    }
-
-                    outputWriter.write(variantName);
-                    outputWriter.write("\t");
-                    outputWriter.write(variantLine);
-                    outputWriter.write("\n");
+            @Override
+            public void startRow(int rowNum) {
+                if (rowNum > layout.headerRow) {
+                    currentSampleId = null;
+                    currentRowHasData = false;
+                    Arrays.fill(currentRowGenotypes, null);
                 }
-
-                progress.setCurrentStepProgress((chunkStart + chunkSize) * 100 / markerCount);
             }
-        } finally {
-            outputWriter.close();
+
+            @Override
+            public void endRow(int rowNum) {
+                if (rowNum <= layout.headerRow)
+                    return;
+                if (currentSampleId == null || currentSampleId.trim().isEmpty()) {
+                    if (currentRowHasData)
+                        LOG.warn("Skipping row " + (rowNum + 1) + ": no Sample_ID found");
+                    return;
+                }
+                individualListToFill.add(currentSampleId.trim());
+                for (int i = 0; i < markerCount; i++) {
+                    transposed[i].append("\t");
+                    if (currentRowGenotypes[i] != null) {
+                        transposed[i].append(currentRowGenotypes[i]);
+                        for (String allele : currentRowGenotypes[i].split("/"))
+                            distinctAlleles[i].add(allele);
+                    }
+                }
+            }
+
+            @Override
+            public void cell(String cellReference, String formattedValue, XSSFComment comment) {
+                int[] colRow = colRowFromCellReference(cellReference);
+                int col = colRow[0], row = colRow[1];
+                if (row <= layout.headerRow)
+                    return;
+                if (col == layout.sampleIdCol) {
+                    currentSampleId = formattedValue;
+                    currentRowHasData = true;
+                    return;
+                }
+                if (col < layout.firstMarkerCol || col >= layout.firstMarkerCol + markerCount)
+                    return;
+                currentRowHasData = true;
+                int idx = col - layout.firstMarkerCol;
+                currentRowGenotypes[idx] = normalizeGenotype(formattedValue, indelMarkers.contains(markerIds[idx]));
+            }
+        });
+
+        if (individualListToFill.isEmpty())
+            throw new Exception("No sample found in sheet '" + sheetName + "'");
+
+        // Write TSV in one go
+        try (BufferedWriter outputWriter = new BufferedWriter(new FileWriter(outputFile))) {
+            for (int i = 0; i < markerCount; i++) {
+                String variantName = markerIds[i];
+                if (!distinctAlleles[i].isEmpty()) {
+                    List<Allele> alleleList = distinctAlleles[i].stream()
+                            .map(a -> Allele.create(a))
+                            .collect(Collectors.toList());
+                    Type variantType = determineType(alleleList);
+                    if (variantType != Type.SNP)
+                        nonSnpVariantTypeMapToFill.put(variantName, variantType);
+                }
+                outputWriter.write(variantName);
+                outputWriter.write("\t");
+                outputWriter.write(transposed[i].length() > 0 ? transposed[i].substring(1) : "");
+                outputWriter.newLine();
+            }
         }
 
-        LOG.info("Genotype matrix transposition took " + (System.currentTimeMillis() - before) + "ms for " + markerCount + " markers and " + individualListToFill.size() + " samples");
+        LOG.info("Genotype matrix transposition took " + (System.currentTimeMillis() - before) + "ms for "
+                + markerCount + " markers and " + individualListToFill.size() + " samples");
 
         Runtime.getRuntime().gc();
         return nProvidedPloidy != null ? nProvidedPloidy : ploidy;
@@ -590,11 +559,28 @@ public class AgriplexImport extends RefactoredImport<FileImportParameters> {
     /**
      * Streams the given sheet of an xlsx file using Apache POI's SAX-based
      * {@link XSSFReader}, without ever loading the whole workbook into memory.
+     *
+     * Opening OPCPackage from a File (rather than an InputStream) lets POI use
+     * ZipFile-based random access, avoiding the full in-memory buffer that
+     * ZipInputStreamZipEntrySource requires and that trips the 100 MB limit.
      */
     private static void readSheet(URL fileURL, String sheetName, SheetContentsHandler handler) throws Exception {
-        try (InputStream is = fileURL.openStream(); OPCPackage pkg = OPCPackage.open(is)) {
+        File localFile;
+        Path tempFile = null;
+        if ("file".equalsIgnoreCase(fileURL.getProtocol())) {
+            localFile = new File(fileURL.toURI());
+        } else {
+            tempFile = Files.createTempFile("agriplexImport_", ".xlsx");
+            try (InputStream is = fileURL.openStream()) {
+                Files.copy(is, tempFile, StandardCopyOption.REPLACE_EXISTING);
+            }
+            localFile = tempFile.toFile();
+        }
+
+        try (OPCPackage pkg = OPCPackage.open(localFile)) {
             XSSFReader reader = new XSSFReader(pkg);
             StylesTable styles = reader.getStylesTable();
+            ReadOnlySharedStringsTable strings = new ReadOnlySharedStringsTable(pkg);
             DataFormatter formatter = new DataFormatter();
 
             XSSFReader.SheetIterator sheetIterator = (XSSFReader.SheetIterator) reader.getSheetsData();
@@ -615,16 +601,18 @@ public class AgriplexImport extends RefactoredImport<FileImportParameters> {
                 SAXParserFactory saxFactory = SAXParserFactory.newInstance();
                 saxFactory.setNamespaceAware(true);
                 XMLReader sheetParser = saxFactory.newSAXParser().getXMLReader();
-                ContentHandler contentHandler = new XSSFSheetXMLHandler(styles, null, reader.getSharedStringsTable(), handler, formatter, false);
+                ContentHandler contentHandler = new XSSFSheetXMLHandler(styles, null, strings, handler, formatter, false);
                 sheetParser.setContentHandler(contentHandler);
                 sheetParser.parse(new InputSource(sheetStream));
             } finally {
                 if (sheetStream != null)
                     sheetStream.close();
             }
+        } finally {
+            if (tempFile != null)
+                Files.deleteIfExists(tempFile);
         }
     }
-
 
     /**
      * Converts an A1-style cell reference (e.g. "AB12") into 0-based
