@@ -29,7 +29,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Scanner;
 import java.util.concurrent.atomic.AtomicReference;
-import java.util.stream.Collectors;
 
 import org.apache.commons.lang3.StringUtils;
 import org.apache.log4j.Logger;
@@ -149,19 +148,20 @@ public abstract class AbstractGenotypeImport<T extends ImportParameters> {
         return indName;
     }
 
-    public static ArrayList<String> getIdentificationStrings(String sType, String sSeq, Long nStartPos, Collection<String> idAndSynonyms) throws Exception
-    {
-        ArrayList<String> result = new ArrayList<String>();
-
+    public static ArrayList<String> getIdentificationStrings(String sType, String sSeq, Long nStartPos, Collection<String> idAndSynonyms) throws Exception {
+        ArrayList<String> result = new ArrayList<>(4);
         if (idAndSynonyms != null)
-            result.addAll(idAndSynonyms.stream().filter(s -> s != null && !s.isEmpty() && !s.equals(".")).map(s -> s.toUpperCase()).collect(Collectors.toList()));
+            for (String s : idAndSynonyms) {
+                if (s != null && !s.isEmpty() && !s.equals("."))
+                    result.add(s.toUpperCase());
+            }
 
         if (sSeq != null && nStartPos != null)
-            result.add(new StringBuilder(sType).append("¤").append(sSeq).append("¤").append(nStartPos).toString());
-
-        if (result.size() == 0)
+            result.add(sType + "¤" + sSeq + "¤" + nStartPos);
+        
+        if (result.isEmpty())
             throw new Exception("Not enough info provided to build identification strings");
-
+        
         return result;
     }
     
@@ -271,63 +271,33 @@ public abstract class AbstractGenotypeImport<T extends ImportParameters> {
         return !fLooksLikePreprocessedVariantList;
     }
     
-    public void persistVariantsAndGenotypes(boolean fDBAlreadyContainsVariants, MongoTemplate mongoTemplate, Collection<VariantData> unsavedVariants, Collection<VariantRunData> unsavedRuns) throws InterruptedException
-    {
+    public void persistVariantsAndGenotypes(boolean fDBAlreadyContainsVariants, MongoTemplate mongoTemplate, Collection<VariantData> unsavedVariants, Collection<VariantRunData> unsavedRuns) throws InterruptedException {
         Thread vdAsyncThread = new Thread() {
             public void run() {
-                if (!fDBAlreadyContainsVariants) {    // we benefit from the fact that it's the first variant import into this database to use bulk insert which is much faster
+                if (!fDBAlreadyContainsVariants)
                     mongoTemplate.insert(unsavedVariants, VariantData.class);
-                } else {
+                else
                     for (VariantData vd : unsavedVariants) {
                         try {
                             mongoTemplate.save(vd);
-                        }
-                        catch (OptimisticLockingFailureException olfe) {
-                            mongoTemplate.save(vd);    // try again
+                        } catch (OptimisticLockingFailureException olfe) {
+                            mongoTemplate.save(vd);
                         }
                     }
-                }
             }
         };
         vdAsyncThread.start();
-
-        // using 2 threads is faster when calling save, but slower when calling insert
-        List<VariantRunData> syncList = new ArrayList<>(), asyncList = new ArrayList<>();
-        int i = 0;
-        for (VariantRunData vrd : unsavedRuns)
-            (i++ < unsavedRuns.size() / 2 ? syncList : asyncList).add(vrd);
-
+        
         try {
-            AtomicReference<DuplicateKeyException> asyncException = new AtomicReference<>();
-            Thread vrdAsyncThread = new Thread() {
-                public void run() {
-                    try {
-                        mongoTemplate.insert(asyncList, VariantRunData.class);    // this should always work but fails when a same variant is provided several times (using different synonyms)
-                    }
-                    catch (DuplicateKeyException dke) {
-                        asyncException.set(dke);
-                    }
-                }
-            };
-            vrdAsyncThread.start();
-            mongoTemplate.insert(syncList, VariantRunData.class);    // this should always work but fails when a same variant is provided several times (using different synonyms)
-            vrdAsyncThread.join();
-            if (asyncException.get() != null)
-                throw asyncException.get();
+            mongoTemplate.insert(unsavedRuns, VariantRunData.class);
+        } catch (DuplicateKeyException dke) {
+            // Fallback to save() for duplicates
+            for (VariantRunData vrd : unsavedRuns) {
+                mongoTemplate.save(vrd);
+            }
         }
-        catch (DuplicateKeyException dke)
-        {
-            LOG.info("Persisting runs using save() because of synonym variants: " + dke.getMessage());
-            Thread vrdAsyncThread = new Thread() {    // using 2 threads is faster when calling save, but slower when calling insert
-                public void run() {
-                    asyncList.stream().forEach(vrd -> mongoTemplate.save(vrd));
-                }
-            };
-            vrdAsyncThread.start();
-            syncList.stream().forEach(vrd -> mongoTemplate.save(vrd));
-            vrdAsyncThread.join();
-        }
-
+        
+        // Just in case, wait for variants to complete
         vdAsyncThread.join();
     }
 
@@ -528,25 +498,49 @@ public abstract class AbstractGenotypeImport<T extends ImportParameters> {
         
         // Get variant type
         Type variantType = nonSnpVariantTypeMap.get(providedVariantId);
+        String variantTypeStr = variantType == null ? Type.SNP.toString() : variantType.toString();
+        
+        // Check if we have a valid ID
+        boolean hasValidId = providedVariantId != null && !providedVariantId.isEmpty() && !".".equals(providedVariantId);
+        List<String> idAndSynonyms = hasValidId ? Arrays.asList(new String[]{providedVariantId}) : null;
         
         // Try to resolve to existing variant
-        String variantTypeStr = variantType == null ? Type.SNP.toString() : variantType.toString();
+        String canonicalId = null;
         try {
-            for (String variantDescForPos : getIdentificationStrings(variantTypeStr, sequence, bpPosition, Arrays.asList(new String[]{providedVariantId}))) {
-                String variantId = existingVariantIDs.get(variantDescForPos);
-                if (variantId != null) {
-                    if (variantType != null && !variantId.equals(providedVariantId)) {
-                        nonSnpVariantTypeMap.put(variantId, variantType);
+            for (String variantDescForPos : getIdentificationStrings(
+                    variantTypeStr, sequence, bpPosition, idAndSynonyms)) {
+                canonicalId = existingVariantIDs.get(variantDescForPos);
+                if (canonicalId != null) {
+                    if (variantType != null && !canonicalId.equals(providedVariantId)) {
+                        nonSnpVariantTypeMap.put(canonicalId, variantType);
                     }
-                    return new ResolvedVariantInfo(variantId, sequence, bpPosition, variantType);
+                    break;
                 }
             }
         } catch (Exception e) {
-            LOG.warn("Error resolving variant info for " + providedVariantId + ": " + e.getMessage());
+            // No position and no ID
+            LOG.debug("Cannot build identification strings for " + providedVariantId + ": " + e.getMessage());
         }
         
-        // Not found
-        String canonicalId = importUnknownVariants ? providedVariantId : null;
+        // --- IMPORT UNKNOWN VARIANTS LOGIC ---
+        if (canonicalId == null) {
+            if (!importUnknownVariants) {
+                // Unknown variants are NOT allowed - return null for canonicalId
+                return new ResolvedVariantInfo(null, sequence, bpPosition, variantType);
+            }
+            
+            // Unknown variants ARE allowed - generate a consistent ID for routing
+            if (sequence != null && bpPosition != null) {
+                // Use position as the basis for consistent routing
+                canonicalId = sequence + "_" + bpPosition;
+            } else if (hasValidId) {
+                canonicalId = providedVariantId;
+            } else {
+                // Absolutely no info - generate a unique one (should never happen)
+                canonicalId = "new_" + System.nanoTime();
+            }
+        }
+        
         return new ResolvedVariantInfo(canonicalId, sequence, bpPosition, variantType);
     }
 

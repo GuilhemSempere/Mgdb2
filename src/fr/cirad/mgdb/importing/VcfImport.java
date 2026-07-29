@@ -372,44 +372,27 @@ public class VcfImport extends AbstractGenotypeImport<VCFParameters> {
             if (task == VariantTask.POISON_PILL || progress.getError() != null || progress.isAborted())
                 break;
             
-            VariantContextHologram hologram = task.vcfEntry;
-            
-            // --- WORKER RESOLVES VARIANT ---
-            String variantId = null;
-            boolean hasValidId = hologram.hasID() && !".".equals(hologram.getID()) && !hologram.getID().isEmpty();
-            boolean hasPosition = hologram.getContig() != null && !".".equals(hologram.getContig()) && 
-                                  !"0".equals(hologram.getContig()) && !hologram.getContig().isEmpty() &&
-                                  hologram.getStart() != null && hologram.getStart() > 0;
-            
-            // 1. Check by ID first
-            if (hasValidId) {
-                variantId = existingVariantIDs.get(hologram.getID().toUpperCase());
-            }
-            
-            // 2. If not found, check by position+type
-            if (variantId == null && hasPosition) {
-                String posKey = hologram.getType().toString() + "¤" + hologram.getContig() + "¤" + hologram.getStart();
-                variantId = existingVariantIDs.get(posKey);
-            }
-            
-            // 3. If still not found, check by position with other types
-            if (variantId == null && hasPosition) {
-                for (Type type : new Type[]{Type.SNP, Type.INDEL, Type.MNP, Type.MIXED}) {
-                    if (type == hologram.getType()) continue;
-                    String posKey = type.toString() + "¤" + hologram.getContig() + "¤" + hologram.getStart();
-                    variantId = existingVariantIDs.get(posKey);
-                    if (variantId != null) break;
-                }
-            }
-            
-            // 4. Create new variant if not found
-            if (variantId == null) {
-                if (hasValidId) {
-                    variantId = (ObjectId.isValid(hologram.getID()) ? "_" : "") + hologram.getID();
-                } else {
-                    variantId = generatedIdBaseString + String.format("%09x", totalParsedVariantCount.getAndIncrement());
-                }
-            }
+            VariantContextHologram hologram = task.vcfEntry;            
+			String variantId = null;
+			boolean hasValidId = hologram.hasID() && !".".equals(hologram.getID()) && !hologram.getID().isEmpty();
+			
+			List<String> idAndSynonyms = hasValidId ? Arrays.asList(new String[]{hologram.getID()}) : null;
+			try {
+				for (String variantDescForPos : getIdentificationStrings(hologram.getType().toString(), hologram.getContig(), (long) hologram.getStart(), idAndSynonyms)) {
+			        variantId = existingVariantIDs.get(variantDescForPos);
+			        if (variantId != null)
+			        	break;
+				}
+			} catch (Exception e) {		// No position and no ID - will create new variant
+			    LOG.debug("Cannot build identification strings: " + e.getMessage());
+			}
+
+			if (variantId == null) {	// Not found, create new variant
+			    if (hasValidId)
+			        variantId = (ObjectId.isValid(hologram.getID()) ? "_" : "") + hologram.getID();
+			    else
+			        variantId = generatedIdBaseString + String.format("%09x", totalParsedVariantCount.getAndIncrement());
+			}
             
             // Skip monomorphic (only for new variants)
             if (fSkipMonomorphic && !existingVariantIDs.containsKey(variantId)) {

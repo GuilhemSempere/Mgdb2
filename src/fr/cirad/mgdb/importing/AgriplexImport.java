@@ -117,9 +117,6 @@ public class AgriplexImport extends RefactoredImport<FileImportParameters> {
     /** Matches 2 sequences of nucleotides or "-" separated by a slash, with optional surrounding whitespace. */
     private static final Pattern HETEROZYGOTE_PATTERN = Pattern.compile("^\\s*([ACGTNacgtn]+|-)\\s*/\\s*([ACGTNacgtn]+|-)\\s*$");
 
-//    /** Matches a Customer Marker ID of the form &lt;STRING&gt;_&lt;NUMBER&gt;, e.g. "chr01_194844". */
-//    private static final Pattern CUSTOMER_MARKER_ID_POSITION_PATTERN = Pattern.compile("^(.+)_([0-9]+)$");
-
     private File rotatedFile;
 
     public AgriplexImport() {
@@ -220,6 +217,7 @@ public class AgriplexImport extends RefactoredImport<FileImportParameters> {
         if (params.getImportMode() == 0 && createdProject == null && project.getPloidyLevel() != nPloidy)
             throw new Exception("Ploidy levels differ between existing (" + project.getPloidyLevel() + ") and provided (" + nPloidy + ") data!");
         project.setPloidyLevel(nPloidy);
+        m_ploidy = nPloidy;
 
         if (progress.getError() != null && !progress.isAborted())
             return 0;
@@ -235,10 +233,16 @@ public class AgriplexImport extends RefactoredImport<FileImportParameters> {
         if (progress.getError() != null || progress.isAborted())
             return 0;
 
-        // Rotated file import
-        int nConcurrentThreads = Math.max(1, Runtime.getRuntime().availableProcessors());
-        LOG.debug("Importing project '" + sProject + "' into " + sModule + " using " + nConcurrentThreads + " threads");
-        long count = importTempFileContents(progress, nConcurrentThreads, mongoTemplate, assembly == null ? null : assembly.getId(), rotatedFile, variantsAndPositions, existingVariantIDs, project, sRun, null, orderedIndOrSpToPopulationMap, nonSnpVariantTypeMap, null, fSkipMonomorphic);
+        // Calculate threads and pass to importTempFileContents
+        int nNConcurrentThreads = Math.max(1, Runtime.getRuntime().availableProcessors());
+        LOG.debug("Importing project '" + sProject + "' into " + sModule + " using " + nNConcurrentThreads + " threads");
+
+        // --- Call importTempFileContents with the correct signature ---
+        long count = importTempFileContents(progress, nNConcurrentThreads, mongoTemplate, 
+            assembly == null ? null : assembly.getId(), rotatedFile, variantsAndPositions, 
+            existingVariantIDs, project, sRun, null, orderedIndOrSpToPopulationMap, 
+            nonSnpVariantTypeMap, null, fSkipMonomorphic);
+        
         if (progress.getError() != null)
             throw new Exception(progress.getError());
 

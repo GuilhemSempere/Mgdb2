@@ -19,6 +19,7 @@ import java.util.Map;
 import java.util.Scanner;
 import java.util.TreeSet;
 import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
@@ -91,6 +92,7 @@ public abstract class RefactoredImport<T extends ImportParameters> extends Abstr
 
     public long importTempFileContents(ProgressIndicator progress, int nNConcurrentThreads, MongoTemplate mongoTemplate, Integer nAssemblyId, File tempFile, LinkedHashMap<String, String> providedVariantPositions, HashMap<String, String> existingVariantIDs, GenotypingProject project, String sRun, HashMap<String, ArrayList<String>> inconsistencies, LinkedHashMap<String, String> orderedIndividualToPopulationMap, Map<String, Type> nonSnpVariantTypeMap, HashSet<Integer> indexesOfLinesThatMustBeSkipped, boolean fSkipMonomorphic) throws Exception {
         String[] individuals = orderedIndividualToPopulationMap.keySet().toArray(new String[orderedIndividualToPopulationMap.size()]);
+        final AtomicInteger totalParsedVariantCount = new AtomicInteger(0);
         final AtomicInteger totalWrittenVariantCount = new AtomicInteger(0);
         final AtomicInteger ignoredVariants = new AtomicInteger(0);
 
@@ -101,8 +103,8 @@ public abstract class RefactoredImport<T extends ImportParameters> extends Abstr
             progress.moveToNextStep();
             progress.setPercentageEnabled(true);
 
-            final int chunkSize = Math.max(1, Math.min(1000, (int) Math.ceil((float) nMaxChunkSize / Math.max(1, individuals.length))));
-            LOG.info("Importing by chunks of size " + chunkSize);
+            final int nNumberOfVariantsToSaveAtOnce = Math.max(1, nMaxChunkSize / Math.max(1, individuals.length));
+            LOG.info("Importing by chunks of size " + nNumberOfVariantsToSaveAtOnce);
 
             LinkedHashSet<String> individualsWithoutPopulation = new LinkedHashSet<>();
             for (String sIndOrSpId : orderedIndividualToPopulationMap.keySet()) {
@@ -144,8 +146,6 @@ public abstract class RefactoredImport<T extends ImportParameters> extends Abstr
             if (assemblyIDs.isEmpty())
                 assemblyIDs.add(null);    // old-style, assembly-less DB
 
-            final int projId = project.getId();
-
             // --- DISPATCHER + QUEUE IMPLEMENTATION ---
             
             // Create worker queues
@@ -155,6 +155,9 @@ public abstract class RefactoredImport<T extends ImportParameters> extends Abstr
             for (int i = 0; i < nImportThreads; i++) {
                 workerQueues[i] = new LinkedBlockingQueue<>();
             }
+
+            // SHARED CACHE across all workers (prevents duplicate variant creation)
+            ConcurrentHashMap<String, VariantData> sharedVariantCache = new ConcurrentHashMap<>();
 
             // Start workers
             Thread[] importThreads = new Thread[nImportThreads];
@@ -173,9 +176,10 @@ public abstract class RefactoredImport<T extends ImportParameters> extends Abstr
                                 nonSnpVariantTypeMap,
                                 project,
                                 sRun,
-                                chunkSize,
+                                nNumberOfVariantsToSaveAtOnce,
                                 assemblyIDs,
                                 progress,
+                                totalParsedVariantCount,
                                 totalWrittenVariantCount,
                                 providedVariantPositions.size(),
                                 inconsistencies,
@@ -184,7 +188,8 @@ public abstract class RefactoredImport<T extends ImportParameters> extends Abstr
                                 existingVariantIDs,
                                 fSkipMonomorphic,
                                 m_ploidy,
-                                m_fImportUnknownVariants
+                                m_fImportUnknownVariants,
+                                sharedVariantCache
                             );
                         } catch (Throwable t) {
                             progress.setError("Worker " + workerIndex + " failed with " + t.getClass().getSimpleName() + ": " + t.getMessage());
@@ -214,6 +219,7 @@ public abstract class RefactoredImport<T extends ImportParameters> extends Abstr
                             String providedVariantId = splitLine[0];
                             
                             // Use shared resolveVariantInfo method from AbstractGenotypeImport
+                            // ALWAYS returns a canonical ID for consistent routing
                             ResolvedVariantInfo resolvedInfo = resolveVariantInfo(
                                 providedVariantId,
                                 providedVariantPositions,
@@ -238,6 +244,8 @@ public abstract class RefactoredImport<T extends ImportParameters> extends Abstr
                                 }
                             }
                             
+                            // ALWAYS route based on canonical ID (never null)
+                            // This ensures all synonyms go to the same worker
                             String idToDispatch = resolvedInfo.canonicalVariantId != null ? 
                                 resolvedInfo.canonicalVariantId : providedVariantId;
                             int workerIndex = Math.floorMod(idToDispatch.hashCode(), nImportThreads);
@@ -253,8 +261,10 @@ public abstract class RefactoredImport<T extends ImportParameters> extends Abstr
                             workerQueues[workerIndex].put(task);
                         }
                         
-                        for (BlockingQueue<VariantTask> queue : workerQueues)
+                        // Send poison pills to all workers
+                        for (BlockingQueue<VariantTask> queue : workerQueues) {
                             queue.put(VariantTask.POISON_PILL);
+                        }
                         
                     } catch (Exception e) {
                         progress.setError("Dispatcher failed: " + e.getMessage());
@@ -268,12 +278,12 @@ public abstract class RefactoredImport<T extends ImportParameters> extends Abstr
             for (int i = 0; i < nImportThreads; i++) {
                 importThreads[i].join();
             }
-            
+
             if (ignoredVariants.get() > 0)
                 LOG.warn("Number of ignored variants: " + ignoredVariants);
 
             if (progress.getError() != null || progress.isAborted())
-                return totalWrittenVariantCount.get();
+                return totalParsedVariantCount.get();
 
             if (!project.getRuns().contains(sRun))
                 project.getRuns().add(sRun);
@@ -281,11 +291,12 @@ public abstract class RefactoredImport<T extends ImportParameters> extends Abstr
         } finally {
             // cleanup
         }
-        return totalWrittenVariantCount.get();
+        return totalParsedVariantCount.get();
     }
 
     /**
-     * Worker method that processes variant tasks
+     * Worker method that processes variant tasks with caching
+     * Uses shared cache across all workers to prevent duplicate variant creation
      */
     private void processVariantTasks(BlockingQueue<VariantTask> queue,
             MongoTemplate mongoTemplate,
@@ -298,6 +309,7 @@ public abstract class RefactoredImport<T extends ImportParameters> extends Abstr
             int chunkSize,
             Collection<Integer> assemblyIDs,
             ProgressIndicator progress,
+            AtomicInteger totalParsedVariantCount,
             AtomicInteger totalWrittenVariantCount,
             int totalVariants,
             HashMap<String, ArrayList<String>> inconsistencies,
@@ -306,11 +318,11 @@ public abstract class RefactoredImport<T extends ImportParameters> extends Abstr
             HashMap<String, String> existingVariantIDs,
             boolean fSkipMonomorphic,
             int ploidy,
-            boolean importUnknownVariants) throws Exception {
+            boolean importUnknownVariants,
+            ConcurrentHashMap<String, VariantData> sharedVariantCache) throws Exception {
         
         HashSet<VariantData> unsavedVariants = new HashSet<>();
         HashSet<VariantRunData> unsavedRuns = new HashSet<>();
-        HashMap<String, VariantData> variantCache = new HashMap<>();
         int workerProcessed = 0;
         
         while (true) {
@@ -320,20 +332,30 @@ public abstract class RefactoredImport<T extends ImportParameters> extends Abstr
             }
             
             String variantId = task.canonicalVariantId != null ? task.canonicalVariantId : task.providedVariantId;
-                
+            
             if (variantId != null && variantId.startsWith("*")) {
                 LOG.warn("Skipping deprecated variant data: " + task.providedVariantId);
                 continue;
             }
             
-            VariantData variant = variantCache.get(variantId);
+            // --- USE SHARED CACHE to prevent duplicate variant creation ---
+            VariantData variant = sharedVariantCache.get(variantId);
             if (variant == null) {
                 variant = mongoTemplate.findById(variantId, VariantData.class);
                 if (variant == null) {
+                    // Check if we're allowed to create new variants
+                    if (!importUnknownVariants) {
+                        // Skip this variant - it's unknown and we're not importing unknowns
+                        LOG.debug("Skipping unknown variant: " + variantId);
+                        continue;
+                    }
                     String id = ObjectId.isValid(variantId) ? "_" + variantId : variantId;
                     variant = new VariantData(id);
                 }
-                variantCache.put(variantId, variant);
+                VariantData existing = sharedVariantCache.putIfAbsent(variantId, variant);
+                if (existing != null) {
+                    variant = existing;
+                }
             }
             
             variant.getRuns().add(new Run(project.getId(), sRun));
@@ -415,16 +437,22 @@ public abstract class RefactoredImport<T extends ImportParameters> extends Abstr
                     (rp != null ? " positioned at " + rp.getSequence() + ":" + rp.getStartSite() : "") + 
                     " because its alleles are not known (only missing data provided so far)");
             }
-                
             
+            workerProcessed++;
+            int newCount = totalParsedVariantCount.incrementAndGet();
+            
+            // Save based on per-worker processed count to keep chunks consistent
             if (workerProcessed % chunkSize == 0 && !unsavedVariants.isEmpty()) {
                 persistVariantsAndGenotypes(!existingVariantIDs.isEmpty(), mongoTemplate, 
                     unsavedVariants, unsavedRuns);
                 progress.setCurrentStepProgress(totalWrittenVariantCount.addAndGet(unsavedVariants.size()) * 100 / totalVariants);
                 
-                variantCache.clear();
                 unsavedVariants = new HashSet<>();
                 unsavedRuns = new HashSet<>();
+            }
+            
+            if (newCount % (chunkSize * 50) == 0) {
+                LOG.debug(newCount + " lines processed by worker");
             }
         }
         

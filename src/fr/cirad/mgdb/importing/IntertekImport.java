@@ -31,6 +31,7 @@ import java.util.Map;
 import java.util.Scanner;
 import java.util.Set;
 import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
@@ -203,12 +204,15 @@ public class IntertekImport extends AbstractGenotypeImport<FileImportParameters>
         // --- DISPATCHER + QUEUE IMPLEMENTATION ---
         
         int nNConcurrentThreads = Math.max(1, Runtime.getRuntime().availableProcessors());
-        int nImportThreads = Math.max(1, nNConcurrentThreads - 1);
+        int nImportThreads = Math.max(1, (nNConcurrentThreads - 1) / 2);
         @SuppressWarnings("unchecked")
         BlockingQueue<VariantTask>[] workerQueues = new BlockingQueue[nImportThreads];
         for (int i = 0; i < nImportThreads; i++) {
             workerQueues[i] = new LinkedBlockingQueue<>();
         }
+
+        // SHARED CACHE across all workers
+        ConcurrentHashMap<String, VariantData> sharedVariantCache = new ConcurrentHashMap<>();
 
         final GenotypingProject finalProject = project;
         final MongoTemplate finalMongoTemplate = mongoTemplate;
@@ -234,7 +238,8 @@ public class IntertekImport extends AbstractGenotypeImport<FileImportParameters>
                             assemblyIDs,
                             progress,
                             existingVariantIDs,
-                            totalWrittenVariantCount
+                            totalWrittenVariantCount,
+                            sharedVariantCache
                         );
                     } catch (Throwable t) {
                         progress.setError("Worker " + workerIndex + " failed: " + t.getMessage());
@@ -567,6 +572,7 @@ public class IntertekImport extends AbstractGenotypeImport<FileImportParameters>
 
     /**
      * Worker method that processes variant tasks with caching
+     * Uses shared cache across all workers to prevent duplicate variant creation
      */
     private void processVariantTasks(
             BlockingQueue<VariantTask> queue,
@@ -577,32 +583,33 @@ public class IntertekImport extends AbstractGenotypeImport<FileImportParameters>
             Collection<Integer> assemblyIDs,
             ProgressIndicator progress,
             HashMap<String, String> existingVariantIDs,
-            AtomicInteger totalWrittenVariantCount) throws Exception {
+            AtomicInteger totalWrittenVariantCount,
+            ConcurrentHashMap<String, VariantData> sharedVariantCache) throws Exception {
         
         HashSet<VariantData> unsavedVariants = new HashSet<>();
         HashSet<VariantRunData> unsavedRuns = new HashSet<>();
-        HashMap<String, VariantData> variantCache = new HashMap<>();
         
-        int chunkSize = Math.max(1, nMaxChunkSize / Math.max(1, m_providedIdToCallsetMap.size()));
-        long processedVariants = 0;
-        int localChunkSize = chunkSize;
+        int chunkSize = Math.max(1, Math.min(1000, (int) Math.ceil((float) nMaxChunkSize / Math.max(1, m_providedIdToCallsetMap.size()))));
+        int workerProcessed = 0;
         
         while (true) {
             VariantTask task = queue.take();
-            if (task == VariantTask.POISON_PILL) {
+            if (task == VariantTask.POISON_PILL || progress.getError() != null || progress.isAborted())
                 break;
-            }
             
             String variantId = task.variantId;
             
-            // Get or load variant from cache
-            VariantData variant = variantCache.get(variantId);
+            // USE SHARED CACHE
+            VariantData variant = sharedVariantCache.get(variantId);
             if (variant == null) {
                 variant = mongoTemplate.findById(variantId, VariantData.class);
                 if (variant == null) {
                     variant = task.variant;
                 }
-                variantCache.put(variantId, variant);
+                VariantData existing = sharedVariantCache.putIfAbsent(variantId, variant);
+                if (existing != null) {
+                    variant = existing;
+                }
             }
             
             // Add run to variant
@@ -634,26 +641,23 @@ public class IntertekImport extends AbstractGenotypeImport<FileImportParameters>
                 project.getAlleleCounts().add(variant.getKnownAlleles().size());
             }
             
-            processedVariants++;
+            workerProcessed++;
             
-            
-            if (processedVariants % localChunkSize == 0) {
-                persistVariantsAndGenotypes(!existingVariantIDs.isEmpty(), mongoTemplate, unsavedVariants, unsavedRuns);
+            if (workerProcessed % chunkSize == 0 && !unsavedVariants.isEmpty()) {
+                persistVariantsAndGenotypes(!existingVariantIDs.isEmpty(), mongoTemplate, 
+                    unsavedVariants, unsavedRuns);
+                progress.setCurrentStepProgress(totalWrittenVariantCount.addAndGet(unsavedVariants.size()));
                 
-                variantCache.clear();
                 unsavedVariants = new HashSet<>();
                 unsavedRuns = new HashSet<>();
-                
-                progress.setCurrentStepProgress((int) processedVariants);
-            }
-            
-            if (processedVariants % (localChunkSize * 50) == 0) {
-                LOG.debug(processedVariants + " lines processed by worker");
             }
         }
         
+        // Save remaining
         if (!unsavedVariants.isEmpty()) {
-            persistVariantsAndGenotypes(!existingVariantIDs.isEmpty(), mongoTemplate, unsavedVariants, unsavedRuns);
+            persistVariantsAndGenotypes(!existingVariantIDs.isEmpty(), mongoTemplate, 
+                unsavedVariants, unsavedRuns);
+            progress.setCurrentStepProgress(totalWrittenVariantCount.addAndGet(unsavedVariants.size()));
         }
     }
 

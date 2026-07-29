@@ -222,10 +222,16 @@ public class DArTagImport extends RefactoredImport<FileImportParameters> {
         if (progress.getError() != null || progress.isAborted())
             return 0;
 
-        int nConcurrentThreads = Math.max(1, Runtime.getRuntime().availableProcessors());
-        LOG.debug("Importing project '" + params.getProject() + "' into " + params.getModule() + " using " + nConcurrentThreads + " threads");
+        // Calculate threads and pass to importTempFileContents
+        int nNConcurrentThreads = Math.max(1, Runtime.getRuntime().availableProcessors());
+        LOG.debug("Importing project '" + params.getProject() + "' into " + params.getModule() + " using " + nNConcurrentThreads + " threads");
 
-        long count = importTempFileContents(progress, nConcurrentThreads, mongoTemplate, assembly == null ? null : assembly.getId(), rotatedFile, variantsAndPositions, existingVariantIDs, project, sRun, null, orderedIndOrSpToPopulationMap, nonSnpVariantTypeMap, null, fSkipMonomorphic);
+        // --- Call importTempFileContents with the correct signature ---
+        long count = importTempFileContents(progress, nNConcurrentThreads, mongoTemplate, 
+            assembly == null ? null : assembly.getId(), rotatedFile, variantsAndPositions, 
+            existingVariantIDs, project, sRun, null, orderedIndOrSpToPopulationMap, 
+            nonSnpVariantTypeMap, null, fSkipMonomorphic);
+        
         if (progress.getError() != null)
             throw new Exception(progress.getError());
 

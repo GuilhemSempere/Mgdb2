@@ -28,10 +28,8 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.BlockingQueue;
-import java.util.concurrent.ExecutorService;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.LinkedBlockingQueue;
-import java.util.concurrent.ThreadPoolExecutor;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -207,6 +205,9 @@ public class HapMapImport extends AbstractGenotypeImport<FileImportParameters> {
             workerQueues[i] = new LinkedBlockingQueue<>();
         }
 
+        // SHARED CACHE across all workers
+        ConcurrentHashMap<String, VariantData> sharedVariantCache = new ConcurrentHashMap<>();
+
         final Collection<Integer> assemblyIDs = mongoTemplate.findDistinct(new Query(), "_id", Assembly.class, Integer.class);
         if (assemblyIDs.isEmpty())
             assemblyIDs.add(null);
@@ -238,7 +239,8 @@ public class HapMapImport extends AbstractGenotypeImport<FileImportParameters> {
                             existingVariantIDs,
                             params.isSkipMonomorphic(),
                             sampleIds,
-                            sampleToIndividualMap
+                            sampleToIndividualMap,
+                            sharedVariantCache
                         );
                     } catch (Throwable t) {
                         progress.setError("Worker " + workerIndex + " failed: " + t.getMessage());
@@ -345,6 +347,7 @@ public class HapMapImport extends AbstractGenotypeImport<FileImportParameters> {
 
     /**
      * Worker method that processes variant tasks
+     * Uses shared cache across all workers to prevent duplicate variant creation
      */
     private void processVariantTasks(
             BlockingQueue<VariantTask> queue,
@@ -359,31 +362,34 @@ public class HapMapImport extends AbstractGenotypeImport<FileImportParameters> {
             HashMap<String, String> existingVariantIDs,
             boolean fSkipMonomorphic,
             ArrayList<String> sampleIds,
-            Map<String, String> sampleToIndividualMap) throws Exception {
+            Map<String, String> sampleToIndividualMap,
+            ConcurrentHashMap<String, VariantData> sharedVariantCache) throws Exception {
         
         HashSet<VariantData> unsavedVariants = new HashSet<>();
         HashSet<VariantRunData> unsavedRuns = new HashSet<>();
-        HashMap<String, VariantData> variantCache = new HashMap<>();
         
         final int chunkSize = Math.max(1, Math.min(1000, (int) Math.ceil((float) nMaxChunkSize / Math.max(1, sampleIds.size()))));
         int workerProcessed = 0;
         
         while (true) {
             VariantTask task = queue.take();
-            if (task == VariantTask.POISON_PILL) {
+            if (task == VariantTask.POISON_PILL || progress.getError() != null || progress.isAborted())
                 break;
-            }
             
             String variantId = task.variantId;
             
-            VariantData variant = variantCache.get(variantId);
+            // USE SHARED CACHE
+            VariantData variant = sharedVariantCache.get(variantId);
             if (variant == null) {
                 variant = mongoTemplate.findById(variantId, VariantData.class);
                 if (variant == null) {
                     String id = ObjectId.isValid(variantId) ? "_" + variantId : variantId;
                     variant = new VariantData(id);
                 }
-                variantCache.put(variantId, variant);
+                VariantData existing = sharedVariantCache.putIfAbsent(variantId, variant);
+                if (existing != null) {
+                    variant = existing;
+                }
             }
             
             variant.getRuns().add(new Run(project.getId(), sRun));
@@ -417,12 +423,10 @@ public class HapMapImport extends AbstractGenotypeImport<FileImportParameters> {
             workerProcessed++;
             
             if (workerProcessed % chunkSize == 0 && !unsavedVariants.isEmpty()) {
-                // Save DIRECTLY - no saveService!
                 persistVariantsAndGenotypes(!existingVariantIDs.isEmpty(), mongoTemplate, 
                     unsavedVariants, unsavedRuns);
                 progress.setCurrentStepProgress(totalWrittenVariantCount.addAndGet(unsavedVariants.size()));
                 
-                variantCache.clear();
                 unsavedVariants = new HashSet<>();
                 unsavedRuns = new HashSet<>();
             }
@@ -483,7 +487,6 @@ public class HapMapImport extends AbstractGenotypeImport<FileImportParameters> {
             String runName,
             List<String> individuals) throws Exception {
         
-        // Determine variant type from alleles
         Type variantType = determineType(Arrays.stream(hmFeature.getAlleles())
             .map(allele -> Allele.create(allele))
             .collect(Collectors.toList()));
@@ -503,7 +506,6 @@ public class HapMapImport extends AbstractGenotypeImport<FileImportParameters> {
         if (variantToFeed.getKnownAlleles().size() == 0)
             variantToFeed.setKnownAlleles(Arrays.stream(hmFeature.getAlleles()).collect(Collectors.toList()));
 
-        // Build allele index map
         AtomicInteger allIdx = new AtomicInteger(0);
         Map<String, Integer> alleleIndexMap = variantToFeed.getKnownAlleles().stream()
             .collect(Collectors.toMap(Function.identity(), t -> allIdx.getAndIncrement()));
