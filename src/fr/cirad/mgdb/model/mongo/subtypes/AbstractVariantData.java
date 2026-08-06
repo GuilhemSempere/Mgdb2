@@ -791,7 +791,7 @@ abstract public class AbstractVariantData
             for (VariantRunData run : runs) {
                 for (int projectIdx = 1; projectIdx <= 1; projectIdx++) {
                     List<List<Integer>> projectGenotypeArray = run.getGenotypeArray().get(projectIdx);
-                    List<List<HashMap<String,Object>>> projectGenotypeAnnotationArray = run.getGenotypeAnnotationArray().get(projectIdx);
+                    List<List<HashMap<String,Object>>> projectGenotypeAnnotationArray = (run.getGenotypeAnnotationArray() == null || run.getGenotypeAnnotationArray().size() <= projectIdx) ? null : run.getGenotypeAnnotationArray().get(projectIdx);
                     if (projectGenotypeArray.isEmpty())
                         continue;
                     GenotypingProject project = mongoTemplate.findById(projectIdx, GenotypingProject.class);
@@ -802,7 +802,7 @@ abstract public class AbstractVariantData
                     for (int runIdx = 0; runIdx < numberOfRunsForProject; runIdx++) {
 
                         List<Integer> runGenotypeArray = projectGenotypeArray.get(runIdx);
-                        List<HashMap<String,Object>> runGenotypeAnnotationArray = projectGenotypeAnnotationArray.get(runIdx);
+                        List<HashMap<String,Object>> runGenotypeAnnotationArray = (projectGenotypeAnnotationArray == null || projectGenotypeAnnotationArray.size() <= runIdx) ? null : projectGenotypeAnnotationArray.get(projectIdx);
                         if (runGenotypeArray.isEmpty())
                             continue;
                         String cuurentRun = projectRuns.get(runIdx);
@@ -825,8 +825,13 @@ abstract public class AbstractVariantData
                             if (genotypeCode == null)
                                 continue;
                             String decodedGenotype = decodeGenotypeCode(genotypeCode, mongoTemplate);
-                            HashMap<String, Object> genotypeAnnotationForSample = runGenotypeAnnotationArray.get(indexOfCallsetInsideArrays);
+                            HashMap<String, Object> genotypeAnnotationForSample = null;
+                            if (runGenotypeAnnotationArray != null && !runGenotypeAnnotationArray.isEmpty()) {
+                                genotypeAnnotationForSample = runGenotypeAnnotationArray.get(indexOfCallsetInsideArrays);
+                            }
+
                             sampleGenotype.setCode(decodedGenotype);
+
                             sampleGenotype.setAdditionalInfo(genotypeAnnotationForSample);
 
                             // keep track of SampleGenotype and Run so we can have access to additional info later on

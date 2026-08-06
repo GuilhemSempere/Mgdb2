@@ -426,6 +426,8 @@ public class HapMapImport extends AbstractGenotypeImport<FileImportParameters> {
         saveService.shutdown();
         saveService.awaitTermination(Integer.MAX_VALUE, TimeUnit.DAYS);
 
+        mongoTemplate.save(finalProject);
+
         if (progress.getError() != null || progress.isAborted())
             return 0;
 

@@ -346,7 +346,7 @@ public class VcfImport extends AbstractGenotypeImport<VCFParameters> {
                                         finalProject.getContigs(asmId).add(rp.getSequence());
                                 }
                             }
-                            LOG.info("chunk build took: " + (System.currentTimeMillis() - b4) + "ms for " + vcChunkToImport.size() + " variants");
+                            //LOG.info("chunk build took: " + (System.currentTimeMillis() - b4) + "ms for " + vcChunkToImport.size() + " variants");
                             saveChunkV3(unsavedVariants, unsavedRuns, existingVariantIDs, finalMongoTemplate, progress, saveService, finalProject.getId(), runIndex);
                             progress.setCurrentStepProgress(totalProcessedVariantCount.get());
                             if (!importThreads.contains(this) && progress.getCurrentStepProgress() % (vcChunkToImport.size()*50) == 0)
@@ -630,7 +630,7 @@ public class VcfImport extends AbstractGenotypeImport<VCFParameters> {
         }
 
         vdAsyncThread.join();
-        LOG.info("persistVariantsAndGenotypes took: " + (System.currentTimeMillis() - b4) + "ms for " + unsavedRuns.size() + " docs");
+        //LOG.info("persistVariantsAndGenotypes took: " + (System.currentTimeMillis() - b4) + "ms for " + unsavedRuns.size() + " docs");
     }
 
     private static void upsertV3(VariantRunData vrd, int projectIndex, int runIndex, MongoTemplate mongoTemplate) {

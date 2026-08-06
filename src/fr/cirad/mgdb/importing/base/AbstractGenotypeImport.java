@@ -508,9 +508,9 @@ public abstract class AbstractGenotypeImport<T extends ImportParameters> {
             // specific part
             long count = doImport(params, mongoTemplate, project, progress, createdProject);
 
-//            if (!project.getRuns().contains(params.getRun()))
-//                project.getRuns().add(params.getRun());
-//            mongoTemplate.save(project);
+            if (!project.getRuns().contains(params.getRun()))
+                project.getRuns().add(params.getRun());
+            mongoTemplate.save(project);
 
             String importType = params.getClass().getSimpleName();
             if (importType.endsWith("Parameters")) {
