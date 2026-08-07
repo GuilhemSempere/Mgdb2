@@ -279,7 +279,7 @@ public class MgdbDao {
      *
      * @param mongoTemplate the mongoTemplate
      * @param variantColl the variant collection to ensure indexes on
-     * @param mongoTemplate if false, skips synonym index creation if none such synonyms found in the first 100000 documents 
+     * @param mongoTemplate if false, skips synonym index creation if none such synonyms found in the first 100000 documents
      */
 	public static int ensureVariantDataIndexes(MongoTemplate mongoTemplate, MongoCollection<Document> variantColl, boolean fEvenIfNoSuchSynonyms) {
     	int nResult = 0;
@@ -1103,6 +1103,18 @@ public class MgdbDao {
 		        	LOG.info("Removed " + nRemovedVrdCount + " VRD records for project " + nProjectId + " of module " + sModule);
 		            fAnythingRemoved.set(true);
 		        }
+
+                // FIXME: Use variables instead
+                Update update = new Update()
+                        .set(VariantRunData.FIELDNAME_SAMPLEGENOTYPES + "." + nProjectId, null)
+                        .set(VariantRunData.SECTION_ADDITIONAL_INFO + "." +nProjectId, null)
+                        .set("vai." + nProjectId, null);
+
+                mongoTemplate.updateMulti(
+                        new Query(),  // or add criteria if needed
+                        update,
+                        VariantRunData.class
+                );
 		    }
 		    catch (DataIntegrityViolationException e) {
 		        if (isCollectionDroppedError(e))
@@ -1110,7 +1122,7 @@ public class MgdbDao {
 		        else
 		            LOG.error("Unexpected VRD cleanup failure", e);
 		    }
-		}).start();	// we can do this asynchronously because even if we're re-importing with the same project name it's going to be assigned a new ID 
+		}).start();	// we can do this asynchronously because even if we're re-importing with the same project name it's going to be assigned a new ID
         LOG.info("Launched async VRD cleanup for project " + nProjectId + " of module " + sModule);
         
         Update update = new Update();
@@ -1160,6 +1172,9 @@ public class MgdbDao {
     public static boolean removeRunAndRelatedRecords(String sModule, int nProjectId, String sRun, boolean fAllowAsyncVrdCleanup) throws Exception {
     	AtomicBoolean fAnythingRemoved = new AtomicBoolean(false);
         MongoTemplate mongoTemplate = MongoTemplateManager.get(sModule);
+        GenotypingProject project = mongoTemplate.findById(nProjectId, GenotypingProject.class);
+        int runIndex = project.getRuns().indexOf(sRun);
+
         long nRemovedCallsetCount = mongoTemplate.updateMulti(new Query(), new Update().pull(GenotypingSample.FIELDNAME_CALLSETS, new Query(new Criteria().andOperator(Criteria.where(Callset.FIELDNAME_PROJECT_ID).is(nProjectId), Criteria.where(Callset.FIELDNAME_RUN).is(sRun)))), GenotypingSample.class).getModifiedCount();
         if (nRemovedCallsetCount > 0) {
             LOG.info("Removed " + nRemovedCallsetCount + " callsets for run " + sRun + " in project " + nProjectId + " of module " + sModule);
@@ -1218,6 +1233,19 @@ public class MgdbDao {
 	                LOG.info("Removed " + nRemovedVrdCount + " VRD records for project " + nProjectId + " of module " + sModule);
 	                fAnythingRemoved.set(true);
 	            }
+                // FIXME: Use variables instead
+                if (runIndex>-1) {
+                    Update update = new Update()
+                            .set(VariantRunData.FIELDNAME_SAMPLEGENOTYPES + "." + nProjectId + "." + runIndex, null)
+                            .set(VariantRunData.SECTION_ADDITIONAL_INFO + "." + nProjectId + "." + runIndex, null)
+                            .set("vai." + nProjectId + "." + runIndex, null);
+
+                    mongoTemplate.updateMulti(
+                            new Query(),  // or add criteria if needed
+                            update,
+                            VariantRunData.class
+                    );
+                }
             }
         };
         vrdCleanupThread.start();

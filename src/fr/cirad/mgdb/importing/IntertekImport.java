@@ -36,6 +36,7 @@ import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
+import fr.cirad.mgdb.model.mongo.maintypes.*;
 import org.apache.log4j.Logger;
 import org.bson.types.ObjectId;
 import org.springframework.data.mongodb.core.MongoTemplate;
@@ -45,13 +46,6 @@ import com.opencsv.CSVReader;
 
 import fr.cirad.mgdb.importing.base.AbstractGenotypeImport;
 import fr.cirad.mgdb.importing.parameters.FileImportParameters;
-import fr.cirad.mgdb.model.mongo.maintypes.Assembly;
-import fr.cirad.mgdb.model.mongo.maintypes.DBVCFHeader;
-import fr.cirad.mgdb.model.mongo.maintypes.GenotypingProject;
-import fr.cirad.mgdb.model.mongo.maintypes.GenotypingSample;
-import fr.cirad.mgdb.model.mongo.maintypes.Individual;
-import fr.cirad.mgdb.model.mongo.maintypes.VariantData;
-import fr.cirad.mgdb.model.mongo.maintypes.VariantRunData;
 import fr.cirad.mgdb.model.mongo.subtypes.AbstractVariantData;
 import fr.cirad.mgdb.model.mongo.subtypes.Callset;
 import fr.cirad.mgdb.model.mongo.subtypes.ReferencePosition;
@@ -127,11 +121,11 @@ public class IntertekImport extends AbstractGenotypeImport<FileImportParameters>
      */
     private static class VariantTask {
         public static final VariantTask POISON_PILL = new VariantTask(null, null, null);
-        
+
         final String variantId;
         final HashMap<Integer, SampleGenotype> sampleGenotypes;
         final VariantData variant;
-        
+
         VariantTask(String variantId, HashMap<Integer, SampleGenotype> sampleGenotypes, VariantData variant) {
             this.variantId = variantId;
             this.sampleGenotypes = sampleGenotypes;
@@ -148,15 +142,16 @@ public class IntertekImport extends AbstractGenotypeImport<FileImportParameters>
             .filter(gtCode -> gtCode != null)
             .distinct()
             .toArray(String[]::new);
-        
-        return distinctGTs.length == 0 || 
-               (distinctGTs.length == 1 && 
+
+        return distinctGTs.length == 0 ||
+               (distinctGTs.length == 1 &&
                 Arrays.stream(distinctGTs[0].split("/")).distinct().count() < 2);
     }
 
     @Override
     protected long doImport(FileImportParameters params, MongoTemplate mongoTemplate, GenotypingProject project, ProgressIndicator progress, Integer createdProject) throws Exception {
         String sRun = params.getRun();
+        int projectIndex = project.getId();
         String assemblyName = params.getAssemblyName();
         Map<String, String> sampleToIndividualMap = params.getSampleToIndividualMap();
         boolean fSkipMonomorphic = params.isSkipMonomorphic();
@@ -202,7 +197,7 @@ public class IntertekImport extends AbstractGenotypeImport<FileImportParameters>
         Set<GenotypingSample> samplesToAdd = new HashSet<>(), samplesToUpdate = new HashSet<>();
 
         // --- DISPATCHER + QUEUE IMPLEMENTATION ---
-        
+
         int nNConcurrentThreads = Math.max(1, Runtime.getRuntime().availableProcessors());
         int nImportThreads = Math.max(1, (nNConcurrentThreads - 1) / 2);
         @SuppressWarnings("unchecked")
@@ -257,13 +252,20 @@ public class IntertekImport extends AbstractGenotypeImport<FileImportParameters>
         int nPloidy = 0;
         List<String> ambiguousVariants = new ArrayList<>();
 
-        try (BufferedReader in = new BufferedReader(new InputStreamReader(fileURL.openStream())); 
+        try (BufferedReader in = new BufferedReader(new InputStreamReader(fileURL.openStream()));
              CSVReader csvReader = new CSVReader(in)) {
-            
+
             boolean snpPart = false;
             boolean dataPart = false;
             String[] values;
             int i = 0;
+            int runIndex = project.getRuns().indexOf(sRun) == -1 ? project.getRuns().size() : project.getRuns().indexOf(sRun);
+
+
+
+
+            List<List<List<Integer>>> genotypeArray = null;
+            List<List<List<HashMap<String,Object>>>> genotypeArrayAnnotationArray = null;
 
             while ((values = csvReader.readNext()) != null) {
                 if (progress.getError() != null || progress.isAborted())
@@ -282,23 +284,23 @@ public class IntertekImport extends AbstractGenotypeImport<FileImportParameters>
                 // Reading Variants Part
                 if (snpPart && !dataPart && !values[0].equals("")) {
                     String providedVariantId = values[snpColIndex];
-                    
+
                     // --- SIMPLE VARIANT RESOLUTION (ID-based only, no position) ---
                     String variantId = null;
                     boolean hasValidId = providedVariantId != null && !providedVariantId.isEmpty() && !".".equals(providedVariantId);
-                    
+
                     // Try to find by ID only (Intertek has no position in variant header)
                     if (hasValidId) {
                         variantId = existingVariantIDs.get(providedVariantId.toUpperCase());
                     }
-                    
+
                     VariantData variant = null;
                     if (variantId != null) {
                         variant = mongoTemplate.findById(variantId, VariantData.class);
                     }
-                    
+
                     Map<String, String> allelesMap = new HashMap<>();
-                    
+
                     if (variant == null) {
                         // Create new variant
                         if (hasValidId) {
@@ -307,11 +309,11 @@ public class IntertekImport extends AbstractGenotypeImport<FileImportParameters>
                             variantId = generatedIdBaseString + String.format("%09x", totalParsedVariantCount.getAndIncrement());
                         }
                         variant = new VariantData(variantId);
-                        
+
                         // Parse alleles
                         String ref = values[xColIndex];
                         String alt = values[yColIndex];
-                                                
+
                         if (ref.equals(alt))
                             throw new Exception("Identical AlleleX and AlleleY alleles '" + ref + "' provided for variant " + providedVariantId);
                         if (!ref.matches(validAlleleRegex) && !alt.matches("INS") && !alt.matches("DEL"))
@@ -342,7 +344,7 @@ public class IntertekImport extends AbstractGenotypeImport<FileImportParameters>
                         List<String> altList = variant.getKnownAlleles().subList(1, variant.getKnownAlleles().size());
                         String alleleX = values[xColIndex];
                         String alleleY = values[yColIndex];
-                        
+
                         if (variant.getType().equals(Type.SNP.toString())) {
                             if (reverseComplement(alleleX).equals(alleleY)) {
                                 // Ambiguity, can't know which one is ref. So arbitrary, X=ref and Y=alt
@@ -413,7 +415,7 @@ public class IntertekImport extends AbstractGenotypeImport<FileImportParameters>
                             }
                         }
                     }
-                    
+
                     project.getVariantTypes().add(variant.getType());
                     variants.put(providedVariantId, variant);
                     variantAllelesMap.put(providedVariantId, allelesMap);
@@ -438,6 +440,14 @@ public class IntertekImport extends AbstractGenotypeImport<FileImportParameters>
 
                     if (currentVariantId == null) {
                         currentVariantId = variantId;
+
+                        genotypeArray = new ArrayList<>();
+                        genotypeArray.add(new ArrayList<>());
+                        genotypeArray.get(0).add(new ArrayList<>());
+
+                        genotypeArrayAnnotationArray = new ArrayList<>();
+                        genotypeArrayAnnotationArray.add(new ArrayList<>());
+                        genotypeArrayAnnotationArray.get(0).add(new ArrayList<>());
                     }
 
                     if (!variantId.equals(currentVariantId)) {
@@ -449,7 +459,7 @@ public class IntertekImport extends AbstractGenotypeImport<FileImportParameters>
                                 variantIdsToSave.remove(currentVariantId);
                             }
                         }
-                        
+
                         // Only dispatch if not skipping
                         if (!shouldSkip) {
                             VariantData variant = variants.get(currentVariantId);
@@ -459,12 +469,36 @@ public class IntertekImport extends AbstractGenotypeImport<FileImportParameters>
                                 workerQueues[workerIndex].put(task);
                             }
                         }
-                        
+
+
+
+                        addVariantRunToChunk(currentVariantId, fSkipMonomorphic, existingIds, variantIdsToSave, variantRunsChunk, variantsChunk,
+                                sampleGenotypes, variants, project, sRun, assemblyIDs, genotypeArray,genotypeArrayAnnotationArray);
                         sampleGenotypes = new HashMap<>();
+                        genotypeArray = new ArrayList<>();
+                        genotypeArray.add(new ArrayList<>());
+                        genotypeArray.get(0).add(new ArrayList<>());
+
+                        genotypeArrayAnnotationArray = new ArrayList<>();
+                        genotypeArrayAnnotationArray.add(new ArrayList<>());
+                        genotypeArrayAnnotationArray.get(0).add(new ArrayList<>());
+
+                        if (variantRunsChunk.size() == nNumberOfVariantRunsToSaveAtOnce) {
+                            //save variantRuns
+                            VcfImport.saveChunkV3(variantsChunk, variantRunsChunk, existingVariantIDs, mongoTemplate, progress, saveService,project.getId(),runIndex);
+                            variantRunsChunk = new HashSet<>();
+                        }
                     }
                     currentVariantId = variantId;
 
                     String gtCode = null;
+                    Integer encodedGenotype = null;
+                    Map<String, Integer> allelesMapForEncoding = variantAllelesMap.get(variantId).entrySet()
+                            .stream()
+                            .collect(Collectors.toMap(
+                                    entry -> entry.getKey(),
+                                    entry -> Integer.parseInt(entry.getValue())
+                            ));
                     Map<String, String> variantAlleles = variantAllelesMap.get(variantId);
                     if (!call.equals("NTC")) {
                         if (call.contains(":")) {
@@ -472,6 +506,7 @@ public class IntertekImport extends AbstractGenotypeImport<FileImportParameters>
                             gtCode = alleles.stream()
                                     .map(al -> variantAlleles.get(al))
                                     .collect(Collectors.joining("/"));
+                            encodedGenotype = GenotypeCodeManager.createGenotypeEncoding(alleles,allelesMapForEncoding,mongoTemplate,new HashMap<>()); // FIXME: Add genotype code cache map
                             if (nPloidy == 0) {
                                 nPloidy = alleles.size();
                                 project.setPloidyLevel(nPloidy);
@@ -521,10 +556,12 @@ public class IntertekImport extends AbstractGenotypeImport<FileImportParameters>
                         SampleGenotype sampleGt = new SampleGenotype(gtCode);
                         sampleGt.getAdditionalInfo().put(AbstractVariantData.GT_FIELD_FI, FI);
                         sampleGenotypes.put(m_providedIdToCallsetMap.get(bioEntityID).getId(), sampleGt);
+                        genotypeArray.get(0).get(0).add(encodedGenotype);
+                        genotypeArrayAnnotationArray.get(0).get(0).add(sampleGt.getAdditionalInfo());
                     }
                 }
             }
-            
+
             // Dispatch last variant
             if (currentVariantId != null) {
                 boolean shouldSkip = false;
@@ -534,7 +571,7 @@ public class IntertekImport extends AbstractGenotypeImport<FileImportParameters>
                         variantIdsToSave.remove(currentVariantId);
                     }
                 }
-                
+
                 if (!shouldSkip) {
                     VariantData variant = variants.get(currentVariantId);
                     if (variant != null) {
@@ -544,7 +581,7 @@ public class IntertekImport extends AbstractGenotypeImport<FileImportParameters>
                     }
                 }
             }
-            
+
             for (BlockingQueue<VariantTask> queue : workerQueues)
                 queue.put(VariantTask.POISON_PILL);
 
@@ -584,21 +621,23 @@ public class IntertekImport extends AbstractGenotypeImport<FileImportParameters>
             ProgressIndicator progress,
             HashMap<String, String> existingVariantIDs,
             AtomicInteger totalWrittenVariantCount,
-            ConcurrentHashMap<String, VariantData> sharedVariantCache) throws Exception {
-        
+            ConcurrentHashMap<String, VariantData> sharedVariantCache,
+            int projectID,
+            int runIndex) throws Exception {
+
         HashSet<VariantData> unsavedVariants = new HashSet<>();
         HashSet<VariantRunData> unsavedRuns = new HashSet<>();
-        
+
         int chunkSize = Math.max(1, Math.min(1000, (int) Math.ceil((float) nMaxChunkSize / Math.max(1, m_providedIdToCallsetMap.size()))));
         int workerProcessed = 0;
-        
+
         while (true) {
             VariantTask task = queue.take();
             if (task == VariantTask.POISON_PILL || progress.getError() != null || progress.isAborted())
                 break;
-            
+
             String variantId = task.variantId;
-            
+
             // USE SHARED CACHE
             VariantData variant = sharedVariantCache.get(variantId);
             if (variant == null) {
@@ -611,10 +650,10 @@ public class IntertekImport extends AbstractGenotypeImport<FileImportParameters>
                     variant = existing;
                 }
             }
-            
+
             // Add run to variant
             variant.getRuns().add(new Run(project.getId(), sRun));
-            
+
             // Create VariantRunData
             VariantRunData vrd = new VariantRunData(new VariantRunDataId(project.getId(), sRun, variantId));
             vrd.setKnownAlleles(variant.getKnownAlleles());
@@ -623,7 +662,7 @@ public class IntertekImport extends AbstractGenotypeImport<FileImportParameters>
             vrd.setPositions(variant.getPositions());
             vrd.setReferencePosition(variant.getReferencePosition());
             vrd.setSynonyms(variant.getSynonyms());
-            
+
             // Track the variant
             if (variant.getKnownAlleles().size() > 0) {
                 if (!unsavedVariants.contains(variant)) {
@@ -632,7 +671,7 @@ public class IntertekImport extends AbstractGenotypeImport<FileImportParameters>
                 if (!unsavedRuns.contains(vrd)) {
                     unsavedRuns.add(vrd);
                 }
-                
+
                 for (Integer asmId : assemblyIDs) {
                     ReferencePosition rp = variant.getReferencePosition(asmId);
                     project.getContigs(asmId).add(rp == null ? "" : rp.getSequence());
@@ -640,23 +679,23 @@ public class IntertekImport extends AbstractGenotypeImport<FileImportParameters>
                 project.getVariantTypes().add(variant.getType());
                 project.getAlleleCounts().add(variant.getKnownAlleles().size());
             }
-            
+
             workerProcessed++;
-            
+
             if (workerProcessed % chunkSize == 0 && !unsavedVariants.isEmpty()) {
-                persistVariantsAndGenotypes(!existingVariantIDs.isEmpty(), mongoTemplate, 
-                    unsavedVariants, unsavedRuns);
+                VcfImport.persistVariantsAndGenotypesV3(!existingVariantIDs.isEmpty(), mongoTemplate,
+                    unsavedVariants, unsavedRuns, projectID, runIndex);
                 progress.setCurrentStepProgress(totalWrittenVariantCount.addAndGet(unsavedVariants.size()));
-                
+
                 unsavedVariants = new HashSet<>();
                 unsavedRuns = new HashSet<>();
             }
         }
-        
+
         // Save remaining
         if (!unsavedVariants.isEmpty()) {
-            persistVariantsAndGenotypes(!existingVariantIDs.isEmpty(), mongoTemplate, 
-                unsavedVariants, unsavedRuns);
+            VcfImport.persistVariantsAndGenotypesV3(!existingVariantIDs.isEmpty(), mongoTemplate,
+                unsavedVariants, unsavedRuns, projectID, runIndex);
             progress.setCurrentStepProgress(totalWrittenVariantCount.addAndGet(unsavedVariants.size()));
         }
     }

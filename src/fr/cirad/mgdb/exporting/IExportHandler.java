@@ -183,7 +183,8 @@ public interface IExportHandler
 	}
 	
 	public static int computeQueryChunkSize(MongoTemplate mongoTemplate, long nExportedVariantCount) {
-		Number avgObjSize = (Number) mongoTemplate.getDb().runCommand(new Document("collStats", mongoTemplate.getCollectionName(VariantRunData.class))).get("avgObjSize");
+		// Number avgObjSize = (Number) mongoTemplate.getDb().runCommand(new Document("collStats", mongoTemplate.getCollectionName(VariantRunData.class))).get("avgObjSize");
+		Number avgObjSize = (Number) 1;
 		return (int) Math.max(1, Math.min(nExportedVariantCount / 20 /* no more than 5% at a time */, (nMaxChunkSizeInMb*1024*1024 / avgObjSize.doubleValue())));
 	}
 	

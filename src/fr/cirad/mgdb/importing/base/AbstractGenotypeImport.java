@@ -80,12 +80,12 @@ public abstract class AbstractGenotypeImport<T extends ImportParameters> {
     protected Map<String /* individual or sample name */, GenotypingSample> m_providedIdToSampleMap = null;
     protected Map<String /* individual or sample name */, Callset> m_providedIdToCallsetMap = null;
     protected List<Callset> m_callsets = new ArrayList<>();
-    
+
     protected String brapiEndPointUriForNamingIndividuals;
     protected String brapiEndPointTokenForNamingIndividuals;
-    
+
     private HashMap<String, String> preloadedSampleToIndividualMap = null;
-    
+
     public void setBrapiEndPointForNamingIndividuals(String brapiEndPointUri, String brapiEndPointToken) {
         brapiEndPointUriForNamingIndividuals = !brapiEndPointUri.endsWith("/") ? brapiEndPointUri + "/" : brapiEndPointUri;
         brapiEndPointTokenForNamingIndividuals = "".equals(brapiEndPointToken) ? null : brapiEndPointToken;
@@ -102,7 +102,7 @@ public abstract class AbstractGenotypeImport<T extends ImportParameters> {
         try {
             if (progress != null)
                 progress.setProgressDescription("Getting germplasmDbId for " + sampleDbIds.size() + " samples from " + brapiEndPointUriForNamingIndividuals);
-            
+
             preloadedSampleToIndividualMap = new HashMap<>();
             if (brapiEndPointUriForNamingIndividuals.endsWith("/v1/"))
                 for (BrapiSample sp : IndividualMetadataImport.readBrapiV1Samples(brapiEndPointUriForNamingIndividuals, brapiEndPointTokenForNamingIndividuals, sampleDbIds, null))
@@ -158,13 +158,13 @@ public abstract class AbstractGenotypeImport<T extends ImportParameters> {
 
         if (sSeq != null && nStartPos != null)
             result.add(sType + "¤" + sSeq + "¤" + nStartPos);
-        
+
         if (result.isEmpty())
             throw new Exception("Not enough info provided to build identification strings");
-        
+
         return result;
     }
-    
+
     static public HashMap<String, String> readSampleMappingFile(URL sampleMappingFileURL) throws Exception {
         if (sampleMappingFileURL == null)
             return null;
@@ -191,7 +191,7 @@ public abstract class AbstractGenotypeImport<T extends ImportParameters> {
     public boolean haveSamplesBeenPersisted() {
         return m_fSamplesPersisted;
     }
-    
+
     protected Assembly createAssemblyIfNeeded(MongoTemplate mongoTemplate, String assemblyName) throws Exception {
         Assembly assembly = null;
         if (!mongoTemplate.findDistinct(new Query(), GenotypingProject.FIELDNAME_SEQUENCES, GenotypingProject.class, String.class).isEmpty()) {    // working on an existing old-style (assembly-less) database
@@ -212,7 +212,7 @@ public abstract class AbstractGenotypeImport<T extends ImportParameters> {
         }
         return assembly;
     }
-    
+
     protected static HashMap<String, String> buildSynonymToIdMapForExistingVariants(MongoTemplate mongoTemplate, boolean fIncludeRandomObjectIDs, Integer assemblyId) throws Exception
     {
         HashMap<String, String> existingVariantIDs = new HashMap<>();
@@ -270,7 +270,7 @@ public abstract class AbstractGenotypeImport<T extends ImportParameters> {
         boolean fLooksLikePreprocessedVariantList = firstId != null && firstId.endsWith("001") && mongoTemplate.count(new Query(Criteria.where("_id").not().regex("^\\*?" + StringUtils.getCommonPrefix(new String[] {firstId, lastId}) + ".*")), VariantData.class) == 0;
         return !fLooksLikePreprocessedVariantList;
     }
-    
+
     public void persistVariantsAndGenotypes(boolean fDBAlreadyContainsVariants, MongoTemplate mongoTemplate, Collection<VariantData> unsavedVariants, Collection<VariantRunData> unsavedRuns) throws InterruptedException {
         Thread vdAsyncThread = new Thread() {
             public void run() {
@@ -287,7 +287,7 @@ public abstract class AbstractGenotypeImport<T extends ImportParameters> {
             }
         };
         vdAsyncThread.start();
-        
+
         try {
             mongoTemplate.insert(unsavedRuns, VariantRunData.class);
         } catch (DuplicateKeyException dke) {
@@ -296,7 +296,7 @@ public abstract class AbstractGenotypeImport<T extends ImportParameters> {
                 mongoTemplate.save(vrd);
             }
         }
-        
+
         // Just in case, wait for variants to complete
         vdAsyncThread.join();
     }
@@ -336,6 +336,7 @@ public abstract class AbstractGenotypeImport<T extends ImportParameters> {
             case 0:
                 throw new IllegalStateException("Unexpected error: requested type of VariantContext with no alleles!");
             case 1:
+                // note that this doesn't require a reference allele.  You can be monomorphic independent of having a reference allele
                 return Type.NO_VARIATION;
             default:
                 return determinePolymorphicType(alleles);
@@ -415,6 +416,14 @@ public abstract class AbstractGenotypeImport<T extends ImportParameters> {
                     createdProject = project.getId();
             }
 
+			List<String> runs = project.getRuns();
+			if (!runs.contains(params.getRun())) {
+				runs.add(params.getRun());
+				mongoTemplate.save(project);
+			}
+			int runIndex = runs.indexOf(params.getRun());
+
+            // specific part
             long count = doImport(params, mongoTemplate, project, progress, createdProject);
 
             if (!project.getRuns().contains(params.getRun()))
@@ -447,7 +456,7 @@ public abstract class AbstractGenotypeImport<T extends ImportParameters> {
     }
 
     // ============ NEW: Shared Helper Methods for Variant Resolution ============
-    
+
     /**
      * Helper class for resolved variant information
      */
@@ -456,7 +465,7 @@ public abstract class AbstractGenotypeImport<T extends ImportParameters> {
         public final String sequence;
         public final Long bpPosition;
         public final Type variantType;
-        
+
         public ResolvedVariantInfo(String canonicalVariantId, String sequence, Long bpPosition, Type variantType) {
             this.canonicalVariantId = canonicalVariantId;
             this.sequence = sequence;
@@ -475,7 +484,7 @@ public abstract class AbstractGenotypeImport<T extends ImportParameters> {
             HashMap<String, String> existingVariantIDs,
             Map<String, Type> nonSnpVariantTypeMap,
             boolean importUnknownVariants) {
-        
+
         // Extract sequence and position
         String sequence = null;
         Long bpPosition = null;
@@ -495,15 +504,15 @@ public abstract class AbstractGenotypeImport<T extends ImportParameters> {
                 }
             }
         }
-        
+
         // Get variant type
         Type variantType = nonSnpVariantTypeMap.get(providedVariantId);
         String variantTypeStr = variantType == null ? Type.SNP.toString() : variantType.toString();
-        
+
         // Check if we have a valid ID
         boolean hasValidId = providedVariantId != null && !providedVariantId.isEmpty() && !".".equals(providedVariantId);
         List<String> idAndSynonyms = hasValidId ? Arrays.asList(new String[]{providedVariantId}) : null;
-        
+
         // Try to resolve to existing variant
         String canonicalId = null;
         try {
@@ -521,14 +530,14 @@ public abstract class AbstractGenotypeImport<T extends ImportParameters> {
             // No position and no ID
             LOG.debug("Cannot build identification strings for " + providedVariantId + ": " + e.getMessage());
         }
-        
+
         // --- IMPORT UNKNOWN VARIANTS LOGIC ---
         if (canonicalId == null) {
             if (!importUnknownVariants) {
                 // Unknown variants are NOT allowed - return null for canonicalId
                 return new ResolvedVariantInfo(null, sequence, bpPosition, variantType);
             }
-            
+
             // Unknown variants ARE allowed - generate a consistent ID for routing
             if (sequence != null && bpPosition != null) {
                 // Use position as the basis for consistent routing
@@ -540,7 +549,7 @@ public abstract class AbstractGenotypeImport<T extends ImportParameters> {
                 canonicalId = "new_" + System.nanoTime();
             }
         }
-        
+
         return new ResolvedVariantInfo(canonicalId, sequence, bpPosition, variantType);
     }
 
@@ -568,7 +577,7 @@ public abstract class AbstractGenotypeImport<T extends ImportParameters> {
         boolean fDbAlreadyContainedIndividuals = mongoTemplate.findOne(new Query(), Individual.class) != null;
         boolean fDbAlreadyContainedSamples = mongoTemplate.findOne(new Query(), GenotypingSample.class) != null;       
         attemptPreloadingIndividuals(biologicalMaterialIDs, progress);
-
+		int indexOfCallsetInsideGenotypeArray = 0;
         for (String bioEntityID : biologicalMaterialIDs) {
             GenotypingSample sample = null;
             if (sampleToIndividualMap != null) {    // provided bio-entities are actually samples
@@ -604,9 +613,10 @@ public abstract class AbstractGenotypeImport<T extends ImportParameters> {
 
             m_providedIdToSampleMap.put(bioEntityID, sample);  // add a sample for this individual to the project
             int callsetId = AutoIncrementCounter.getNextSequence(mongoTemplate, MongoTemplateManager.getMongoCollectionName(Callset.class));
-            Callset cs = new Callset(callsetId, sample, projId, sRun);
+            Callset cs = new Callset(callsetId, sample, projId, sRun,indexOfCallsetInsideGenotypeArray);
             sample.getCallSets().add(cs);
             m_providedIdToCallsetMap.put(bioEntityID, cs);
+			indexOfCallsetInsideGenotypeArray++;
         }
 
         insertNewCallSetsSamplesIndividuals(mongoTemplate, indsToAdd, samplesToAdd, samplesToUpdate);
@@ -635,7 +645,7 @@ public abstract class AbstractGenotypeImport<T extends ImportParameters> {
         List<GenotypingSample> samplesToImport = new ArrayList<>(samplesToAdd);
         for (int j=0; j<Math.ceil((float) samplesToAdd.size() / importChunkSize); j++)
             mongoTemplate.insert(samplesToImport.subList(j * importChunkSize, Math.min(samplesToImport.size(), (j + 1) * importChunkSize)), GenotypingSample.class);
-        
+
         List<Individual> individualsToImport = new ArrayList<>(indsToAdd);
         for (int j=0; j<Math.ceil((float) individualsToImport.size() / importChunkSize); j++)
             mongoTemplate.insert(individualsToImport.subList(j * importChunkSize, Math.min(individualsToImport.size(), (j + 1) * importChunkSize)), Individual.class);
@@ -645,14 +655,14 @@ public abstract class AbstractGenotypeImport<T extends ImportParameters> {
     }
 
     public void updateExistingVrdAlleles(MongoTemplate mongoTemplate, int initialAlleleCount, VariantData variant) {
-        if (variant.getKnownAlleles().size() > initialAlleleCount) {
-            new Thread() {
-                public void run() {
-                    UpdateResult existingVrdAlleleUpdates = mongoTemplate.updateMulti(new Query(Criteria.where("_id." + VariantRunDataId.FIELDNAME_VARIANT_ID).is(variant.getId())), new Update().set(VariantData.FIELDNAME_KNOWN_ALLELES, variant.getKnownAlleles()), VariantRunData.class);
-                    if (existingVrdAlleleUpdates.getModifiedCount() > 0)
-                        LOG.debug("Updated " + existingVrdAlleleUpdates.getModifiedCount() + " existing VRD entries for variant " + variant.getId() + " to reflect new known alleles");
-                }
-            }.start();
-        }
+	    if (variant.getKnownAlleles().size() > initialAlleleCount) {
+	    	new Thread() {
+	    		public void run() {
+			    	UpdateResult existingVrdAlleleUpdates = mongoTemplate.updateFirst(new Query(Criteria.where("_id").is(variant.getId())), new Update().set(VariantData.FIELDNAME_KNOWN_ALLELES, variant.getKnownAlleles()), VariantRunData.class);
+			    	if (existingVrdAlleleUpdates.getModifiedCount() > 0)
+						LOG.debug("Updated " + existingVrdAlleleUpdates.getModifiedCount() + " existing VRD entries for variant " + variant.getId() + " to reflect new known alleles");
+	    		}
+	    	}.start();
+	    }
     }
 }

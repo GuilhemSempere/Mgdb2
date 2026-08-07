@@ -16,10 +16,10 @@
  *******************************************************************************/
 package fr.cirad.mgdb.model.mongo.maintypes;
 
-import java.util.HashMap;
-import java.util.List;
-import java.util.NoSuchElementException;
+import java.util.*;
 
+import fr.cirad.mgdb.model.mongo.subtypes.VariantRunDataV3Id;
+import org.bson.codecs.pojo.annotations.BsonIgnore;
 import org.bson.codecs.pojo.annotations.BsonProperty;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.annotation.TypeAlias;
@@ -54,18 +54,68 @@ public class VariantRunData extends AbstractVariantData
 
 	/** The id. */
 	@BsonProperty("_id")
-	@Id
 	private VariantRunDataId id;
 
+	/** The id. */
+	@BsonProperty("_idv")
+	@Id
+	private String idv;
+
 	/** The sample genotypes. */
-	@BsonProperty(FIELDNAME_SAMPLEGENOTYPES)
-	@Field(FIELDNAME_SAMPLEGENOTYPES)
+	@BsonIgnore
 	private HashMap<Integer, SampleGenotype> sampleGenotypes = new HashMap<Integer, SampleGenotype>();
+
+	/** The genotypes array */
+	@BsonProperty("sp")
+	@Field("sp")
+	private List<List<List<Integer>>> genotypeArray = new ArrayList<>();
+
+	public List<List<List<Integer>>> getGenotypeArray() {
+		return genotypeArray;
+	}
+
+	public void setGenotypeArray(List<List<List<Integer>>> genotypeArray) {
+		this.genotypeArray = genotypeArray;
+	}
+
+	/** The genotypes annotation array */
+	@BsonProperty("ai")
+	@Field("ai")
+	private List<List<List<HashMap<String, Object>>>> genotypeAnnotationArray = new ArrayList<>();
+
+	public List<List<List<HashMap<String, Object>>>>getGenotypeAnnotationArray() {
+		return genotypeAnnotationArray;
+	}
+
+	public void setGenotypeAnnotationArray (List<List<List<HashMap<String, Object>>>> genotypeAnnotationArray) {
+		this.genotypeAnnotationArray = genotypeAnnotationArray;
+	}
+
+	/** The variant run annotation array */
+	@BsonProperty("vra")
+	@Field("vra")
+	private List<List<HashMap<String, Object>>> variantRunAnnotation = new ArrayList<>();
+
+	public List<List<HashMap<String, Object>>> getVariantRunAnnotation() {
+		return variantRunAnnotation;
+	}
+
+	public void setVariantRunAnnotation (List<List<HashMap<String, Object>>> variantRunAnnotation) {
+		this.variantRunAnnotation = variantRunAnnotation;
+	}
+
 
 	/**
 	 * Instantiates a new variant run data.
 	 */
 	public VariantRunData() {
+	}
+
+	/**
+	 * Instantiates a new variant run data.
+	 */
+	public VariantRunData(String id) {
+		this.idv=id;
 	}
 
 	/**
@@ -87,6 +137,16 @@ public class VariantRunData extends AbstractVariantData
 	}
 
 	/**
+	 * Gets the id.
+	 *
+	 * @return the id
+	 */
+
+	public String getIdV3() {
+		return idv;
+	}
+
+	/**
 	 * Sets the id.
 	 *
 	 * @param id the new id
@@ -94,10 +154,19 @@ public class VariantRunData extends AbstractVariantData
 	public void setId(VariantRunDataId id) {
 		this.id = id;
 	}
+
+	/**
+	 * Sets the id.
+	 *
+	 * @param id the new id
+	 */
+	public void setId(String id) {
+		this.idv = id;
+	}
 	
         @Override
 	public String getVariantId() {
-		return getId().getVariantId();
+		return getIdV3();
 	}
 
 	/**
@@ -139,25 +208,25 @@ public class VariantRunData extends AbstractVariantData
 		if (o == null || !(o instanceof VariantRunData))
 			return false;
 		
-		return getId().equals(((VariantRunData)o).getId());
+		return getIdV3().equals(((VariantRunData)o).getIdV3());
 	}
     
 	@Override
 	public int hashCode()	// thanks to this overriding, HashSet.contains will find such objects based on their ID
 	{
-		if (getId() == null)
+		if (getIdV3() == null)
 			return super.hashCode();
 
-		return getId().hashCode();
+		return getIdV3().hashCode();
 	}
 	
 	@Override
 	public String toString()
 	{
-		if (getId() == null)
+		if (getIdV3() == null)
 			return super.toString();
 
-		return getId().toString();
+		return getIdV3().toString();
 	}
 	
     /**
