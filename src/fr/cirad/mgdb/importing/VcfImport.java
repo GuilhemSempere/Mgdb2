@@ -1135,6 +1135,7 @@ public class VcfImport extends AbstractGenotypeImport<VCFParameters> {
                 genotypeAnnotationArray.get(projectIndex).get(runIndex).add(null);
                 continue;
             }
+            Map<String, Integer> genotypeCodeCache = new HashMap<>(); // FIXME: Variable lost after the merge.
 
             List<String> gtAllelesAsStrings = genotype.getAlleles().stream().map(allele -> allele.getBaseString()).collect(Collectors.toList());
             int numericCode = GenotypeCodeManager.createGenotypeEncoding(gtAllelesAsStrings, knownAlleleStringToIndexMap, mongoTemplate, genotypeCodeCache);

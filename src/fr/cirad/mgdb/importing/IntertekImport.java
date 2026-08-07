@@ -152,6 +152,7 @@ public class IntertekImport extends AbstractGenotypeImport<FileImportParameters>
     protected long doImport(FileImportParameters params, MongoTemplate mongoTemplate, GenotypingProject project, ProgressIndicator progress, Integer createdProject) throws Exception {
         String sRun = params.getRun();
         int projectIndex = project.getId();
+        int runIndex = project.getRuns().indexOf(sRun) == -1 ? project.getRuns().size() : project.getRuns().indexOf(sRun);
         String assemblyName = params.getAssemblyName();
         Map<String, String> sampleToIndividualMap = params.getSampleToIndividualMap();
         boolean fSkipMonomorphic = params.isSkipMonomorphic();
@@ -234,7 +235,9 @@ public class IntertekImport extends AbstractGenotypeImport<FileImportParameters>
                             progress,
                             existingVariantIDs,
                             totalWrittenVariantCount,
-                            sharedVariantCache
+                            sharedVariantCache,
+                            project.getId(),
+                            runIndex
                         );
                     } catch (Throwable t) {
                         progress.setError("Worker " + workerIndex + " failed: " + t.getMessage());
@@ -259,7 +262,6 @@ public class IntertekImport extends AbstractGenotypeImport<FileImportParameters>
             boolean dataPart = false;
             String[] values;
             int i = 0;
-            int runIndex = project.getRuns().indexOf(sRun) == -1 ? project.getRuns().size() : project.getRuns().indexOf(sRun);
 
 
 
@@ -472,8 +474,7 @@ public class IntertekImport extends AbstractGenotypeImport<FileImportParameters>
 
 
 
-                        addVariantRunToChunk(currentVariantId, fSkipMonomorphic, existingIds, variantIdsToSave, variantRunsChunk, variantsChunk,
-                                sampleGenotypes, variants, project, sRun, assemblyIDs, genotypeArray,genotypeArrayAnnotationArray);
+
                         sampleGenotypes = new HashMap<>();
                         genotypeArray = new ArrayList<>();
                         genotypeArray.add(new ArrayList<>());
@@ -483,11 +484,7 @@ public class IntertekImport extends AbstractGenotypeImport<FileImportParameters>
                         genotypeArrayAnnotationArray.add(new ArrayList<>());
                         genotypeArrayAnnotationArray.get(0).add(new ArrayList<>());
 
-                        if (variantRunsChunk.size() == nNumberOfVariantRunsToSaveAtOnce) {
-                            //save variantRuns
-                            VcfImport.saveChunkV3(variantsChunk, variantRunsChunk, existingVariantIDs, mongoTemplate, progress, saveService,project.getId(),runIndex);
-                            variantRunsChunk = new HashSet<>();
-                        }
+
                     }
                     currentVariantId = variantId;
 

@@ -72,7 +72,7 @@ public abstract class AbstractGenotypeImport<T extends ImportParameters> {
 
     protected static final int nMaxChunkSize = 30000;
 
-    private boolean m_fAllowDbDropIfNoGenotypingData = true;
+    protected boolean m_fAllowDbDropIfNoGenotypingData = true;
     public boolean m_fCloseContextAfterImport = false;
     public boolean m_fAllowNewAssembly = true;
     private boolean m_fSamplesPersisted = false;

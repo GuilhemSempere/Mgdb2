@@ -17,26 +17,13 @@
 package fr.cirad.mgdb.model.mongo.subtypes;
 
 import java.io.OutputStream;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collection;
-import java.util.Comparator;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.LinkedHashSet;
-import java.util.List;
-import java.util.Map;
-import java.util.NoSuchElementException;
-import java.util.TreeMap;
-import java.util.TreeSet;
+import java.util.*;
 import java.util.stream.Collectors;
 
 import fr.cirad.mgdb.model.mongo.maintypes.*;
-import htsjdk.samtools.util.Tuple;
 import org.apache.commons.lang3.StringUtils;
 import org.apache.log4j.Logger;
 import org.bson.codecs.pojo.annotations.BsonProperty;
-import org.mortbay.log.Log;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.mapping.Field;
 
@@ -686,74 +673,8 @@ abstract public class AbstractVariantData
 
 		return result.length() > 0 ? result.toString() : null;
 	}
+
     /**
-     * Overload of toVariantContext for VariantRunDataV3 (array-based numeric genotype storage).
-     * Decodes numeric genotype codes back to VCF allele index strings before delegating
-     * to the standard toVariantContext pipeline via synthetic SampleGenotype objects.
-     *
-     * @param mongoTemplate     the mongoTemplate
-     * @param runsV3            the V3 runs
-     * @param nAssemblyId       ID of the assembly to work with
-     * @param exportVariantIDs  the export variant ids
-     * @param callSetsToExport  overall list of samples involved in the export
-     * @param individualPositions map providing the index at which each individual must appear
-     * @param individualsByPop  List of individual IDs for each group
-     * @param workWithSamples   whether to work with samples or individuals
-     * @param annotationFieldThresholds the annotation field thresholds for each group
-     * @param previousPhasingIds the previous phasing ids
-     * @param warningOS         the warning file writer
-     * @param synonym           the synonym
-     * @return the variant context
-     * @throws Exception the exception
-     */
-    public VariantContext toVariantContextV3(MongoTemplate mongoTemplate, List<VariantRunDataV3> runsV3, Integer nAssemblyId, boolean exportVariantIDs, Collection<Callset> callSetsToExport, Map<String, Integer> individualPositions, Map<String, Collection<String>> individualsByPop, boolean workWithSamples, Map<String, HashMap<String, Float>> annotationFieldThresholds, HashMap<Integer, Object> previousPhasingIds, OutputStream warningOS, String synonym) throws Exception {
-        // convert each VariantRunDataV3 into a synthetic VariantRunData with decoded string genotype codes
-        List<VariantRunData> syntheticRuns = new ArrayList<>();
-
-        for (VariantRunDataV3 vrdV3 : runsV3) {
-            // find the project index and run index from the sp array
-            List<List<List<Integer>>> sp = vrdV3.getSampleGenotypes();
-            if (sp == null) continue;
-
-            for (int projectIndex = 0; projectIndex < sp.size(); projectIndex++) {
-                List<List<Integer>> projectRuns = sp.get(projectIndex);
-                if (projectRuns == null) continue;
-
-                for (int runIndex = 0; runIndex < projectRuns.size(); runIndex++) {
-                    List<Integer> callsetCodes = projectRuns.get(runIndex);
-                    if (callsetCodes == null) continue;
-
-                    // build a synthetic VariantRunData carrying decoded SampleGenotype objects
-                    VariantRunData syntheticRun = new VariantRunData(new VariantRunDataId(projectIndex, String.valueOf(runIndex), vrdV3.getId().getVariantId()));
-                    syntheticRun.setKnownAlleles(vrdV3.getKnownAlleles());
-                    syntheticRun.setPositions(vrdV3.getPositions());
-                    syntheticRun.setReferencePosition(vrdV3.getReferencePosition());
-                    syntheticRun.setType(vrdV3.getType());
-                    syntheticRun.setSynonyms(vrdV3.getSynonyms());
-
-                    // map callset index → callset id using callSetsToExport order
-                    List<Callset> orderedCallsets = new ArrayList<>(callSetsToExport);
-                    for (int callsetIndex = 0; callsetIndex < callsetCodes.size(); callsetIndex++) {
-                        Integer code = callsetCodes.get(callsetIndex);
-                        if (code == null) continue;
-
-                        if (callsetIndex >= orderedCallsets.size()) continue;
-                        Callset cs = orderedCallsets.get(callsetIndex);
-
-                        String gtString = decodeGenotypeCode(code, mongoTemplate);
-                        SampleGenotype sg = new SampleGenotype(gtString);
-                        syntheticRun.getSampleGenotypes().put(cs.getId(), sg);
-                    }
-
-                    syntheticRuns.add(syntheticRun);
-                }
-            }
-        }
-
-        return toVariantContext(mongoTemplate, syntheticRuns, nAssemblyId, exportVariantIDs, callSetsToExport, individualPositions, individualsByPop, workWithSamples, annotationFieldThresholds, previousPhasingIds, warningOS, synonym);
-    }
-		
-	/**
 	 * To variant context.
 	 *
 	 * @param mongoTemplate the mongoTemplate
@@ -807,7 +728,7 @@ abstract public class AbstractVariantData
                             continue;
                         String cuurentRun = projectRuns.get(runIdx);
                         for (Callset cs : callSetsToExport) {
-                            if (cs.getProjectId() != projectIdx || cs.getRun() != cuurentRun)
+                            if (cs.getProjectId() != projectIdx || !Objects.equals(cs.getRun(), cuurentRun))
                                 continue;
                             if (sRefAllele == null) {
                                 knownAlleleCount = run.getKnownAlleles().size();
