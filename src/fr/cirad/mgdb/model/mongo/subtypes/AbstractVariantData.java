@@ -693,7 +693,7 @@ abstract public class AbstractVariantData
 	 */
 	public VariantContext toVariantContext(MongoTemplate mongoTemplate, Collection<VariantRunData> runs, Integer nAssemblyId, boolean exportVariantIDs, Collection<Callset> callSetsToExport, Map<String, Integer> individualPositions, Map<String /*population*/, Collection<String>> individualsByPop, boolean workWithSamples, Map<String /*population*/, HashMap<String, Float>> annotationFieldThresholds, HashMap<Integer, Object> previousPhasingIds, OutputStream warningOS, String synonym) throws Exception
 	{
-        // FIXME
+        // FIXME: take the project list as a paramter to the method instead
         int projectIndex = 1;
         int runIndex = 0;
 		ArrayList<Genotype> genotypes = new ArrayList<Genotype>();

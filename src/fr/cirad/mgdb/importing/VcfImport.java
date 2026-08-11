@@ -727,7 +727,7 @@ public class VcfImport extends AbstractGenotypeImport<VCFParameters> {
 
         HashMap<String, Object> newVariantRunAnnotationArray = null;
         if (vrd.getVariantRunAnnotation()!=null && !vrd.getVariantRunAnnotation().isEmpty()) {
-            newVariantRunAnnotationArray = vrd.getVariantRunAnnotation().get(0).get(0);
+            newVariantRunAnnotationArray = vrd.getVariantRunAnnotation().get(projectIndex).get(runIndex);
         }
 
         Map<String, Object> newVariantAnnotation = vrd.getVariantAnnotation();
@@ -1194,10 +1194,13 @@ public class VcfImport extends AbstractGenotypeImport<VCFParameters> {
                 bVariantHasGenotypeAnnotations = true;
                 additionalInformationForCallset.put(VariantData.FIELD_FILTERS, genotype.getFilters());
             }
-            if (genotype.isCalled() && !additionalInformationForCallset.isEmpty()) {
+            // always add an entry (null when there is nothing to store) so this list stays aligned with genotypeArray
+            if (!additionalInformationForCallset.isEmpty()) {
                 bVariantHasGenotypeAnnotations = true;
                 genotypeAnnotationArray.get(projectIndex).get(runIndex).add(additionalInformationForCallset);
             }
+            else
+                genotypeAnnotationArray.get(projectIndex).get(runIndex).add(null);
 //            Comparable phasedGroup = phasingGroup.get(sIndOrSpId);
 //            if (phasedGroup == null || (!isPhased && !genotype.isNoCall()))
 //                phasingGroup.put(sIndOrSpId, variantToFeed.getId());
