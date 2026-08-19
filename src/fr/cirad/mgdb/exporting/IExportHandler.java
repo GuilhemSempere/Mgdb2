@@ -34,10 +34,11 @@ import java.util.stream.Collectors;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipOutputStream;
 
-import javax.ejb.ObjectNotFoundException;
+import jakarta.ejb.ObjectNotFoundException;
 
-import org.apache.log4j.Logger;
 import org.bson.Document;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.data.mongodb.core.MongoTemplate;
 
 import com.mongodb.client.MongoCollection;
@@ -65,8 +66,8 @@ public interface IExportHandler
 {
 	
 	/** The Constant LOG. */
-	static final Logger LOG = Logger.getLogger(IExportHandler.class);
-	
+	static final Logger LOG = LoggerFactory.getLogger(IExportHandler.class);
+
 	static final Collation collationObj = Collation.builder().numericOrdering(true).locale("en_US").build();
 	
 	/** The Constant nMaxChunkSizeInMb. */

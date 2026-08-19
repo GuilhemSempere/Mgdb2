@@ -31,7 +31,8 @@ import java.util.Scanner;
 import java.util.concurrent.atomic.AtomicReference;
 
 import org.apache.commons.lang3.StringUtils;
-import org.apache.log4j.Logger;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.brapi.v2.model.Sample;
 import org.bson.Document;
 import org.springframework.dao.DuplicateKeyException;
@@ -68,7 +69,7 @@ import jhi.brapi.api.samples.BrapiSample;
 public abstract class AbstractGenotypeImport<T extends ImportParameters> {
     protected String m_processID;
 
-    private static final Logger LOG = Logger.getLogger(AbstractGenotypeImport.class);
+    private static final Logger LOG = LoggerFactory.getLogger(AbstractGenotypeImport.class);
 
     protected static final int nMaxChunkSize = 30000;
 

@@ -28,7 +28,8 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
-import org.apache.log4j.Logger;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * parse an .obo file to get ontology Id and name
@@ -38,7 +39,7 @@ import org.apache.log4j.Logger;
  */
 public class OntologyImport {
 
-    private static final Logger LOG = Logger.getLogger(OntologyImport.class);
+    private static final Logger LOG = LoggerFactory.getLogger(OntologyImport.class);
 
     /**
      * @param args the command line arguments

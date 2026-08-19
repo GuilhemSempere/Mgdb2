@@ -36,7 +36,8 @@ import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
 import org.apache.commons.lang.StringUtils;
-import org.apache.log4j.Logger;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.bson.Document;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.mapping.Field;
@@ -66,7 +67,7 @@ public class Helper {
     /**
      * The Constant LOG.
      */
-    private static final Logger LOG = Logger.getLogger(Helper.class);
+    private static final Logger LOG = LoggerFactory.getLogger(Helper.class);
 
     static public final String ID_SEPARATOR = "§";
     

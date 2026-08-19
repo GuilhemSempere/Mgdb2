@@ -19,10 +19,11 @@ package fr.cirad.tools.security.base;
 import java.io.UnsupportedEncodingException;
 import java.util.Collection;
 
-import javax.ejb.ObjectNotFoundException;
-import javax.servlet.http.HttpServletRequest;
+import jakarta.ejb.ObjectNotFoundException;
+import jakarta.servlet.http.HttpServletRequest;
 
-import org.apache.log4j.Logger;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -31,7 +32,7 @@ import org.springframework.stereotype.Component;
 @Component
 public abstract class AbstractTokenManager {
 
-    static private final Logger LOG = Logger.getLogger(AbstractTokenManager.class);
+    static private final Logger LOG = LoggerFactory.getLogger(AbstractTokenManager.class);
         
 	static public final String ENTITY_PROJECT = "project";
 	static public final String ENTITY_RUN = "project.run";

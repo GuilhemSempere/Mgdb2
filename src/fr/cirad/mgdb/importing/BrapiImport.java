@@ -40,12 +40,13 @@ import java.util.TreeSet;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
-import javax.servlet.http.HttpServletResponse;
+import jakarta.servlet.http.HttpServletResponse;
 
 import fr.cirad.mgdb.model.mongo.maintypes.*;
 import org.apache.commons.io.FileUtils;
 import org.apache.commons.lang.StringUtils;
-import org.apache.log4j.Logger;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.bson.types.ObjectId;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.dao.OptimisticLockingFailureException;
@@ -91,7 +92,7 @@ import retrofit2.Response;
 public class BrapiImport extends STDVariantImport {
 	
 	/** The Constant LOG. */
-	private static final Logger LOG = Logger.getLogger(VariantData.class);
+	private static final Logger LOG = LoggerFactory.getLogger(VariantData.class);
 
 	private static final String unphasedGenotypeSeparator = "/"; 
 	private static String phasedGenotypeSeparator = "|";

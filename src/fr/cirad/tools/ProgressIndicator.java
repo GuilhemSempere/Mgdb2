@@ -27,14 +27,15 @@ import java.util.Locale;
 import java.util.Timer;
 import java.util.TimerTask;
 
-import org.apache.log4j.Logger;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /**
  * The Class ProgressIndicator.
  */
 public class ProgressIndicator
 {
-	private static final Logger LOG = Logger.getLogger(ProgressIndicator.class);
+	private static final Logger LOG = LoggerFactory.getLogger(ProgressIndicator.class);
 	
 	static private final HashMap<String, ProgressIndicator> progressIndicators = new HashMap<String, ProgressIndicator>();
 	

@@ -38,7 +38,8 @@ import org.springframework.dao.OptimisticLockingFailureException;
 import fr.cirad.mgdb.importing.parameters.FileImportParameters;
 import fr.cirad.mgdb.model.mongo.maintypes.*;
 import fr.cirad.tools.ProgressIndicator;
-import org.apache.log4j.Logger;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.broadinstitute.gatk.utils.codecs.hapmap.RawHapMapCodec;
 import org.broadinstitute.gatk.utils.codecs.hapmap.RawHapMapFeature;
 import org.bson.types.ObjectId;
@@ -65,7 +66,7 @@ import fr.cirad.mgdb.model.mongo.maintypes.GenotypeCodeManager;
 
 public class HapMapImport extends AbstractGenotypeImport<FileImportParameters> {
 
-    private static final Logger LOG = Logger.getLogger(VariantData.class);
+    private static final Logger LOG = LoggerFactory.getLogger(VariantData.class);
 
     private int nNumProc = Runtime.getRuntime().availableProcessors();
 

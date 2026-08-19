@@ -31,7 +31,8 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
 
-import org.apache.log4j.Logger;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.data.annotation.TypeAlias;
 import org.springframework.data.mongodb.core.mapping.Document;
 import org.springframework.data.mongodb.core.mapping.Field;
@@ -118,7 +119,7 @@ public class DBVCFHeader
 	private Map<String, VCFSimpleHeaderLine> mMetaData = new LinkedHashMap<>();
 
 	/** The Constant LOG. */
-	private static final Logger LOG = Logger.getLogger(DBVCFHeader.class);
+	private static final Logger LOG = LoggerFactory.getLogger(DBVCFHeader.class);
 	
 	/**
 	 * Instantiates a new DBVCF header.

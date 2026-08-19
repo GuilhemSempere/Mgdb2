@@ -22,7 +22,8 @@ import java.io.FileReader;
 import java.text.NumberFormat;
 import java.util.List;
 
-import org.apache.log4j.Logger;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.context.support.GenericXmlApplicationContext;
 import org.springframework.dao.OptimisticLockingFailureException;
 import org.springframework.data.mongodb.core.MongoTemplate;
@@ -43,7 +44,7 @@ import fr.cirad.tools.mongo.MongoTemplateManager;
 public class ReferencePositionImport {
 	
 	/** The Constant LOG. */
-	private static final Logger LOG = Logger.getLogger(ReferencePositionImport.class);
+	private static final Logger LOG = LoggerFactory.getLogger(ReferencePositionImport.class);
 	
 	/** The Constant twoDecimalNF. */
 	static private final NumberFormat twoDecimalNF = NumberFormat.getInstance();

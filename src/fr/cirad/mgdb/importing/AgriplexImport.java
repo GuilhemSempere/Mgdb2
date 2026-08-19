@@ -32,7 +32,8 @@ import java.util.stream.Collectors;
 
 import javax.xml.parsers.SAXParserFactory;
 
-import org.apache.log4j.Logger;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.apache.poi.openxml4j.opc.OPCPackage;
 import org.apache.poi.ss.usermodel.DataFormatter;
 import org.apache.poi.xssf.eventusermodel.ReadOnlySharedStringsTable;
@@ -104,7 +105,7 @@ import htsjdk.variant.variantcontext.VariantContext.Type;
  */
 public class AgriplexImport extends RefactoredImport<FileImportParameters> {
 
-    private static final Logger LOG = Logger.getLogger(AgriplexImport.class);
+    private static final Logger LOG = LoggerFactory.getLogger(AgriplexImport.class);
 
     public static final String DEFAULT_SHEET_NAME = "GENOTYPES";
 

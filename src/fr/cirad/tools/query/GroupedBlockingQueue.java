@@ -15,14 +15,15 @@ import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Predicate;
 
-import org.apache.log4j.Logger;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import fr.cirad.tools.query.GroupedExecutor.GroupedFutureTask;
 import fr.cirad.tools.query.GroupedExecutor.TaskWrapper;
 
 public class GroupedBlockingQueue<E> implements BlockingQueue<E> {
 
-	protected static final Logger LOG = Logger.getLogger(GroupedBlockingQueue.class);
+	protected static final Logger LOG = LoggerFactory.getLogger(GroupedBlockingQueue.class);
 	
 	private HashMap<String, LinkedBlockingQueue<E>> taskGroups;
     private HashSet<String> shutdownGroups = new HashSet<>();

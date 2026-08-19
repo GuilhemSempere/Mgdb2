@@ -28,7 +28,8 @@ import java.util.List;
 import java.util.Scanner;
 
 import fr.cirad.mgdb.importing.parameters.ImportParameters;
-import org.apache.log4j.Logger;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
@@ -46,7 +47,7 @@ import fr.cirad.tools.mongo.MongoTemplateManager;
 
 public class STDVariantImport extends RefactoredImport<ImportParameters> {
 	
-	private static final Logger LOG = Logger.getLogger(STDVariantImport.class);
+	private static final Logger LOG = LoggerFactory.getLogger(STDVariantImport.class);
 	
 	protected String m_processID;
 	private boolean m_fTryAndMatchRandomObjectIDs = false;

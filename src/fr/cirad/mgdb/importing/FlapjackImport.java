@@ -32,7 +32,8 @@ import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 import fr.cirad.mgdb.importing.parameters.FlapjackImportParameters;
-import org.apache.log4j.Logger;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.data.mongodb.core.MongoTemplate;
 
 import fr.cirad.mgdb.importing.base.AbstractGenotypeImport;
@@ -50,7 +51,7 @@ import htsjdk.variant.variantcontext.VariantContext.Type;
 public class FlapjackImport extends RefactoredImport<FlapjackImportParameters> {
 
     /** The Constant LOG. */
-    private static final Logger LOG = Logger.getLogger(VariantData.class);
+    private static final Logger LOG = LoggerFactory.getLogger(VariantData.class);
 
     /** The m_process id. */
     //private String m_processID;
@@ -184,7 +185,7 @@ public class FlapjackImport extends RefactoredImport<FlapjackImportParameters> {
             }
             mapReader.close();
         } catch (Exception exc) {
-            LOG.error(exc);
+            LOG.error(exc.getMessage());
             progress.setError("Map file parsing failed : " + exc.getMessage());
             return 0;
         }

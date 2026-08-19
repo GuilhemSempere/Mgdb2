@@ -16,12 +16,13 @@
  *******************************************************************************/
 package fr.cirad.tools.mongo;
 
-import java.io.File;
-import java.io.FileOutputStream;
-import java.io.FileReader;
-import java.io.IOException;
-import java.io.InputStream;
+import java.io.*;
 import java.net.UnknownHostException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
@@ -44,9 +45,10 @@ import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
-import javax.annotation.PreDestroy;
+import jakarta.annotation.PreDestroy;
 
-import org.apache.log4j.Logger;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.bson.Document;
 import org.springframework.beans.BeansException;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -89,7 +91,7 @@ public class MongoTemplateManager implements ApplicationContextAware {
     /**
      * The Constant LOG.
      */
-    static private final Logger LOG = Logger.getLogger(MongoTemplateManager.class);
+    static private final Logger LOG = LoggerFactory.getLogger(MongoTemplateManager.class);
 
     /**
      * The application context.
@@ -120,6 +122,11 @@ public class MongoTemplateManager implements ApplicationContextAware {
      * The mongo clients.
      */
     static private Map<String, MongoClient> mongoClients = new HashMap<>();
+
+    @Autowired
+    public MongoTemplateManager(Map<String, MongoClient> mongoClients) {
+        MongoTemplateManager.mongoClients = mongoClients;
+    }
     
     /**
      * The available annotation functionalities.
@@ -174,6 +181,13 @@ public class MongoTemplateManager implements ApplicationContextAware {
     @Autowired
     public void setAppConfig(AppConfig ac) {
     	appConfig = ac; 
+    }
+
+    private static String getDatasourcesDirectory() {
+        if (appConfig != null) {
+            return appConfig.getConfigDirectory();
+        }
+        return null;
     }
     
     private static final List<String> addressesConsideredLocal = Arrays.asList("127.0.0.1", "localhost");
@@ -280,16 +294,22 @@ public class MongoTemplateManager implements ApplicationContextAware {
      */
     static public void loadDataSources() {
         templateMap.clear();
-        mongoClients.clear();
+        //mongoClients.clear();
         publicDatabases.clear();
         hiddenDatabases.clear();
         try {
         	annotationControllers = applicationContext.getBeansOfType(AnnotationControllerInterface.class).values();
-            mongoClients = applicationContext.getBeansOfType(MongoClient.class);
-            
-    	    InputStream input = MongoTemplateManager.class.getClassLoader().getResourceAsStream(resource + ".properties");
-    	    dataSourceProperties.load(input);
-    	    input.close();
+            //mongoClients = applicationContext.getBeansOfType(MongoClient.class);
+
+            File datasourcesFile = getDatasourcesFile();
+            if (datasourcesFile.exists()) {
+                try (FileReader fileReader = new FileReader(datasourcesFile)) {
+                    dataSourceProperties.load(fileReader);
+                }
+            }
+//    	    InputStream input = MongoTemplateManager.class.getClassLoader().getResourceAsStream(resource + ".properties");
+//    	    dataSourceProperties.load(input);
+//    	    input.close();
     	    
     	    boolean fClearCachedCountsOnStartup = appConfig != null && Boolean.TRUE.equals(Boolean.parseBoolean(appConfig.get("clearCachedCountsOnStartup")));
             
@@ -427,7 +447,7 @@ public class MongoTemplateManager implements ApplicationContextAware {
     		throw new Exception("Module " + sModule + " already exists!");
     	
     	FileOutputStream fos = null;
-        File f = new ClassPathResource("/" + resource + ".properties").getFile();
+        File f = getDatasourcesFile();
     	FileReader fileReader = new FileReader(f);
 
         dataSourceProperties.load(fileReader);
@@ -899,4 +919,25 @@ public class MongoTemplateManager implements ApplicationContextAware {
     public static Collection<AnnotationControllerInterface> getAnnotationControllers() {
 		return annotationControllers;
 	}
+
+    private static File getDatasourcesFile() throws IOException {
+        String datasourcesDirectory = getDatasourcesDirectory();
+        Path externalPath = Paths.get(datasourcesDirectory, resource + ".properties");
+        LOG.info("datasources file = {}", externalPath.toAbsolutePath());
+        // read external datasources.properties file
+        if (Files.isRegularFile(externalPath)) {
+            return externalPath.toFile();
+        }
+
+        // Copy from classpath to modifiable directory
+        File configDir = new File(datasourcesDirectory);
+        configDir.mkdirs();
+        File externalFile = new File(configDir, resource + ".properties");
+
+        try (InputStream is = new ClassPathResource("/" + resource + ".properties").getInputStream()) {
+            Files.copy(is, externalFile.toPath());
+        }
+        return externalFile;
+    }
+
 }

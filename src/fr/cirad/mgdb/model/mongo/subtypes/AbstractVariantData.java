@@ -22,7 +22,8 @@ import java.util.stream.Collectors;
 
 import fr.cirad.mgdb.model.mongo.maintypes.*;
 import org.apache.commons.lang3.StringUtils;
-import org.apache.log4j.Logger;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.bson.codecs.pojo.annotations.BsonProperty;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.mapping.Field;
@@ -121,7 +122,7 @@ abstract public class AbstractVariantData
     
     /** The Constant GT_FIELDVAL_ID_MISSING. */
     public static final String GT_FIELDVAL_ID_MISSING = ".";
-    private static final Logger log = Logger.getLogger(AbstractVariantData.class);
+    private static final Logger log = LoggerFactory.getLogger(AbstractVariantData.class);
 
     /** The type. */
     @BsonProperty(FIELDNAME_TYPE)

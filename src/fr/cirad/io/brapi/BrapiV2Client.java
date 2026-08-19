@@ -30,8 +30,8 @@ import javax.net.ssl.SSLSession;
 import javax.net.ssl.SSLSocketFactory;
 import javax.net.ssl.TrustManager;
 import javax.net.ssl.X509TrustManager;
-import org.apache.log4j.Level;
-import org.apache.log4j.Logger;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import okhttp3.Interceptor;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
@@ -47,7 +47,7 @@ import retrofit2.converter.jackson.JacksonConverterFactory;
 
 public class BrapiV2Client {
 
-    private static final Logger LOG = Logger.getLogger(BrapiV2Client.class);
+    private static final Logger LOG = LoggerFactory.getLogger(BrapiV2Client.class);
 
     private BrapiV2Service service;
 
@@ -114,7 +114,7 @@ public class BrapiV2Client {
                 @Override
                 public Response intercept(Chain chain) throws IOException {
                     Request request = chain.request();
-                    if (LOG.isEnabledFor(Level.DEBUG)) {
+                    if (LOG.isDebugEnabled()) {
                         LOG.debug(getClass().getName() + ": " + request.method() + " " + request.url());
 //                        LOG.debug(getClass().getName() + ": " + request.header("Cookie"));
                         RequestBody rb = request.body();

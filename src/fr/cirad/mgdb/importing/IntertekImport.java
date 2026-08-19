@@ -37,7 +37,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
 import fr.cirad.mgdb.model.mongo.maintypes.*;
-import org.apache.log4j.Logger;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.bson.types.ObjectId;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.query.Query;
@@ -63,7 +64,7 @@ import htsjdk.variant.vcf.VCFHeaderLineType;
 
 public class IntertekImport extends AbstractGenotypeImport<FileImportParameters> {
 
-    private static final Logger LOG = Logger.getLogger(VariantData.class);
+    private static final Logger LOG = LoggerFactory.getLogger(VariantData.class);
 
     public boolean m_fCloseContextOpenAfterImport = false;
 

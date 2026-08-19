@@ -44,7 +44,8 @@ import java.util.stream.Collectors;
 
 import fr.cirad.mgdb.model.mongo.maintypes.*;
 import fr.cirad.mgdb.model.mongodao.MgdbDao;
-import org.apache.log4j.Logger;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.bson.BsonDocument;
 import org.bson.Document;
 import org.bson.codecs.configuration.CodecRegistries;
@@ -75,7 +76,7 @@ import fr.cirad.tools.mongo.MongoTemplateManager;
 import fr.cirad.tools.query.GroupedExecutor;
 import fr.cirad.tools.query.GroupedExecutor.TaskWrapper;
 
-import javax.ejb.ObjectNotFoundException;
+import jakarta.ejb.ObjectNotFoundException;
 
 /**
  * The class ExportManager.
@@ -84,7 +85,7 @@ public class ExportManager
 {
     
     /** The Constant LOG. */
-    static final Logger LOG = Logger.getLogger(ExportManager.class);
+    static final Logger LOG = LoggerFactory.getLogger(ExportManager.class);
     
     static public final AlphaNumericComparator<String> alphaNumericStringComparator = new AlphaNumericComparator<String>();
     
@@ -601,7 +602,7 @@ public class ExportManager
     
     public static abstract class AbstractExportWriter
     {
-    	static final Logger LOG = Logger.getLogger(AbstractExportWriter.class);
+    	static final Logger LOG = LoggerFactory.getLogger(AbstractExportWriter.class);
     	
     	protected boolean fWritesVariantFile = true;
 

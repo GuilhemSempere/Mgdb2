@@ -29,7 +29,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
 
-import org.apache.log4j.Logger;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.config.BeanDefinition;
 import org.springframework.context.annotation.ClassPathScanningCandidateComponentProvider;
 import org.springframework.core.type.filter.AssignableTypeFilter;
@@ -47,7 +48,7 @@ public abstract class AbstractMarkerOrientedExportHandler implements IExportHand
 {
 	
 	/** The Constant LOG. */
-	private static final Logger LOG = Logger.getLogger(AbstractMarkerOrientedExportHandler.class);
+	private static final Logger LOG = LoggerFactory.getLogger(AbstractMarkerOrientedExportHandler.class);
 	
 	/** The marker oriented export handlers. */
 	static private TreeMap<String, AbstractMarkerOrientedExportHandler> markerOrientedExportHandlers = null;

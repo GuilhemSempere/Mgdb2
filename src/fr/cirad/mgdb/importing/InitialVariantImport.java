@@ -37,7 +37,8 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 
-import org.apache.log4j.Logger;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.bson.Document;
 import org.bson.codecs.pojo.annotations.BsonProperty;
 import org.springframework.data.mongodb.core.BulkOperations;
@@ -71,7 +72,7 @@ import fr.cirad.tools.mongo.MongoTemplateManager;
 public class InitialVariantImport {
     
     /** The Constant LOG. */
-    private static final Logger LOG = Logger.getLogger(InitialVariantImport.class);
+    private static final Logger LOG = LoggerFactory.getLogger(InitialVariantImport.class);
 
     static public final String VARIANT_LIST_COLNAME_ID = "id";
     static public final String VARIANT_LIST_COLNAME_TYPE = "type";

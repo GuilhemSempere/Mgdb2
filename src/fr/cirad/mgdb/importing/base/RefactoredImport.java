@@ -29,7 +29,8 @@ import java.util.stream.Stream;
 import fr.cirad.mgdb.importing.VcfImport;
 import fr.cirad.mgdb.model.mongo.maintypes.*;
 import org.apache.commons.lang3.StringUtils;
-import org.apache.log4j.Logger;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.bson.types.ObjectId;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.query.Query;
@@ -49,7 +50,7 @@ import htsjdk.variant.variantcontext.VariantContext.Type;
  */
 public abstract class RefactoredImport<T extends ImportParameters> extends AbstractGenotypeImport<T> {
 
-    private static final Logger LOG = Logger.getLogger(RefactoredImport.class);
+    private static final Logger LOG = LoggerFactory.getLogger(RefactoredImport.class);
 
     protected boolean m_fImportUnknownVariants = false;
     protected int m_ploidy = 2;

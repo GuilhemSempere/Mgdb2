@@ -1,7 +1,8 @@
 package fr.cirad.tools;
 
 import java.util.concurrent.*;
-import org.apache.log4j.Logger;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import java.util.Map;
 
 public class ExpiringHashMap<K, V> {
@@ -12,7 +13,7 @@ public class ExpiringHashMap<K, V> {
     private final long expireAfterMillis;
     private final boolean refreshOnAccess;
 
-    private static final Logger LOG = Logger.getLogger(ExpiringHashMap.class);
+    private static final Logger LOG = LoggerFactory.getLogger(ExpiringHashMap.class);
 
     public ExpiringHashMap(long expireAfterMillis) {
         this(expireAfterMillis, false);

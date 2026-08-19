@@ -33,7 +33,8 @@ import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 import fr.cirad.mgdb.importing.parameters.PlinkImportParameters;
-import org.apache.log4j.Logger;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.data.mongodb.core.MongoTemplate;
 
 import fr.cirad.mgdb.importing.base.AbstractGenotypeImport;
@@ -51,7 +52,7 @@ import htsjdk.variant.variantcontext.VariantContext.Type;
 public class PlinkImport extends RefactoredImport<PlinkImportParameters> {
 
     /** The Constant LOG. */
-    private static final Logger LOG = Logger.getLogger(PlinkImport.class);
+    private static final Logger LOG = LoggerFactory.getLogger(PlinkImport.class);
 
     /** The m_process id. */
     //private String m_processID;

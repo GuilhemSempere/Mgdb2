@@ -17,7 +17,8 @@
  */
 package fr.cirad.mgdb.model.mongo.maintypes;
 
-import org.apache.log4j.Logger;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.data.annotation.Id;
 import org.springframework.data.annotation.TypeAlias;
 import org.springframework.data.annotation.Version;
@@ -43,7 +44,7 @@ public class VariantData extends AbstractVariantData {
     /**
      * The Constant LOG.
      */
-    private static final Logger LOG = Logger.getLogger(VariantData.class);
+    private static final Logger LOG = LoggerFactory.getLogger(VariantData.class);
 
     /**
      * The id.

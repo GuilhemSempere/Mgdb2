@@ -40,12 +40,13 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
-import javax.ejb.ObjectNotFoundException;
-import javax.servlet.ServletContext;
-import javax.servlet.http.HttpSession;
+import jakarta.ejb.ObjectNotFoundException;
+import jakarta.servlet.ServletContext;
+import jakarta.servlet.http.HttpSession;
 
-import org.apache.log4j.Level;
-import org.apache.log4j.Logger;
+import org.slf4j.event.Level;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.brapi.v2.model.VariantSet;
 import org.bson.Document;
 import org.springframework.beans.factory.ObjectFactory;
@@ -118,7 +119,7 @@ public class MgdbDao {
     /**
      * The Constant LOG.
      */
-    private static final Logger LOG = Logger.getLogger(MgdbDao.class);
+    private static final Logger LOG = LoggerFactory.getLogger(MgdbDao.class);
 
     /**
      * The Constant COLLECTION_NAME_TAGGED_VARIANT_IDS.
@@ -409,7 +410,7 @@ public class MgdbDao {
 	            if (!fFoundStartSiteIndex) {
 	                Thread ssIndexCreationThread = new Thread() {
 	                    public void run() {
-	                        LOG.log(fIsTmpColl ? Level.DEBUG : Level.INFO, "Creating index " + ssIndexKeys + " on collection " + coll.getNamespace());
+                            LOG.atLevel(fIsTmpColl ? Level.DEBUG : Level.INFO).log("Creating index " + ssIndexKeys + " on collection " + coll.getNamespace());
 	                        coll.createIndex(ssIndexKeys);
 	                    }
 	                };
@@ -420,7 +421,7 @@ public class MgdbDao {
 	            if (!fOnlySNPsInDB && !fFoundEndSiteIndex) {
 	                Thread esIndexCreationThread = new Thread() {
 	                    public void run() {
-	                        LOG.log(fIsTmpColl ? Level.DEBUG : Level.INFO, "Creating index " + esIndexKeys + " on collection " + coll.getNamespace());
+                            LOG.atLevel(fIsTmpColl ? Level.DEBUG : Level.INFO).log("Creating index " + esIndexKeys + " on collection " + coll.getNamespace());
 	                        coll.createIndex(esIndexKeys);
 	                    }
 	                };
@@ -433,11 +434,11 @@ public class MgdbDao {
 	                Thread ssIndexCreationThread = new Thread() {
 	                    public void run() {
 	                        if (collToDropCompoundIndexOn != null) {
-	                            LOG.log(fIsTmpColl ? Level.DEBUG : Level.INFO, "Dropping wrong index " + startCompoundIndexKeys + " on collection " + collToDropCompoundIndexOn.getNamespace());
+                                LOG.atLevel(fIsTmpColl ? Level.DEBUG : Level.INFO).log("Dropping wrong index " + startCompoundIndexKeys + " on collection " + collToDropCompoundIndexOn.getNamespace());
 	                            collToDropCompoundIndexOn.dropIndex(startCompoundIndexKeys);
 	                        }
-	
-	                        LOG.log(fIsTmpColl ? Level.DEBUG : Level.INFO, "Creating index " + startCompoundIndexKeys + " on collection " + coll.getNamespace());
+
+                            LOG.atLevel(fIsTmpColl ? Level.DEBUG : Level.INFO).log("Creating index " + startCompoundIndexKeys + " on collection " + coll.getNamespace());
 	                        coll.createIndex(startCompoundIndexKeys, new IndexOptions().collation(IExportHandler.collationObj));
 	                    }
 	                };
@@ -451,11 +452,11 @@ public class MgdbDao {
 	                Thread esIndexCreationThread = new Thread() {
 	                    public void run() {
 	                        if (collToDropCompoundIndexOn != null) {
-	                            LOG.log(fIsTmpColl ? Level.DEBUG : Level.INFO, "Dropping wrong index " + endCompoundIndexKeys + " on collection " + collToDropCompoundIndexOn.getNamespace());
+                                LOG.atLevel(fIsTmpColl ? Level.DEBUG : Level.INFO).log("Dropping wrong index " + endCompoundIndexKeys + " on collection " + collToDropCompoundIndexOn.getNamespace());
 	                            collToDropCompoundIndexOn.dropIndex(endCompoundIndexKeys);
 	                        }
-	
-	                        LOG.log(fIsTmpColl ? Level.DEBUG : Level.INFO, "Creating index " + endCompoundIndexKeys + " on collection " + coll.getNamespace());
+
+                            LOG.atLevel(fIsTmpColl ? Level.DEBUG : Level.INFO).log("Creating index " + endCompoundIndexKeys + " on collection " + coll.getNamespace());
 	                        coll.createIndex(endCompoundIndexKeys, new IndexOptions().collation(IExportHandler.collationObj));
 	                    }
 	                };

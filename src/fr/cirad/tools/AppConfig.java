@@ -34,8 +34,10 @@ import java.util.TreeMap;
 import java.util.stream.Collectors;
 import java.util.UUID;
 
-import org.apache.log4j.Logger;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.io.ClassPathResource;
 
@@ -45,7 +47,7 @@ import org.springframework.core.io.ClassPathResource;
 @Configuration
 public class AppConfig {
 	
-	static private final Logger LOG = Logger.getLogger(AppConfig.class);
+	static private final Logger LOG = LoggerFactory.getLogger(AppConfig.class);
 	
 	static private AbstractConfigManager configManager;
 	@Autowired void setConfigManager(AbstractConfigManager cm) {
@@ -227,5 +229,16 @@ public class AppConfig {
             LOG.info("Invalid value for maxAlleleSearchTotalCount in config, using default: 10000", e);
         }
         return 10000; // default value
+    }
+
+    @Value("${config.directory:config}")
+    private String configDirectory;
+
+    public String getConfigDirectory() {
+        return configDirectory;
+    }
+
+    public void setConfigDirectory(String configDirectory) {
+        this.configDirectory = configDirectory;
     }
 }

@@ -22,7 +22,8 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import fr.cirad.mgdb.model.mongo.maintypes.*;
-import org.apache.log4j.Logger;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.bson.types.ObjectId;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.query.Query;
@@ -50,7 +51,7 @@ import htsjdk.variant.vcf.VCFInfoHeaderLine;
 
 public class DartImport extends AbstractGenotypeImport<FileImportParameters> {
 
-    private static final Logger LOG = Logger.getLogger(VariantData.class);
+    private static final Logger LOG = LoggerFactory.getLogger(VariantData.class);
 
     private DartIterator dartIterator;
     private int nNumProc = Runtime.getRuntime().availableProcessors();
@@ -657,7 +658,8 @@ public class DartImport extends AbstractGenotypeImport<FileImportParameters> {
 
             }
             catch (NullPointerException npe) {
-                LOG.debug(npe);
+                LOG.debug(npe.getMessage());
+
             	throw new Exception("Some genotypes for variant " + dartFeature.getChrom() + ":" + dartFeature.getStart() + " refer to alleles not declared at the beginning of the line!");
             }
         }

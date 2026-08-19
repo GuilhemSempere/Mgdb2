@@ -35,8 +35,9 @@ import javax.net.ssl.TrustManager;
 import javax.net.ssl.X509TrustManager;
 import javax.security.sasl.AuthenticationException;
 
-import org.apache.log4j.Level;
-import org.apache.log4j.Logger;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.slf4j.LoggerFactory;
 
 import jhi.brapi.api.BrapiListResource;
 import jhi.brapi.api.Metadata;
@@ -54,7 +55,7 @@ import retrofit2.converter.jackson.JacksonConverterFactory;
 
 public class BrapiClient {
 
-    private static final Logger LOG = Logger.getLogger(BrapiClient.class);
+    private static final Logger LOG = LoggerFactory.getLogger(BrapiClient.class);
 
     private BrapiService service;
 
@@ -121,7 +122,7 @@ public class BrapiClient {
                 @Override
                 public Response intercept(Chain chain) throws IOException {
                     Request request = chain.request();
-                    if (LOG.isEnabledFor(Level.DEBUG)) {
+                    if (LOG.isDebugEnabled()) {
                         LOG.debug(getClass().getName() + ": " + request.method() + " " + request.url());
 //                        LOG.debug(getClass().getName() + ": " + request.header("Cookie"));
                         RequestBody rb = request.body();

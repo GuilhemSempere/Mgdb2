@@ -28,7 +28,8 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.stream.Collectors;
 
-import org.apache.log4j.Logger;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.data.mongodb.core.MongoTemplate;
 
 import fr.cirad.mgdb.importing.base.RefactoredImport;
@@ -67,7 +68,7 @@ import htsjdk.variant.variantcontext.VariantContext.Type;
  */
 public class DArTagImport extends RefactoredImport<FileImportParameters> {
 
-    private static final Logger LOG = Logger.getLogger(DArTagImport.class);
+    private static final Logger LOG = LoggerFactory.getLogger(DArTagImport.class);
 
     /** Column index (0-based) of the SUBJECT_ID field in every row. */
     private static final int SUBJECT_ID_COL = 2;

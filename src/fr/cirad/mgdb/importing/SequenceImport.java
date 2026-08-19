@@ -31,7 +31,8 @@ import java.util.Map;
 import java.util.Map.Entry;
 import java.util.zip.GZIPInputStream;
 
-import org.apache.log4j.Logger;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.data.mongodb.core.MongoTemplate;
 
 import fr.cirad.mgdb.model.mongo.maintypes.Sequence;
@@ -120,7 +121,7 @@ public class SequenceImport {
     /**
      * The Constant LOG.
      */
-    private static final Logger LOG = Logger.getLogger(SequenceImport.class);
+    private static final Logger LOG = LoggerFactory.getLogger(SequenceImport.class);
 
     public static void importSeq(MongoTemplate mongoTemplate, String[] args, String seqCollName) throws Exception
     {

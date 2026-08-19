@@ -30,7 +30,8 @@ import java.util.stream.StreamSupport;
 
 import fr.cirad.mgdb.model.mongo.maintypes.*;
 import fr.cirad.tools.mongo.MongoTemplateManager;
-import org.apache.log4j.Logger;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.bson.types.ObjectId;
 import org.springframework.dao.DuplicateKeyException;
 import org.springframework.dao.OptimisticLockingFailureException;
@@ -78,7 +79,7 @@ import fr.cirad.mgdb.model.mongo.subtypes.VariantRunDataV3Id;
 
 public class VcfImport extends AbstractGenotypeImport<VCFParameters> {
 
-    private static final Logger LOG = Logger.getLogger(VariantData.class);
+    private static final Logger LOG = LoggerFactory.getLogger(VariantData.class);
 
     public static final String ANNOTATION_FIELDNAME_EFF = "EFF";
     public static final String ANNOTATION_FIELDNAME_ANN = "ANN";
@@ -636,7 +637,7 @@ public class VcfImport extends AbstractGenotypeImport<VCFParameters> {
                     persistVariantsAndGenotypesV3(!existingVariantIDs.isEmpty(), finalMongoTemplate, unsavedVariants, unsavedRuns, projectIndex, runIndex);
                 } catch (InterruptedException e) {
                     progress.setError(e.getMessage());
-                    LOG.error(e);
+                    LOG.error(e.getMessage());
                 }
             }
         };

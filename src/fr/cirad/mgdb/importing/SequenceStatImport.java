@@ -24,7 +24,8 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 
-import org.apache.log4j.Logger;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.data.mongodb.core.MongoTemplate;
 
 import fr.cirad.mgdb.model.mongo.maintypes.SequenceStats;
@@ -37,7 +38,7 @@ import fr.cirad.tools.mongo.MongoTemplateManager;
 public class SequenceStatImport {
 	
 	/** The Constant LOG. */
-	private static final Logger LOG = Logger.getLogger(SequenceStatImport.class);
+	private static final Logger LOG = LoggerFactory.getLogger(SequenceStatImport.class);
 	
 	/** The Constant SEQUENCE_FIELD_NAME. */
 	private static final String SEQUENCE_FIELD_NAME = "Contig";
