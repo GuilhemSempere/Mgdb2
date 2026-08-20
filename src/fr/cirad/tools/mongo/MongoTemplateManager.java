@@ -18,11 +18,7 @@ package fr.cirad.tools.mongo;
 
 import java.io.*;
 import java.net.UnknownHostException;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
-import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
@@ -183,7 +179,7 @@ public class MongoTemplateManager implements ApplicationContextAware {
     	appConfig = ac; 
     }
 
-    private static String getDatasourcesDirectory() {
+    private static String getConfigDirectory() {
         if (appConfig != null) {
             return appConfig.getConfigDirectory();
         }
@@ -921,20 +917,15 @@ public class MongoTemplateManager implements ApplicationContextAware {
 	}
 
     private static File getDatasourcesFile() throws IOException {
-        String datasourcesDirectory = getDatasourcesDirectory();
-        Path externalPath = Paths.get(datasourcesDirectory, resource + ".properties");
-        LOG.info("datasources file = {}", externalPath.toAbsolutePath());
+        File externalFile= new File(getConfigDirectory(), resource + ".properties");
+        LOG.info("datasources file = {}", externalFile.getAbsolutePath());
         // read external datasources.properties file
-        if (Files.isRegularFile(externalPath)) {
-            return externalPath.toFile();
+        if (externalFile.exists()) {
+            return externalFile;
         }
 
-        // Copy from classpath to modifiable directory
-        File configDir = new File(datasourcesDirectory);
-        configDir.mkdirs();
-        File externalFile = new File(configDir, resource + ".properties");
-
-        try (InputStream is = new ClassPathResource("/" + resource + ".properties").getInputStream()) {
+        try (InputStream is = new ClassPathResource("/" + resource + ".default").getInputStream()) {
+            Files.createDirectories(externalFile.toPath().getParent());
             Files.copy(is, externalFile.toPath());
         }
         return externalFile;
