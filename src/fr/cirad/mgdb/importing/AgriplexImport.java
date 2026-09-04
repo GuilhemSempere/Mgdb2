@@ -95,21 +95,15 @@ import htsjdk.variant.variantcontext.VariantContext.Type;
  * matrix is first rotated into a marker-oriented temporary TSV file, which is
  * then fed to {@link RefactoredImport#importTempFileContents}. The xlsx file
  * is read in a streaming fashion using Apache POI's SAX-based XSSFReader, so
- * that its content is never fully loaded into memory. Since both the number
- * of markers (columns) and the number of samples (rows) are unbounded, the
- * transposition is performed by re-reading the sheet once per marker chunk -
- * exactly as {@link fr.cirad.mgdb.importing.FlapjackImport} and
- * {@link fr.cirad.mgdb.importing.PlinkImport} re-read their genotype matrices
- * once per block of markers.</p>
+ * that its content is never fully loaded into memory. The transposition
+ * currently performs a single streaming pass of the genotype rows while
+ * accumulating one in-memory buffer per marker before writing the rotated TSV.</p>
  */
 public class AgriplexImport extends RefactoredImport<FileImportParameters> {
 
     private static final Logger LOG = Logger.getLogger(AgriplexImport.class);
 
     public static final String DEFAULT_SHEET_NAME = "GENOTYPES";
-
-    /** Number of markers (columns) processed per re-read of the genotype matrix. */
-    private static final int MARKER_CHUNK_SIZE = 500;
 
     /** Matches a sequence of nucleotides (collapsed homozygote). or "-" */
     private static final Pattern HOMOZYGOTE_PATTERN = Pattern.compile("^[ACGTNacgtn]+|-$");
@@ -199,11 +193,6 @@ public class AgriplexImport extends RefactoredImport<FileImportParameters> {
         LinkedHashMap<String, String> variantsAndPositions = new LinkedHashMap<>();
         Set<String> indelVariants = new HashSet<>();
         AgriplexSheetLayout layout = readMarkersAndPositions(genotypeFileURL, sheetName, variantsAndPositions, indelVariants);
-        if (variantsAndPositions.isEmpty()) {
-            progress.setError("No marker found in sheet '" + sheetName + "'");
-            return 0;
-        }
-
 
         // Rotate the sample-oriented matrix into a marker-oriented temporary file
         progress.setPercentageEnabled(true);
@@ -384,18 +373,14 @@ public class AgriplexImport extends RefactoredImport<FileImportParameters> {
     }
 
     /**
-     * Second pass(es) over the file: rotates the sample-oriented genotype
+     * Second pass over the file: rotates the sample-oriented genotype
      * matrix into a marker-oriented temporary TSV file (one line per marker,
      * one tab-separated genotype per sample, in the order in which samples
      * were first encountered).
      *
-     * <p>Since neither the number of markers nor the number of samples is
-     * bounded, the matrix is processed in chunks of
-     * {@link #MARKER_CHUNK_SIZE} markers: for each chunk, the sheet is
-     * streamed again and only the genotypes belonging to that chunk are kept
-     * in memory (one {@link StringBuilder} per marker of the chunk), then
-     * immediately appended to the output file. Sample IDs are collected once,
-     * during the first chunk.</p>
+     * <p>The sheet is streamed once; for each marker we keep a
+     * {@link StringBuilder} accumulating one tab-separated genotype entry per
+     * sample, then write all marker lines to the output file.</p>
      *
      * @return the dataset's ploidy (2, since AgriPlex only ever provides
      *         single-nucleotide or two-allele genotypes)

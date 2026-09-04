@@ -182,10 +182,6 @@ public class DArTagImport extends RefactoredImport<FileImportParameters> {
         ArrayList<String> individualNames = new ArrayList<>();
 
         readMarkerIds(fileURL, variantsAndPositions);
-        if (variantsAndPositions.isEmpty()) {
-            progress.setError("No marker columns found in DArTag file");
-            return 0;
-        }
 
         // Transpose the sample-oriented matrix into a marker-oriented temp file
         progress.setPercentageEnabled(true);
@@ -262,6 +258,9 @@ public class DArTagImport extends RefactoredImport<FileImportParameters> {
                     throw new Exception("Duplicate marker ID in header: " + markerId);
                 variantsAndPositions.put(markerId, "0\t0");    // unplaced
             }
+
+            if (variantsAndPositions.isEmpty())
+                throw new Exception("No marker columns found in DArTag file");
         }
     }
 
