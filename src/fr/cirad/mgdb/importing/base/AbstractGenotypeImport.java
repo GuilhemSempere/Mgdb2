@@ -28,7 +28,9 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Scanner;
-import java.util.concurrent.atomic.AtomicReference;
+import java.util.TreeMap;
+import java.util.TreeSet;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import org.apache.commons.lang3.StringUtils;
 import org.apache.log4j.Logger;
@@ -53,6 +55,7 @@ import fr.cirad.mgdb.model.mongo.maintypes.GenotypingSample;
 import fr.cirad.mgdb.model.mongo.maintypes.Individual;
 import fr.cirad.mgdb.model.mongo.maintypes.VariantData;
 import fr.cirad.mgdb.model.mongo.maintypes.VariantRunData;
+import fr.cirad.mgdb.model.mongo.subtypes.AbstractVariantData;
 import fr.cirad.mgdb.model.mongo.subtypes.Callset;
 import fr.cirad.mgdb.model.mongo.subtypes.ReferencePosition;
 import fr.cirad.mgdb.model.mongo.subtypes.VariantRunDataId;
@@ -85,6 +88,9 @@ public abstract class AbstractGenotypeImport<T extends ImportParameters> {
     protected String brapiEndPointTokenForNamingIndividuals;
     
     private HashMap<String, String> preloadedSampleToIndividualMap = null;
+    
+    private final String m_generatedIdBaseString = Long.toHexString(System.currentTimeMillis());
+    private final AtomicInteger m_generatedIdCounter = new AtomicInteger(0);
     
     public void setBrapiEndPointForNamingIndividuals(String brapiEndPointUri, String brapiEndPointToken) {
         brapiEndPointUriForNamingIndividuals = !brapiEndPointUri.endsWith("/") ? brapiEndPointUri + "/" : brapiEndPointUri;
@@ -163,6 +169,23 @@ public abstract class AbstractGenotypeImport<T extends ImportParameters> {
             throw new Exception("Not enough info provided to build identification strings");
         
         return result;
+    }
+    
+    protected String generateFallbackVariantId() {
+        return m_generatedIdBaseString + String.format("%09x", m_generatedIdCounter.getAndIncrement());
+    }
+
+    protected static boolean isValidProvidedId(String id) {
+        return id != null && !id.isEmpty() && !".".equals(id);
+    }
+
+    protected static void addInternalSynonym(VariantData variant, String synonymId) {
+        TreeMap<String, TreeSet<String>> synonyms = variant.getSynonyms();
+        if (synonyms == null) {
+            synonyms = new TreeMap<>();
+            variant.setSynonyms(synonyms);
+        }
+        synonyms.computeIfAbsent(AbstractVariantData.FIELDNAME_SYNONYM_TYPE_ID_INTERNAL, k -> new TreeSet<>()).add(synonymId);
     }
     
     static public HashMap<String, String> readSampleMappingFile(URL sampleMappingFileURL) throws Exception {
@@ -445,8 +468,8 @@ public abstract class AbstractGenotypeImport<T extends ImportParameters> {
             }
         }
     }
-
-    // ============ NEW: Shared Helper Methods for Variant Resolution ============
+    
+    // ============ Shared Helper Methods for Variant Resolution ============
     
     /**
      * Helper class for resolved variant information
@@ -456,12 +479,17 @@ public abstract class AbstractGenotypeImport<T extends ImportParameters> {
         public final String sequence;
         public final Long bpPosition;
         public final Type variantType;
-        
-        public ResolvedVariantInfo(String canonicalVariantId, String sequence, Long bpPosition, Type variantType) {
+        public final boolean isExistingVariant;
+        public final boolean fRoutingKeyOnly;
+
+        public ResolvedVariantInfo(String canonicalVariantId, String sequence, Long bpPosition, Type variantType,
+                                    boolean isExistingVariant, boolean fRoutingKeyOnly) {
             this.canonicalVariantId = canonicalVariantId;
             this.sequence = sequence;
             this.bpPosition = bpPosition;
             this.variantType = variantType;
+            this.isExistingVariant = isExistingVariant;
+            this.fRoutingKeyOnly = fRoutingKeyOnly;
         }
     }
 
@@ -475,7 +503,7 @@ public abstract class AbstractGenotypeImport<T extends ImportParameters> {
             HashMap<String, String> existingVariantIDs,
             Map<String, Type> nonSnpVariantTypeMap,
             boolean importUnknownVariants) {
-        
+
         // Extract sequence and position
         String sequence = null;
         Long bpPosition = null;
@@ -495,25 +523,22 @@ public abstract class AbstractGenotypeImport<T extends ImportParameters> {
                 }
             }
         }
-        
+
         // Get variant type
         Type variantType = nonSnpVariantTypeMap.get(providedVariantId);
         String variantTypeStr = variantType == null ? Type.SNP.toString() : variantType.toString();
-        
-        // Check if we have a valid ID
-        boolean hasValidId = providedVariantId != null && !providedVariantId.isEmpty() && !".".equals(providedVariantId);
+
+        boolean hasValidId = isValidProvidedId(providedVariantId);
         List<String> idAndSynonyms = hasValidId ? Arrays.asList(new String[]{providedVariantId}) : null;
-        
-        // Try to resolve to existing variant
-        String canonicalId = null;
+
+        // 1) look up a variant that already EXISTS in the DB
+        String existingId = null;
         try {
-            for (String variantDescForPos : getIdentificationStrings(
-                    variantTypeStr, sequence, bpPosition, idAndSynonyms)) {
-                canonicalId = existingVariantIDs.get(variantDescForPos);
-                if (canonicalId != null) {
-                    if (variantType != null && !canonicalId.equals(providedVariantId)) {
-                        nonSnpVariantTypeMap.put(canonicalId, variantType);
-                    }
+            for (String variantDescForPos : getIdentificationStrings(variantTypeStr, sequence, bpPosition, idAndSynonyms)) {
+                existingId = existingVariantIDs.get(variantDescForPos);
+                if (existingId != null) {
+                    if (variantType != null && !existingId.equals(providedVariantId))
+                        nonSnpVariantTypeMap.put(existingId, variantType);
                     break;
                 }
             }
@@ -521,27 +546,25 @@ public abstract class AbstractGenotypeImport<T extends ImportParameters> {
             // No position and no ID
             LOG.debug("Cannot build identification strings for " + providedVariantId + ": " + e.getMessage());
         }
-        
+
+        if (existingId != null)
+            return new ResolvedVariantInfo(existingId, sequence, bpPosition, variantType, true, false);
+
         // --- IMPORT UNKNOWN VARIANTS LOGIC ---
-        if (canonicalId == null) {
-            if (!importUnknownVariants) {
-                // Unknown variants are NOT allowed - return null for canonicalId
-                return new ResolvedVariantInfo(null, sequence, bpPosition, variantType);
-            }
-            
-            // Unknown variants ARE allowed - generate a consistent ID for routing
-            if (sequence != null && bpPosition != null) {
-                // Use position as the basis for consistent routing
-                canonicalId = sequence + "_" + bpPosition;
-            } else if (hasValidId) {
-                canonicalId = providedVariantId;
-            } else {
-                // Absolutely no info - generate a unique one (should never happen)
-                canonicalId = "new_" + System.nanoTime();
-            }
-        }
-        
-        return new ResolvedVariantInfo(canonicalId, sequence, bpPosition, variantType);
+        if (!importUnknownVariants)
+            return new ResolvedVariantInfo(null, sequence, bpPosition, variantType, false, false);
+
+        // Unknown variants ARE allowed. What follows only produces a GROUPING key: the id that
+        // will actually be persisted is decided by the caller (providedVariantId takes priority -
+        // see isValidProvidedId / fRoutingKeyOnly), never chr_pos directly.
+        if (sequence != null && bpPosition != null)
+            return new ResolvedVariantInfo(sequence + "_" + bpPosition, sequence, bpPosition, variantType, false, true);
+
+        if (hasValidId)
+            return new ResolvedVariantInfo(providedVariantId, sequence, bpPosition, variantType, false, false);
+
+        // No info at all: nothing to group, the generated id can directly serve as the final id
+        return new ResolvedVariantInfo(generateFallbackVariantId(), sequence, bpPosition, variantType, false, false);
     }
 
     protected abstract long doImport(T params, MongoTemplate mongoTemplate, GenotypingProject project, ProgressIndicator progress, Integer createdProject) throws Exception;
