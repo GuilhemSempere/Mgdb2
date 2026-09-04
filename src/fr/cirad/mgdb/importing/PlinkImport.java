@@ -164,7 +164,7 @@ public class PlinkImport extends RefactoredImport<PlinkImportParameters> {
                 mode,//importMode
                 new File(args[4]).toURI().toURL(), //mainFileUrl
                 new File(args[5]).toURI().toURL(),
-                false
+                true //fCheckConsistencyBetweenSynonyms
         );
         instance.importToMongo(params);
 
