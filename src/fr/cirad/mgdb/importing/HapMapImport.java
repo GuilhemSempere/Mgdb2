@@ -157,7 +157,7 @@ public class HapMapImport extends AbstractGenotypeImport<FileImportParameters> {
         Integer nPloidy = params.getPloidy();
         Map<String, String> sampleToIndividualMap = params.getSampleToIndividualMap();
 
-        if (project == null || params.getImportMode() > 0) {
+        if (/*project == null || */params.getImportMode() > 0) {
             if (params.getPloidy() != null) {
                 project.setPloidyLevel(nPloidy);
             } else {
@@ -186,8 +186,6 @@ public class HapMapImport extends AbstractGenotypeImport<FileImportParameters> {
         Assembly assembly = createAssemblyIfNeeded(mongoTemplate, params.getAssemblyName());
         HashMap<String, String> existingVariantIDs = buildSynonymToIdMapForExistingVariants(mongoTemplate, true, assembly == null ? null : assembly.getId());
 
-        String generatedIdBaseString = Long.toHexString(System.currentTimeMillis());
-        AtomicInteger totalParsedVariantCount = new AtomicInteger(0);
         AtomicInteger totalWrittenVariantCount = new AtomicInteger(0);
         final ArrayList<String> sampleIds = new ArrayList<>();
         progress.addStep("Processing variant lines");
@@ -234,7 +232,6 @@ public class HapMapImport extends AbstractGenotypeImport<FileImportParameters> {
                             sRun,
                             assemblyIDs,
                             progress,
-                            totalParsedVariantCount,
                             totalWrittenVariantCount,
                             existingVariantIDs,
                             params.isSkipMonomorphic(),
@@ -297,7 +294,7 @@ public class HapMapImport extends AbstractGenotypeImport<FileImportParameters> {
                         if (hasValidId) {
                             variantId = (ObjectId.isValid(sFeatureName) ? "_" : "") + sFeatureName;
                         } else {
-                            variantId = generatedIdBaseString + String.format("%09x", totalParsedVariantCount.getAndIncrement());
+                            variantId = generateFallbackVariantId();
                         }
                     }
                     
@@ -357,7 +354,6 @@ public class HapMapImport extends AbstractGenotypeImport<FileImportParameters> {
             String sRun,
             Collection<Integer> assemblyIDs,
             ProgressIndicator progress,
-            AtomicInteger totalParsedVariantCount,
             AtomicInteger totalWrittenVariantCount,
             HashMap<String, String> existingVariantIDs,
             boolean fSkipMonomorphic,

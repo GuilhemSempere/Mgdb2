@@ -139,14 +139,12 @@ public class VcfImport extends AbstractGenotypeImport<VCFParameters> {
      * MINIMAL - just carries the raw VariantContextHologram and the ID for routing
      */
     private static class VariantTask {
-        public static final VariantTask POISON_PILL = new VariantTask(null, null);
+        public static final VariantTask POISON_PILL = new VariantTask(null);
         
         final VariantContextHologram vcfEntry;
-        final String providedVariantId;  // For routing only - worker resolves canonical ID
         
-        VariantTask(VariantContextHologram vcfEntry, String providedVariantId) {
+        VariantTask(VariantContextHologram vcfEntry) {
             this.vcfEntry = vcfEntry;
-            this.providedVariantId = providedVariantId;
         }
     }
 
@@ -204,9 +202,7 @@ public class VcfImport extends AbstractGenotypeImport<VCFParameters> {
         progress.addStep("Processing variant lines");
         progress.moveToNextStep();
 
-        AtomicInteger totalParsedVariantCount = new AtomicInteger(0);
         AtomicInteger totalWrittenVariantCount = new AtomicInteger(0);
-        String generatedIdBaseString = Long.toHexString(System.currentTimeMillis());
 
         int nNConcurrentThreads = Math.max(1, Runtime.getRuntime().availableProcessors());
         int nImportThreads = Math.max(1, (int)(nNConcurrentThreads * 0.60));
@@ -248,7 +244,6 @@ public class VcfImport extends AbstractGenotypeImport<VCFParameters> {
                             sRun,
                             assemblyIDs,
                             progress,
-                            totalParsedVariantCount,
                             totalWrittenVariantCount,
                             existingVariantIDs,
                             fSkipMonomorphic,
@@ -256,8 +251,7 @@ public class VcfImport extends AbstractGenotypeImport<VCFParameters> {
                             finalEffectAnnotationPos,
                             finalGeneIdAnnotationPos,
                             phasingGroups,
-                            distinctEncounteredGeneNames,
-                            generatedIdBaseString
+                            distinctEncounteredGeneNames
                         );
                     } catch (Throwable t) {
                         progress.setError("Worker " + workerIndex + " failed: " + t.getMessage());
@@ -293,7 +287,7 @@ public class VcfImport extends AbstractGenotypeImport<VCFParameters> {
                     hologram.getID() : 
                     hologram.getContig() + "_" + hologram.getStart();
                 
-                workerQueues[Math.floorMod(providedId.hashCode(), nImportThreads)].put(new VariantTask(hologram, providedId));
+                workerQueues[Math.floorMod(providedId.hashCode(), nImportThreads)].put(new VariantTask(hologram));
             }
             
             for (BlockingQueue<VariantTask> queue : workerQueues)
@@ -334,7 +328,7 @@ public class VcfImport extends AbstractGenotypeImport<VCFParameters> {
                 LOG.info("Database " + sModule + ": " + wr.getModifiedCount() + " documents updated in " + MgdbDao.COLLECTION_NAME_GENE_CACHE);
         }
 
-        return totalParsedVariantCount.get();
+        return totalWrittenVariantCount.get();
     }
 
     /**
@@ -349,7 +343,6 @@ public class VcfImport extends AbstractGenotypeImport<VCFParameters> {
             String sRun,
             Collection<Integer> assemblyIDs,
             ProgressIndicator progress,
-            AtomicInteger totalParsedVariantCount,
             AtomicInteger totalWrittenVariantCount,
             HashMap<String, String> existingVariantIDs,
             boolean fSkipMonomorphic,
@@ -357,8 +350,7 @@ public class VcfImport extends AbstractGenotypeImport<VCFParameters> {
             int effectAnnotationPos,
             int geneIdAnnotationPos,
             HashMap<String, Comparable> phasingGroups,
-            HashSet<String> distinctEncounteredGeneNames,
-            String generatedIdBaseString) throws Exception {
+            HashSet<String> distinctEncounteredGeneNames) throws Exception {
         
         HashSet<VariantData> unsavedVariants = new HashSet<>();
         HashSet<VariantRunData> unsavedRuns = new HashSet<>();
@@ -391,7 +383,7 @@ public class VcfImport extends AbstractGenotypeImport<VCFParameters> {
 			    if (hasValidId)
 			        variantId = (ObjectId.isValid(hologram.getID()) ? "_" : "") + hologram.getID();
 			    else
-			        variantId = generatedIdBaseString + String.format("%09x", totalParsedVariantCount.getAndIncrement());
+			        variantId = generateFallbackVariantId();
 			}
             
             // Skip monomorphic (only for new variants)

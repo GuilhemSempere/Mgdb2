@@ -217,8 +217,6 @@ public class IntertekImport extends AbstractGenotypeImport<FileImportParameters>
         final GenotypingProject finalProject = project;
         final MongoTemplate finalMongoTemplate = mongoTemplate;
         final Assembly finalAssembly = assembly;
-        String generatedIdBaseString = Long.toHexString(System.currentTimeMillis());
-        AtomicInteger totalParsedVariantCount = new AtomicInteger(0);
         AtomicInteger totalWrittenVariantCount = new AtomicInteger(0);
 
         // Start workers
@@ -304,7 +302,7 @@ public class IntertekImport extends AbstractGenotypeImport<FileImportParameters>
                         if (hasValidId) {
                             variantId = (ObjectId.isValid(providedVariantId) ? "_" : "") + providedVariantId;
                         } else {
-                            variantId = generatedIdBaseString + String.format("%09x", totalParsedVariantCount.getAndIncrement());
+                            variantId = generateFallbackVariantId();
                         }
                         variant = new VariantData(variantId);
                         

@@ -243,7 +243,6 @@ public class DartImport extends AbstractGenotypeImport<FileImportParameters> {
         HashMap<String, String> existingVariantIDs = buildSynonymToIdMapForExistingVariants(mongoTemplate, true, assembly == null ? null : assembly.getId());
 
         String generatedIdBaseString = Long.toHexString(System.currentTimeMillis());
-        AtomicInteger totalParsedVariantCount = new AtomicInteger(0);
         AtomicInteger totalWrittenVariantCount = new AtomicInteger(0);
         final ArrayList<String> sampleIds = new ArrayList<>();
         progress.addStep("Processing variant lines");
@@ -304,7 +303,6 @@ public class DartImport extends AbstractGenotypeImport<FileImportParameters> {
                             sRun,
                             assemblyIDs,
                             progress,
-                            totalParsedVariantCount,
                             totalWrittenVariantCount,
                             existingVariantIDs,
                             fSkipMonomorphic,
@@ -369,7 +367,7 @@ public class DartImport extends AbstractGenotypeImport<FileImportParameters> {
                             if (hasValidId) {
                                 variantId = (ObjectId.isValid(sFeatureName) ? "_" : "") + sFeatureName;
                             } else {
-                                variantId = generatedIdBaseString + String.format("%09x", totalParsedVariantCount.getAndIncrement());
+                                variantId = generateFallbackVariantId();
                             }
                         }
                         
@@ -430,7 +428,6 @@ public class DartImport extends AbstractGenotypeImport<FileImportParameters> {
             String sRun,
             Collection<Integer> assemblyIDs,
             ProgressIndicator progress,
-            AtomicInteger totalParsedVariantCount,
             AtomicInteger totalWrittenVariantCount,
             HashMap<String, String> existingVariantIDs,
             boolean fSkipMonomorphic,
