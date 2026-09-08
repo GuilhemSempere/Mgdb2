@@ -249,11 +249,12 @@ public abstract class AbstractGenotypeImport<T extends ImportParameters> {
             if (refPosPath != null)
                 query.fields().include("_id").include(refPosPath).include(VariantData.FIELDNAME_TYPE).include(VariantData.FIELDNAME_SYNONYMS);
             MongoCursor<Document> variantIterator = mongoTemplate.getCollection(mongoTemplate.getCollectionName(VariantData.class)).find(query.getQueryObject()).projection(query.getFieldsObject()).iterator();
+            HashSet<String> duplicates = new HashSet<>();
             while (variantIterator.hasNext())
             {
                 Document vd = variantIterator.next();
                 String variantId = vd.getString("_id");
-                ArrayList<String> idAndSynonyms = new ArrayList<>();
+                HashSet<String> idAndSynonyms = new HashSet<>();	// allow for a same synonym to appear as multiple types
                 if (fIncludeRandomObjectIDs || !MgdbDao.idLooksGenerated(variantId))    // most of the time we avoid taking into account randomly generated IDs
                     idAndSynonyms.add(variantId);
                 Document synonymsByType = (Document) vd.get(VariantData.FIELDNAME_SYNONYMS);
@@ -265,11 +266,13 @@ public abstract class AbstractGenotypeImport<T extends ImportParameters> {
                 ArrayList<String> identificationStrings = getIdentificationStrings((String) vd.get(VariantData.FIELDNAME_TYPE), refPosPath == null ? null : (String) Helper.readPossiblyNestedField(vd, refPosPath + "." + ReferencePosition.FIELDNAME_SEQUENCE, ";", null), refPosPath == null ? null : (Long) Helper.readPossiblyNestedField(vd, refPosPath + "." + ReferencePosition.FIELDNAME_START_SITE, ";", null), idAndSynonyms);
                 for (String variantDescForPos : identificationStrings) {
                     if (existingVariantIDs.containsKey(variantDescForPos) && !variantId.startsWith("*"))
-                        throw new Exception("This database seems to contain duplicate variants (check " + variantDescForPos.replaceAll("¤", ":") + "). Importing additional data will not be supported until this problem is fixed.");
+                    	duplicates.add(variantDescForPos.replaceAll("¤", ":"))   ;
 
                     existingVariantIDs.put(variantDescForPos, vd.get("_id").toString());
                 }
             }
+            if (duplicates.size() > 0)
+				LOG.warn("Found " + duplicates.size() + " duplicate variant descriptions in the database: " + StringUtils.join(duplicates, ", ") + ". This may cause issues when importing new variants.");	
             LOG.info(Helper.estimDocCount(mongoTemplate,VariantData.class) + " VariantData record IDs were scanned in " + (System.currentTimeMillis() - beforeReadingAllVariants) / 1000 + "s");
         }
         return existingVariantIDs;
