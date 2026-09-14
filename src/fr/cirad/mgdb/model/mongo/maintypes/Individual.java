@@ -46,6 +46,9 @@ public class Individual implements Comparable<Individual> {
      * The Constant SECTION_ADDITIONAL_INFO.
      */
     public final static String SECTION_ADDITIONAL_INFO = "ai";
+    
+    public final static String  AI_FIELDNAME_POPULATION = "population";
+    public final static String  AI_FIELDNAME_POPULATION_GROUP = "population_group";
 
     /**
      * The id.
