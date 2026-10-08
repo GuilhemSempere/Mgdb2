@@ -95,7 +95,7 @@ public abstract class RefactoredImport<T extends ImportParameters> extends Abstr
         }
     }
 
-    public long importTempFileContents(ProgressIndicator progress, int nNConcurrentThreads, MongoTemplate mongoTemplate, Integer nAssemblyId, File tempFile, LinkedHashMap<String, String> providedVariantPositions, HashMap<String, String> existingVariantIDs, GenotypingProject project, String sRun, HashMap<String, ArrayList<String>> inconsistencies, LinkedHashMap<String, String> orderedIndividualToPopulationMap, Map<String, Type> nonSnpVariantTypeMap, HashSet<Integer> indexesOfLinesThatMustBeSkipped, boolean fSkipMonomorphic) throws Exception {
+    public long importTempFileContents(ProgressIndicator progress, int nNConcurrentThreads, MongoTemplate mongoTemplate, Integer nAssemblyId, File tempFile, LinkedHashMap<String, String> providedVariantPositions, Map<String, String> existingVariantIDs, GenotypingProject project, String sRun, HashMap<String, ArrayList<String>> inconsistencies, LinkedHashMap<String, String> orderedIndividualToPopulationMap, Map<String, Type> nonSnpVariantTypeMap, HashSet<Integer> indexesOfLinesThatMustBeSkipped, boolean fSkipMonomorphic) throws Exception {
         String[] individuals = orderedIndividualToPopulationMap.keySet().toArray(new String[orderedIndividualToPopulationMap.size()]);
         final AtomicInteger totalParsedVariantCount = new AtomicInteger(0);
         final AtomicInteger totalWrittenVariantCount = new AtomicInteger(0);
@@ -378,7 +378,7 @@ public abstract class RefactoredImport<T extends ImportParameters> extends Abstr
             HashMap<String, ArrayList<String>> inconsistencies,
             Integer maxExpectedAlleleCount,
             AtomicInteger ignoredVariants,
-            HashMap<String, String> existingVariantIDs,
+            Map<String, String> existingVariantIDs,
             boolean fSkipMonomorphic,
             int ploidy,
             boolean importUnknownVariants,
@@ -594,7 +594,7 @@ public abstract class RefactoredImport<T extends ImportParameters> extends Abstr
      * earlier in this run are saved (never re-inserted); variants touched for the first time are inserted
      * (or saved, if the DB already contained variants before this run started).
      */
-    private void flushChunk(MongoTemplate mongoTemplate, HashMap<String, String> existingVariantIDs,
+    private void flushChunk(MongoTemplate mongoTemplate, Map<String, String> existingVariantIDs,
             HashMap<String, VariantData> unsavedVariants, HashMap<String, VariantData> variantsToResave,
             HashSet<VariantRunData> unsavedRuns, Map<String, Boolean> flushedVariantIds,
             Map<String, VariantData> openVariants, HashSet<String> knownSynonymRoutingKeys) throws InterruptedException {

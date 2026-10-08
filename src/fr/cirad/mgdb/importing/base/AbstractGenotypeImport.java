@@ -24,7 +24,6 @@ import java.util.Arrays;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Scanner;
@@ -502,8 +501,8 @@ public abstract class AbstractGenotypeImport<T extends ImportParameters> {
      */
     protected ResolvedVariantInfo resolveVariantInfo(
             String providedVariantId,
-            LinkedHashMap<String, String> providedVariantPositions,
-            HashMap<String, String> existingVariantIDs,
+            Map<String, String> providedVariantPositions,
+            Map<String, String> existingVariantIDs,
             Map<String, Type> nonSnpVariantTypeMap,
             boolean importUnknownVariants) {
 
