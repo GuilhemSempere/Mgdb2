@@ -17,7 +17,6 @@
 package fr.cirad.tools.mongo;
 
 import java.io.File;
-import java.io.FileOutputStream;
 import java.io.FileReader;
 import java.io.IOException;
 import java.io.InputStream;
@@ -78,6 +77,7 @@ import fr.cirad.mgdb.model.mongo.maintypes.VariantRunData;
 import fr.cirad.mgdb.model.mongodao.MgdbDao;
 import fr.cirad.tools.AppConfig;
 import fr.cirad.tools.Helper;
+import fr.cirad.tools.PropertiesFileUtils;
 import fr.cirad.tools.query.GroupedExecutor;
 
 /**
@@ -426,7 +426,6 @@ public class MongoTemplateManager implements ApplicationContextAware {
     	else if (action.equals(ModuleAction.CREATE))
     		throw new Exception("Module " + sModule + " already exists!");
     	
-    	FileOutputStream fos = null;
         File f = new ClassPathResource("/" + resource + ".properties").getFile();
     	FileReader fileReader = new FileReader(f);
 
@@ -443,8 +442,7 @@ public class MongoTemplateManager implements ApplicationContextAware {
                 	return false;
                 }
                 dataSourceProperties.remove(sModuleKey);
-                fos = new FileOutputStream(f);
-                dataSourceProperties.store(fos, null);
+                PropertiesFileUtils.storeAtomically(dataSourceProperties, f, null, null);
                 return true;
     		}
 	        else if (action.equals(ModuleAction.CREATE))
@@ -469,8 +467,7 @@ public class MongoTemplateManager implements ApplicationContextAware {
 		                if (ncbiTaxonIdNameAndSpecies != null)
 		                	setTaxon(sModule, ncbiTaxonIdNameAndSpecies);
 		                dataSourceProperties.put(sModuleKey, sHost + "," + sDbName + "," + (ncbiTaxonIdNameAndSpecies == null ? "" : ncbiTaxonIdNameAndSpecies));
-		                fos = new FileOutputStream(f);
-		                dataSourceProperties.store(fos, null);
+		                PropertiesFileUtils.storeAtomically(dataSourceProperties, f, null, null);
 
 		                templateMap.put(sModule, mongoTemplate);
 		                assignExecutorToModule(sHost, sModule);
@@ -501,8 +498,7 @@ public class MongoTemplateManager implements ApplicationContextAware {
                 	ncbiTaxonIdNameAndSpecies = getTaxonId(sModule) + ":" + (species != null && species.equals(taxonName) ? "" : taxonName) + ":" + (species != null ? species : "");
                 }
                 dataSourceProperties.put((fPublic ? "*" : "") + sModule + (fHidden ? "*" : ""), propValues[0] + "," + propValues[1] + "," + ncbiTaxonIdNameAndSpecies);
-                fos = new FileOutputStream(f);
-                dataSourceProperties.store(fos, null);
+                PropertiesFileUtils.storeAtomically(dataSourceProperties, f, null, null);
                 setTaxon(sModule, ncbiTaxonIdNameAndSpecies);
                 
                 if (fPublic)
@@ -528,8 +524,6 @@ public class MongoTemplateManager implements ApplicationContextAware {
             try 
             {
            		fileReader.close();
-            	if (fos != null)
-            		fos.close();
             } 
             catch (IOException ex)
             {
@@ -899,4 +893,4 @@ public class MongoTemplateManager implements ApplicationContextAware {
     public static Collection<AnnotationControllerInterface> getAnnotationControllers() {
 		return annotationControllers;
 	}
-}
+}
