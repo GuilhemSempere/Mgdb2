@@ -495,9 +495,10 @@ public class HapMapImport extends AbstractGenotypeImport<FileImportParameters> {
         else if (null != variantType && Type.NO_VARIATION != variantType && !variantToFeed.getType().equals(variantType.toString()))
             throw new Exception("Variant type mismatch between existing data and data to import: " + variantToFeed.getId());
 
-        if (!"0".equals(hmFeature.getChr()) && hmFeature.getStart() > 0)
-            if (variantToFeed.getReferencePosition(nAssemblyId) == null)
-                variantToFeed.setReferencePosition(nAssemblyId, new ReferencePosition(hmFeature.getChr(), hmFeature.getStart(), (long) hmFeature.getEnd()));
+        if (!"0".equals(hmFeature.getChr()) && hmFeature.getStart() > 0 && variantToFeed.getReferencePosition(nAssemblyId) == null) {
+            Long endSite = hmFeature.getAlleles().length > 0 && hmFeature.getAlleles()[0] != null ? hmFeature.getStart() + (long) hmFeature.getAlleles()[0].length() - 1 : null;
+            variantToFeed.setReferencePosition(nAssemblyId, new ReferencePosition(hmFeature.getChr(), hmFeature.getStart(), endSite));
+        }
 
         if (variantToFeed.getKnownAlleles().size() == 0)
             variantToFeed.setKnownAlleles(Arrays.stream(hmFeature.getAlleles()).collect(Collectors.toList()));
