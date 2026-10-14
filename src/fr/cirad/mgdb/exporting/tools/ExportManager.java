@@ -70,8 +70,7 @@ import fr.cirad.tools.AlphaNumericComparator;
 import fr.cirad.tools.Helper;
 import fr.cirad.tools.ProgressIndicator;
 import fr.cirad.tools.mongo.MongoTemplateManager;
-import fr.cirad.tools.query.GroupedExecutor;
-import fr.cirad.tools.query.GroupedExecutor.TaskWrapper;
+import fr.cirad.tools.query.AdaptiveTaskSubmitter;
 
 import javax.ejb.ObjectNotFoundException;
 
@@ -266,6 +265,7 @@ public class ExportManager
         
         ExecutorService executor = MongoTemplateManager.getExecutor(module);
         String taskGroup = "export_" + System.currentTimeMillis() + "_" + progress.getProcessId();
+        AdaptiveTaskSubmitter submitter = new AdaptiveTaskSubmitter(executor, taskGroup);
         
         AtomicInteger nChunkIndex = new AtomicInteger(0), nNextChunkToAppendToMainOS = new AtomicInteger(0), nSpeedEstimationCompletedQueryCount = new AtomicInteger(0);
         AtomicLong timeSpentReadingWithoutProjectStage = new AtomicLong(0), timeSpentReadingWithProjectStage = new AtomicLong(0);
@@ -436,8 +436,12 @@ public class ExportManager
 	            		throw new Exception("All expected (" + chunkExportTasks.length + ") export chunks already processed but markerCursor still had " + nRemaining + " elements! markerCount=" + markerCount + " and " + callSetIDsToExport.size() + " samples");
 	            	}
 
-            		chunkExportTasks[nFinalChunkIndex - 1] = (Future<Void>) executor.submit(new TaskWrapper(taskGroup, chunkExportThread));
+            		chunkExportTasks[nFinalChunkIndex - 1] = submitter.submit(chunkExportThread);	// blocks while the adaptive concurrency limit is reached
 	                currentMarkerIDs = new ArrayList<>(nQueryChunkSize);
+
+	                // append chunks already extracted, so that temporary files don't pile up while we're still submitting
+	                while (extractedChunks.contains(nNextChunkToAppendToMainOS.get()) && nNextChunkToAppendToMainOS.get() < chunkGenotypeFiles.length)
+	                	appendChunkToMainOS(chunkGenotypeFiles[nNextChunkToAppendToMainOS.getAndIncrement()], os);
 	            }
 	        }
 	        
@@ -474,10 +478,7 @@ public class ExportManager
 	        markerCursor.close();
 
 	    	// CRITICAL: Always shutdown the group, even if there was an error
-	        if (executor instanceof GroupedExecutor)
-	        	((GroupedExecutor) executor).shutdown(taskGroup);
-	        else
-	        	executor.shutdown();
+	        MongoTemplateManager.releaseExecutor(executor, taskGroup);
 
 	        for (int i=0; i<chunkGenotypeFiles.length; i++) {
 		        if (chunkGenotypeFiles[i] != null && chunkGenotypeFiles[i].exists()) 

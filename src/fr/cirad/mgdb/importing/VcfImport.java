@@ -19,7 +19,6 @@ import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.Set;
 import java.util.concurrent.BlockingQueue;
-import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 import java.util.stream.StreamSupport;
@@ -204,14 +203,8 @@ public class VcfImport extends AbstractGenotypeImport<VCFParameters> {
 
         AtomicInteger totalWrittenVariantCount = new AtomicInteger(0);
 
-        int nNConcurrentThreads = Math.max(1, Runtime.getRuntime().availableProcessors());
-        int nImportThreads = Math.max(1, (int)(nNConcurrentThreads * 0.60));
-        
-        @SuppressWarnings("unchecked")
-        BlockingQueue<VariantTask>[] workerQueues = new BlockingQueue[nImportThreads];
-        for (int i = 0; i < nImportThreads; i++) {
-            workerQueues[i] = new LinkedBlockingQueue<>(5000); // Large queue for workers
-        }
+        int nImportThreads = getImportWorkerCount();
+        BlockingQueue<VariantTask>[] workerQueues = createWorkerQueues(nImportThreads);
         
         final Collection<Integer> assemblyIDs = mongoTemplate.findDistinct(new Query(), "_id", Assembly.class, Integer.class);
         if (assemblyIDs.isEmpty())
@@ -287,11 +280,12 @@ public class VcfImport extends AbstractGenotypeImport<VCFParameters> {
                     hologram.getID() : 
                     hologram.getContig() + "_" + hologram.getStart();
                 
-                workerQueues[Math.floorMod(providedId.hashCode(), nImportThreads)].put(new VariantTask(hologram));
+                if (!dispatch(workerQueues[Math.floorMod(providedId.hashCode(), nImportThreads)], new VariantTask(hologram), progress))
+                    break;
             }
-            
+
             for (BlockingQueue<VariantTask> queue : workerQueues)
-                queue.put(VariantTask.POISON_PILL);
+                dispatch(queue, VariantTask.POISON_PILL, progress);
             
             LOG.info("Dispatcher finished: " + totalDispatched + " variants dispatched");
             

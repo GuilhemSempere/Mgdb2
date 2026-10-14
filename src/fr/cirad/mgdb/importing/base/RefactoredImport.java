@@ -20,7 +20,6 @@ import java.util.Scanner;
 import java.util.TreeSet;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -199,12 +198,8 @@ public abstract class RefactoredImport<T extends ImportParameters> extends Abstr
             // --- DISPATCHER + QUEUE IMPLEMENTATION ---
 
             // Create worker queues
-            int nImportThreads = Math.max(1, (nNConcurrentThreads - 1) / 2);
-            @SuppressWarnings("unchecked")
-            BlockingQueue<VariantTask>[] workerQueues = new BlockingQueue[nImportThreads];
-            for (int i = 0; i < nImportThreads; i++) {
-                workerQueues[i] = new LinkedBlockingQueue<>();
-            }
+            int nImportThreads = getImportWorkerCount();   // nNConcurrentThreads is no longer used: kept for compatibility with external callers
+            BlockingQueue<VariantTask>[] workerQueues = createWorkerQueues(nImportThreads);
 
             // Arbitrates the persisted (final) _id across DIFFERENT routing-key groups, e.g. the same
             // provided marker name appearing with inconsistent/conflicting positions on different lines
@@ -311,12 +306,13 @@ public abstract class RefactoredImport<T extends ImportParameters> extends Abstr
                                 resolvedInfo.fRoutingKeyOnly
                             );
 
-                            workerQueues[workerIndex].put(task);
+                            if (!dispatch(workerQueues[workerIndex], task, progress))
+                                break;
                         }
 
                         // Send poison pills to all workers
                         for (BlockingQueue<VariantTask> queue : workerQueues) {
-                            queue.put(VariantTask.POISON_PILL);
+                            dispatch(queue, VariantTask.POISON_PILL, progress);
                         }
 
                     } catch (Exception e) {

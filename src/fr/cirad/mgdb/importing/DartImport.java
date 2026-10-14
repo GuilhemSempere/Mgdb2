@@ -22,7 +22,6 @@ import java.util.Map;
 import java.util.Scanner;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 import java.util.regex.Matcher;
@@ -63,7 +62,6 @@ public class DartImport extends AbstractGenotypeImport<DartImportParameters> {
     private static final Logger LOG = Logger.getLogger(VariantData.class);
 
     private DartIterator dartIterator;
-    private int nNumProc = Runtime.getRuntime().availableProcessors();
 
     public DartImport(){}
 
@@ -432,19 +430,14 @@ public class DartImport extends AbstractGenotypeImport<DartImportParameters> {
         progress.addStep("Processing variant lines");
         progress.moveToNextStep();
 
-        int nNConcurrentThreads = Math.max(1, nNumProc);
-        int nImportThreads = Math.max(1, (nNConcurrentThreads - 1) / 2);
+        int nImportThreads = getImportWorkerCount();
         LOG.debug("Importing project '" + sProject + "' into " + sModule + " using " + nImportThreads + " threads");
 
         DartIterator dataReader = getDartInfo(sortedFiles == null ? params.getMainFileUrl() : sortedFiles.getSortedGenotypeFile().toURI().toURL());
-        
+
         // --- DISPATCHER + QUEUE IMPLEMENTATION ---
-        
-        @SuppressWarnings("unchecked")
-        BlockingQueue<VariantTask>[] workerQueues = new BlockingQueue[nImportThreads];
-        for (int i = 0; i < nImportThreads; i++) {
-            workerQueues[i] = new LinkedBlockingQueue<>();
-        }
+
+        BlockingQueue<VariantTask>[] workerQueues = createWorkerQueues(nImportThreads);
 
         // SHARED CACHE across all workers
         ConcurrentHashMap<String, VariantData> sharedVariantCache = new ConcurrentHashMap<>();
@@ -574,7 +567,8 @@ public class DartImport extends AbstractGenotypeImport<DartImportParameters> {
                         
                         int workerIndex = Math.floorMod(variantId.hashCode(), nImportThreads);
                         VariantTask task = new VariantTask(dartFeature, variantId, countsReader == null ? null : countsReader.countsFor(dartFeature));
-                        workerQueues[workerIndex].put(task);
+                        if (!dispatch(workerQueues[workerIndex], task, progress))
+                            break;  // the import failed or was aborted: the outer loop stops too
                         
                     } catch (Exception e) {
                         LOG.error("Error processing variant: " + e.getMessage(), e);
@@ -585,7 +579,7 @@ public class DartImport extends AbstractGenotypeImport<DartImportParameters> {
             }
             
             for (BlockingQueue<VariantTask> queue : workerQueues)
-                queue.put(VariantTask.POISON_PILL);
+                dispatch(queue, VariantTask.POISON_PILL, progress);
             
         } catch (Exception e) {
             progress.setError("Dispatcher failed: " + e.getMessage());

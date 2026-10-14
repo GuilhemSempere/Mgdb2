@@ -29,6 +29,9 @@ import java.util.Map;
 import java.util.Scanner;
 import java.util.TreeMap;
 import java.util.TreeSet;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import org.apache.commons.lang3.StringUtils;
@@ -63,6 +66,7 @@ import fr.cirad.tools.Helper;
 import fr.cirad.tools.ProgressIndicator;
 import fr.cirad.tools.mongo.AutoIncrementCounter;
 import fr.cirad.tools.mongo.MongoTemplateManager;
+import fr.cirad.tools.query.AdaptiveConcurrencyLimit;
 import htsjdk.variant.variantcontext.Allele;
 import htsjdk.variant.variantcontext.VariantContext.Type;
 import jhi.brapi.api.samples.BrapiSample;
@@ -73,6 +77,52 @@ public abstract class AbstractGenotypeImport<T extends ImportParameters> {
     private static final Logger LOG = Logger.getLogger(AbstractGenotypeImport.class);
 
     protected static final int nMaxChunkSize = 30000;
+
+    /**
+     * Max number of import workers. Each one holds a MongoDB connection for its variant lookups, and up to
+     * MAX_CONCURRENT_CHUNK_WRITES of them at a time use 2 more for writing a chunk: this keeps an import within the
+     * driver's default pool size (100 connections per host).
+     */
+    protected static final int MAX_IMPORT_WORKERS = 32;
+
+    /** Upper bound for the adaptive number of chunks being written at the same time (see {@link #MAX_IMPORT_WORKERS}) */
+    protected static final int MAX_CONCURRENT_CHUNK_WRITES = 20;
+
+    /** Capacity of each worker's task queue, bounding memory use when MongoDB is slower than parsing */
+    protected static final int WORKER_QUEUE_CAPACITY = 1000;
+
+    /**
+     * Number of worker threads an import should use to process (encode, look up, write) variants. Workers mostly do CPU
+     * work, so this follows the number of cores, while the number of them writing to MongoDB at a given time is tuned
+     * separately (see {@link #persistVariantsAndGenotypes}).
+     */
+    protected static int getImportWorkerCount() {
+        return Math.max(2, Math.min(MAX_IMPORT_WORKERS, (int) (Runtime.getRuntime().availableProcessors() * .6)));
+    }
+
+    @SuppressWarnings("unchecked")
+    protected static <T> BlockingQueue<T>[] createWorkerQueues(int nWorkerCount) {
+        BlockingQueue<T>[] queues = new BlockingQueue[nWorkerCount];
+        for (int i = 0; i < nWorkerCount; i++)
+            queues[i] = new LinkedBlockingQueue<>(WORKER_QUEUE_CAPACITY);
+        return queues;
+    }
+
+    /**
+     * Puts a task into a worker's queue, waiting while it is full. Gives up if the import failed or was aborted meanwhile,
+     * since workers then stop taking tasks, which would otherwise leave the caller blocked forever.
+     *
+     * @return false if the task was not queued because the import failed or was aborted
+     */
+    protected static <T> boolean dispatch(BlockingQueue<T> queue, T task, ProgressIndicator progress) throws InterruptedException {
+        while (!queue.offer(task, 1, TimeUnit.SECONDS))
+            if (progress.getError() != null || progress.isAborted())
+                return false;
+        return true;
+    }
+
+    /** Number of chunks this import may be writing at the same time, tuned from write latency */
+    private final AdaptiveConcurrencyLimit m_chunkWriteLimit = new AdaptiveConcurrencyLimit(getClass().getSimpleName() + " chunk writes", MAX_CONCURRENT_CHUNK_WRITES);
 
     private boolean m_fAllowDbDropIfNoGenotypingData = true;
     public boolean m_fCloseContextAfterImport = false;
@@ -296,7 +346,25 @@ public abstract class AbstractGenotypeImport<T extends ImportParameters> {
         return !fLooksLikePreprocessedVariantList;
     }
     
+    /**
+     * Writes a chunk of variants and their genotypes. Waits first if this import already has as many chunks being
+     * written as its adaptive limit allows, so that the number of concurrent writes follows what the MongoDB server
+     * can absorb rather than the number of workers.
+     */
     public void persistVariantsAndGenotypes(boolean fDBAlreadyContainsVariants, MongoTemplate mongoTemplate, Collection<VariantData> unsavedVariants, Collection<VariantRunData> unsavedRuns) throws InterruptedException {
+        m_chunkWriteLimit.acquire();
+        long startTime = System.nanoTime();
+        Long latency = null;
+        try {
+            writeVariantsAndGenotypes(fDBAlreadyContainsVariants, mongoTemplate, unsavedVariants, unsavedRuns);
+            latency = System.nanoTime() - startTime;
+        }
+        finally {
+            m_chunkWriteLimit.release(latency);
+        }
+    }
+
+    private static void writeVariantsAndGenotypes(boolean fDBAlreadyContainsVariants, MongoTemplate mongoTemplate, Collection<VariantData> unsavedVariants, Collection<VariantRunData> unsavedRuns) throws InterruptedException {
         Thread vdAsyncThread = new Thread() {
             public void run() {
                 if (!fDBAlreadyContainsVariants)

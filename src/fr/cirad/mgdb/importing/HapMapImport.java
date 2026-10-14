@@ -29,7 +29,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -62,7 +61,6 @@ public class HapMapImport extends AbstractGenotypeImport<FileImportParameters> {
 
     private static final Logger LOG = Logger.getLogger(VariantData.class);
 
-    private int nNumProc = Runtime.getRuntime().availableProcessors();
 
     private static HashMap<String, String> iupacCodeConversionMap = new HashMap<>();
 
@@ -191,17 +189,12 @@ public class HapMapImport extends AbstractGenotypeImport<FileImportParameters> {
         progress.addStep("Processing variant lines");
         progress.moveToNextStep();
 
-        int nNConcurrentThreads = Math.max(1, nNumProc);
-        int nImportThreads = Math.max(1, (nNConcurrentThreads - 1) / 1);
+        int nImportThreads = getImportWorkerCount();
         LOG.debug("Importing project '" + params.getProject() + "' into " + params.getModule() + " using " + nImportThreads + " threads");
-        
+
         // --- DISPATCHER + QUEUE IMPLEMENTATION ---
-        
-        @SuppressWarnings("unchecked")
-        BlockingQueue<VariantTask>[] workerQueues = new BlockingQueue[nImportThreads];
-        for (int i = 0; i < nImportThreads; i++) {
-            workerQueues[i] = new LinkedBlockingQueue<>();
-        }
+
+        BlockingQueue<VariantTask>[] workerQueues = createWorkerQueues(nImportThreads);
 
         // SHARED CACHE across all workers
         ConcurrentHashMap<String, VariantData> sharedVariantCache = new ConcurrentHashMap<>();
@@ -312,7 +305,8 @@ public class HapMapImport extends AbstractGenotypeImport<FileImportParameters> {
                     
                     int workerIndex = Math.floorMod(variantId.hashCode(), nImportThreads);
                     VariantTask task = new VariantTask(hmFeature, variantId);
-                    workerQueues[workerIndex].put(task);
+                    if (!dispatch(workerQueues[workerIndex], task, progress))
+                        break;
                     
                 } catch (Exception e) {
                     LOG.error("Error processing variant: " + e.getMessage(), e);
@@ -322,7 +316,7 @@ public class HapMapImport extends AbstractGenotypeImport<FileImportParameters> {
             }
             
             for (BlockingQueue<VariantTask> queue : workerQueues)
-                queue.put(VariantTask.POISON_PILL);
+                dispatch(queue, VariantTask.POISON_PILL, progress);
             
         } catch (Exception e) {
             progress.setError("Dispatcher failed: " + e.getMessage());

@@ -852,11 +852,23 @@ public class MongoTemplateManager implements ApplicationContextAware {
 		}
 		return new ThreadPoolExecutor(INITIAL_NUMBER_OF_SIMULTANEOUS_QUERY_THREADS, MAXIMUM_NUMBER_OF_SIMULTANEOUS_QUERY_THREADS, Long.MAX_VALUE, TimeUnit.DAYS, new LinkedBlockingQueue<>(), new ThreadPoolExecutor.CallerRunsPolicy());
 	}
-	
+
+	/**
+	 * Releases an executor obtained from {@link #getExecutor}, whatever the query's outcome: lets the shared host
+	 * executor purge the task group, or shuts down the per-query pool, whose core threads would otherwise stay
+	 * alive forever.
+	 */
+	public static void releaseExecutor(ExecutorService executor, String taskGroup) {
+		if (executor instanceof GroupedExecutor)
+			((GroupedExecutor) executor).shutdown(taskGroup);
+		else
+			executor.shutdownNow();
+	}
+
     @PreDestroy
     public void shutdownExecutors() {
     	for (Entry<String, GroupedExecutor> ge : hostExecutors.entrySet())
-    		if (!ge.getValue().isShutdown()) {
+    		if (ge.getValue() != null && !ge.getValue().isShutdown()) {	// null for hosts without a maxQueryThreads_<host> property
     			LOG.debug("Shutting down executor for host " + ge.getKey());
     			ge.getValue().shutdownNow();
     		}
