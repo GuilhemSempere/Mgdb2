@@ -385,9 +385,9 @@ public class Helper {
         return t -> map.putIfAbsent(keyExtractor.apply(t), Boolean.TRUE) == null;
     }
 
-    public static HashMap<Integer /*project*/, List<String /*runs*/>> getRunsByProjectInCallsetCollection(Collection<Callset> samples) {
+    public static HashMap<Integer /*project*/, List<String /*runs*/>> getRunsByProjectInCallsetCollection(Collection<Callset> callsets) {
 		HashMap<Integer, List<String>> runsByProject = new HashMap<>();
-		for (String projectAndRun : samples.stream().map(sp -> sp.getProjectId() + ID_SEPARATOR + sp.getRun()).distinct().collect(Collectors.toList())) {
+		for (String projectAndRun : callsets.stream().map(sp -> sp.getProjectId() + ID_SEPARATOR + sp.getRun()).distinct().collect(Collectors.toList())) {
 			String[] separateIDs = projectAndRun.split(ID_SEPARATOR);
 			int projId = Integer.parseInt(separateIDs[0]);
 			List<String> projectRuns = runsByProject.get(projId);
