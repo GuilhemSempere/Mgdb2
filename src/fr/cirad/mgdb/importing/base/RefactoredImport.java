@@ -1,23 +1,22 @@
 package fr.cirad.mgdb.importing.base;
 
 import java.io.BufferedReader;
+import java.io.BufferedWriter;
 import java.io.File;
-import java.io.FileOutputStream;
 import java.io.FileReader;
+import java.io.FileWriter;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.BitSet;
 import java.util.Collection;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
-import java.util.Scanner;
-import java.util.TreeSet;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -692,102 +691,95 @@ public abstract class RefactoredImport<T extends ImportParameters> extends Abstr
     protected HashMap<String, ArrayList<String>> checkSynonymGenotypeConsistency(File variantOrientedFile, HashMap<String, String> existingVariantIDs, Collection<String> individualsInProvidedOrder, String outputPathAndPrefix, HashSet<Integer> emptyLineIndexesToFill) throws IOException {
         long b4 = System.currentTimeMillis();
         LOG.info("Checking genotype consistency between synonyms...");
-        String sLine = null;
 
-        FileOutputStream inconsistencyFOS = new FileOutputStream(new File(outputPathAndPrefix + "-INCONSISTENCIES.txt"));
-        HashMap<String /*existing variant id*/, ArrayList<String /*individual*/>> result = new HashMap<>();
-
-        Map<String, List<Integer>> variantLinePositions = new HashMap<>();
-        int nCurrentLinePos = 0;
-        try (Scanner scanner = new Scanner(variantOrientedFile)) {
-            while (scanner.hasNextLine()) {
-                sLine = scanner.nextLine();
-                String providedVariantName = sLine.substring(0, sLine.indexOf("\t"));
+        // 1st pass: find out which lines refer to the same existing variant
+        HashMap<String /*existing variant id*/, Integer /*first line position*/> firstLinePositions = new HashMap<>();
+        LinkedHashMap<String /*existing variant id*/, List<Integer> /*line positions*/> synonymLinePositions = new LinkedHashMap<>();
+        try (BufferedReader reader = new BufferedReader(new FileReader(variantOrientedFile))) {
+            String sLine;
+            for (int nLinePos = 0; (sLine = reader.readLine()) != null; nLinePos++) {
+                int nTabPos = sLine.indexOf('\t');
+                String providedVariantName = nTabPos == -1 ? sLine : sLine.substring(0, nTabPos);
                 String existingId = existingVariantIDs.get(providedVariantName.toUpperCase());
-                if (existingId != null && !existingId.toString().startsWith("*")) {
-                    List<Integer> variantLines = variantLinePositions.get(existingId);
-                    if (variantLines == null) {
-                        variantLines = new ArrayList<>();
-                        variantLinePositions.put(existingId, variantLines);
-                    }
-                    variantLines.add(nCurrentLinePos);
-                }
+                if (existingId == null || existingId.startsWith("*"))
+                    continue;
+
+                Integer firstLinePos = firstLinePositions.putIfAbsent(existingId, nLinePos);
+                if (firstLinePos != null)
+                    synonymLinePositions.computeIfAbsent(existingId, k -> new ArrayList<>(List.of(firstLinePos))).add(nLinePos);
+            }
+        }
+        firstLinePositions = null;
+
+        // 2nd pass: load lines involved in synonym groups
+        int[] linesToReadForComparison = synonymLinePositions.values().stream().flatMap(List::stream).mapToInt(Integer::intValue).sorted().toArray();
+        HashMap<Integer, String> linesNeedingComparison = new HashMap<>(linesToReadForComparison.length * 4 / 3 + 1);
+        try (BufferedReader reader = new BufferedReader(new FileReader(variantOrientedFile))) {
+            int nCurrentLinePos = 0;
+            for (int nLinePos : linesToReadForComparison) {
+                for (; nCurrentLinePos < nLinePos; nCurrentLinePos++)
+                    reader.readLine();
+                linesNeedingComparison.put(nLinePos, reader.readLine());
                 nCurrentLinePos++;
             }
         }
 
-        Map<String /*variant id */, List<Integer> /*corresponding line positions*/> synonymLinePositions = variantLinePositions.entrySet().stream().filter(entry -> variantLinePositions.get(entry.getKey()).size() > 1).collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
-        variantLinePositions.clear();
+        String[] individuals = individualsInProvidedOrder.toArray(new String[0]);
+        HashMap<String /*existing variant id*/, ArrayList<String /*individual*/>> result = new HashMap<>();
+        try (BufferedWriter inconsistencyWriter = new BufferedWriter(new FileWriter(outputPathAndPrefix + "-INCONSISTENCIES.txt"))) {
+            for (Map.Entry<String, List<Integer>> variantEntry : synonymLinePositions.entrySet()) {
+                List<Integer> linesToCompareForVariant = variantEntry.getValue();
+                String[][] synAndGenotypesByLine = new String[linesToCompareForVariant.size()][];
+                String[] firstGenotypes = new String[individuals.length];
+                BitSet inconsistentIndividuals = new BitSet(individuals.length);
+                boolean fFoundAnyNonEmptyLineForThisVariant = false;
+                for (int nLineNumber = 0; nLineNumber < linesToCompareForVariant.size(); nLineNumber++) {
+                    String[] synAndGenotypes = linesNeedingComparison.remove(linesToCompareForVariant.get(nLineNumber)).split("\t");
+                    synAndGenotypesByLine[nLineNumber] = synAndGenotypes;
+                    boolean fFoundAnyGenotypeInThisLine = false;
+                    int nGenotypeCount = Math.min(individuals.length, synAndGenotypes.length - 1);
+                    for (int individualIndex = 0; individualIndex < nGenotypeCount; individualIndex++) {
+                        String genotype = synAndGenotypes[1 + individualIndex];
+                        if (genotype.isEmpty())
+                            continue;
 
-        HashMap<Integer, String> linesNeedingComparison = new HashMap<>();
-        TreeSet<Integer> linesToReadForComparison = new TreeSet<>();
-        synonymLinePositions.values().stream().forEach(varPositions -> linesToReadForComparison.addAll(varPositions));
-        nCurrentLinePos = 0;
-        try (Scanner scanner = new Scanner(variantOrientedFile)) {
-            for (int nLinePos : linesToReadForComparison) {
-                while (nCurrentLinePos <= nLinePos) {
-                    sLine = scanner.nextLine();
-                    nCurrentLinePos++;
-                }
-                linesNeedingComparison.put(nLinePos, sLine);
-            }
-        }
-
-        for (String variantId : synonymLinePositions.keySet()) {
-            HashMap<String /*genotype*/, HashSet<String> /*synonyms*/>[] individualGenotypeListArray = new HashMap[individualsInProvidedOrder.size()];
-            List<Integer> linesToCompareForVariant = synonymLinePositions.get(variantId);
-            boolean fFoundAnyNonEmptyLineForThisVariant = false;
-            for (int nLineNumber = 0; nLineNumber < linesToCompareForVariant.size(); nLineNumber++) {
-                String[] synAndGenotypes = linesNeedingComparison.get(linesToCompareForVariant.get(nLineNumber)).split("\t");
-                boolean fFoundAnyGenotypeInThisLine = false;
-                for (int individualIndex = 0; individualIndex < individualGenotypeListArray.length; individualIndex++) {
-                    if (synAndGenotypes.length <= 1 + individualIndex)
-                        break;
-
-                    String genotype = synAndGenotypes[1 + individualIndex];
-                    if (genotype.isEmpty())
-                        continue;
-
-                    if (individualGenotypeListArray[individualIndex] == null)
-                        individualGenotypeListArray[individualIndex] = new HashMap<>();
-
-                    fFoundAnyGenotypeInThisLine = true;
-                    HashSet<String> synonymsWithThisGenotype = individualGenotypeListArray[individualIndex].get(genotype);
-                    if (synonymsWithThisGenotype == null) {
-                        synonymsWithThisGenotype = new HashSet<>();
-                        individualGenotypeListArray[individualIndex].put(genotype, synonymsWithThisGenotype);
+                        fFoundAnyGenotypeInThisLine = true;
+                        if (firstGenotypes[individualIndex] == null)
+                            firstGenotypes[individualIndex] = genotype;
+                        else if (!firstGenotypes[individualIndex].equals(genotype))
+                            inconsistentIndividuals.set(individualIndex);
                     }
-                    synonymsWithThisGenotype.add(synAndGenotypes[0]);
+
+                    if (fFoundAnyGenotypeInThisLine)
+                        fFoundAnyNonEmptyLineForThisVariant = true;
+                    else if (fFoundAnyNonEmptyLineForThisVariant)
+                        emptyLineIndexesToFill.add(linesToCompareForVariant.get(nLineNumber));
                 }
 
-                if (fFoundAnyGenotypeInThisLine)
-                    fFoundAnyNonEmptyLineForThisVariant = true;
-                else if (fFoundAnyNonEmptyLineForThisVariant)
-                    emptyLineIndexesToFill.add(linesToCompareForVariant.get(nLineNumber));
-            }
+                // the genotype -> synonyms breakdown is only needed (for the report) for inconsistent individuals
+                for (int individualIndex = inconsistentIndividuals.nextSetBit(0); individualIndex >= 0; individualIndex = inconsistentIndividuals.nextSetBit(individualIndex + 1)) {
+                    HashMap<String /*genotype*/, HashSet<String> /*synonyms*/> synonymsByGenotype = new HashMap<>();
+                    for (String[] synAndGenotypes : synAndGenotypesByLine) {
+                        if (synAndGenotypes.length <= 1 + individualIndex || synAndGenotypes[1 + individualIndex].isEmpty())
+                            continue;
 
-            Iterator<String> indIt = individualsInProvidedOrder.iterator();
-            int individualIndex = 0;
-            while (indIt.hasNext()) {
-                String ind = indIt.next();
-                HashMap<String, HashSet<String>> individualGenotypes = individualGenotypeListArray[individualIndex++];
-                if (individualGenotypes != null && individualGenotypes.size() > 1) {
-                    ArrayList<String> individualsWithInconsistentGTs = result.get(variantId);
-                    if (individualsWithInconsistentGTs == null) {
-                        individualsWithInconsistentGTs = new ArrayList<String>();
-                        result.put(variantId, individualsWithInconsistentGTs);
+                        HashSet<String> synonymsWithThisGenotype = synonymsByGenotype.get(synAndGenotypes[1 + individualIndex]);
+                        if (synonymsWithThisGenotype == null) {	// not using computeIfAbsent, which would change the report's genotype order
+                            synonymsWithThisGenotype = new HashSet<>();
+                            synonymsByGenotype.put(synAndGenotypes[1 + individualIndex], synonymsWithThisGenotype);
+                        }
+                        synonymsWithThisGenotype.add(synAndGenotypes[0]);
                     }
-                    individualsWithInconsistentGTs.add(ind);
-                    inconsistencyFOS.write(ind.getBytes());
-                    for (String gt : individualGenotypes.keySet())
-                        for (String syn : individualGenotypes.get(gt))
-                            inconsistencyFOS.write(("\t" + syn + "=" + gt).getBytes());
-                    inconsistencyFOS.write("\r\n".getBytes());
+
+                    result.computeIfAbsent(variantEntry.getKey(), k -> new ArrayList<>()).add(individuals[individualIndex]);
+                    inconsistencyWriter.write(individuals[individualIndex]);
+                    for (Map.Entry<String, HashSet<String>> gtEntry : synonymsByGenotype.entrySet())
+                        for (String syn : gtEntry.getValue())
+                            inconsistencyWriter.write("\t" + syn + "=" + gtEntry.getKey());
+                    inconsistencyWriter.write("\r\n");
                 }
             }
         }
-
-        inconsistencyFOS.close();
         LOG.info("Inconsistency file was saved to " + outputPathAndPrefix + "-INCONSISTENCIES.txt" + " in " + (System.currentTimeMillis() - b4) / 1000 + "s");
         return result;
     }
