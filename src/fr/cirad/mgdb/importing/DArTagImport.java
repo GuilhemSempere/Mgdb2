@@ -406,7 +406,7 @@ public class DArTagImport extends RefactoredImport<FileImportParameters> {
         String a2 = parts[1].trim().toUpperCase();
 
         // Check if both alleles are valid (A, T, G, or C)
-        if (!a1.matches("[ATGC]") || !a2.matches("[ATGC]")) {
+        if (!a1.matches("[ATGC]+") || !a2.matches("[ATGC]+")) {
             LOG.warn("Unrecognised DArTag genotype value: '" + raw + "' — treated as missing");
             return null;
         }

@@ -168,14 +168,14 @@ public class IntertekImport extends AbstractGenotypeImport<FileImportParameters>
         int xColIndex = Arrays.asList(snpHeader).indexOf("AlleleX");
         String[] limit = {"Scaling"};
 
-        List<String> dataHeaderList = Arrays.asList(new String[]{"DaughterPlate","MasterPlate","MasterWell","Call","X","Y","SNPID","SubjectID","Norm","Carrier","DaughterWell","LongID"});
+        List<String> dataHeaderList = Arrays.asList(new String[]{"daughterplate","masterplate","masterwell","call","x","y","snpid","subjectid","norm","carrier","daughterwell","longid"});
 
-        int variantColIndex = dataHeaderList.indexOf("SNPID");
-        int indColIndex = dataHeaderList.indexOf("SubjectID");
-        int callColIndex = dataHeaderList.indexOf("Call");
-        int xFIColIndex = dataHeaderList.indexOf("X");
-        int yFIColIndex = dataHeaderList.indexOf("Y");
-        int masterPlateColIndex = dataHeaderList.indexOf("MasterPlate");
+        int variantColIndex = dataHeaderList.indexOf("snpid");
+        int indColIndex = dataHeaderList.indexOf("subjectid");
+        int callColIndex = dataHeaderList.indexOf("call");
+        int xFIColIndex = dataHeaderList.indexOf("x");
+        int yFIColIndex = dataHeaderList.indexOf("y");
+        int masterPlateColIndex = dataHeaderList.indexOf("masterplate");
 
         readAllSampleIDsToPreloadIndividuals(fileURL, dataHeaderList, indColIndex, progress);
 
@@ -420,7 +420,7 @@ public class IntertekImport extends AbstractGenotypeImport<FileImportParameters>
                 }
 
                 // Data part
-                if (Arrays.asList(values).containsAll(dataHeaderList)) {
+                if (Arrays.stream(values).map(String::toLowerCase).toList().containsAll(dataHeaderList)) {
                     dataPart = true;
                     continue;
                 }
@@ -672,12 +672,14 @@ public class IntertekImport extends AbstractGenotypeImport<FileImportParameters>
         while (scanner.hasNextLine()) {
             String sLine = scanner.nextLine();
             List<String> values = Helper.split(sLine, ",");
-            if (values.containsAll(dataHeaderList))
+            if (values.stream().map(String::toLowerCase).toList().containsAll(dataHeaderList))
                 fInDataSection = true;
             else if (fInDataSection)
                 sampleIDs.add(values.get(subjectColIndex));
         }
         scanner.close();
+        if (!fInDataSection)
+            throw new Exception("Invalid Intertek file: data header line must contain all of the following columns: " + String.join(", ", dataHeaderList));
         attemptPreloadingIndividuals(sampleIDs, progress);
     }
 
