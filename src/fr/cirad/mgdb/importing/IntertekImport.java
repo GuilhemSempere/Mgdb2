@@ -32,6 +32,7 @@ import java.util.Scanner;
 import java.util.Set;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
@@ -167,14 +168,14 @@ public class IntertekImport extends AbstractGenotypeImport<FileImportParameters>
         int xColIndex = Arrays.asList(snpHeader).indexOf("AlleleX");
         String[] limit = {"Scaling"};
 
-        List<String> dataHeaderList = Arrays.asList(new String[]{"DaughterPlate","MasterPlate","MasterWell","Call","X","Y","SNPID","SubjectID","Norm","Carrier","DaughterWell","LongID"});
+        List<String> dataHeaderList = Arrays.asList(new String[]{"daughterplate","masterplate","masterwell","call","x","y","snpid","subjectid","norm","carrier","daughterwell","longid"});
 
-        int variantColIndex = dataHeaderList.indexOf("SNPID");
-        int indColIndex = dataHeaderList.indexOf("SubjectID");
-        int callColIndex = dataHeaderList.indexOf("Call");
-        int xFIColIndex = dataHeaderList.indexOf("X");
-        int yFIColIndex = dataHeaderList.indexOf("Y");
-        int masterPlateColIndex = dataHeaderList.indexOf("MasterPlate");
+        int variantColIndex = dataHeaderList.indexOf("snpid");
+        int indColIndex = dataHeaderList.indexOf("subjectid");
+        int callColIndex = dataHeaderList.indexOf("call");
+        int xFIColIndex = dataHeaderList.indexOf("x");
+        int yFIColIndex = dataHeaderList.indexOf("y");
+        int masterPlateColIndex = dataHeaderList.indexOf("masterplate");
 
         readAllSampleIDsToPreloadIndividuals(fileURL, dataHeaderList, indColIndex, progress);
 
@@ -202,8 +203,13 @@ public class IntertekImport extends AbstractGenotypeImport<FileImportParameters>
 
         // --- DISPATCHER + QUEUE IMPLEMENTATION ---
         
-        int nImportThreads = getImportWorkerCount();
-        BlockingQueue<VariantTask>[] workerQueues = createWorkerQueues(nImportThreads);
+        int nNConcurrentThreads = Math.max(1, Runtime.getRuntime().availableProcessors());
+        int nImportThreads = Math.max(1, (nNConcurrentThreads - 1) / 2);
+        @SuppressWarnings("unchecked")
+        BlockingQueue<VariantTask>[] workerQueues = new BlockingQueue[nImportThreads];
+        for (int i = 0; i < nImportThreads; i++) {
+            workerQueues[i] = new LinkedBlockingQueue<>();
+        }
 
         // SHARED CACHE across all workers
         ConcurrentHashMap<String, VariantData> sharedVariantCache = new ConcurrentHashMap<>();
@@ -414,7 +420,7 @@ public class IntertekImport extends AbstractGenotypeImport<FileImportParameters>
                 }
 
                 // Data part
-                if (Arrays.asList(values).containsAll(dataHeaderList)) {
+                if (Arrays.stream(values).map(String::toLowerCase).toList().containsAll(dataHeaderList)) {
                     dataPart = true;
                     continue;
                 }
@@ -448,7 +454,7 @@ public class IntertekImport extends AbstractGenotypeImport<FileImportParameters>
                             if (variant != null) {
                                 int workerIndex = Math.floorMod(currentVariantId.hashCode(), nImportThreads);
                                 VariantTask task = new VariantTask(currentVariantId, new HashMap<>(sampleGenotypes), variant);
-                                dispatch(workerQueues[workerIndex], task, progress);   // if this fails, the loop exits at the next line
+                                dispatch(workerQueues[workerIndex], task, progress); 
                             }
                         }
                         
@@ -538,7 +544,7 @@ public class IntertekImport extends AbstractGenotypeImport<FileImportParameters>
             }
             
             for (BlockingQueue<VariantTask> queue : workerQueues)
-                dispatch(queue, VariantTask.POISON_PILL, progress);
+            	dispatch(queue, VariantTask.POISON_PILL, progress);
 
             // Wait for workers to complete
             for (Thread t : importThreads) {
@@ -666,12 +672,14 @@ public class IntertekImport extends AbstractGenotypeImport<FileImportParameters>
         while (scanner.hasNextLine()) {
             String sLine = scanner.nextLine();
             List<String> values = Helper.split(sLine, ",");
-            if (values.containsAll(dataHeaderList))
+            if (values.stream().map(String::toLowerCase).toList().containsAll(dataHeaderList))
                 fInDataSection = true;
             else if (fInDataSection)
                 sampleIDs.add(values.get(subjectColIndex));
         }
         scanner.close();
+        if (!fInDataSection)
+            throw new Exception("Invalid Intertek file: data header line must contain all of the following columns: " + String.join(", ", dataHeaderList));
         attemptPreloadingIndividuals(sampleIDs, progress);
     }
 
