@@ -32,7 +32,6 @@ import java.util.Scanner;
 import java.util.Set;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
@@ -203,13 +202,8 @@ public class IntertekImport extends AbstractGenotypeImport<FileImportParameters>
 
         // --- DISPATCHER + QUEUE IMPLEMENTATION ---
         
-        int nNConcurrentThreads = Math.max(1, Runtime.getRuntime().availableProcessors());
-        int nImportThreads = Math.max(1, (nNConcurrentThreads - 1) / 2);
-        @SuppressWarnings("unchecked")
-        BlockingQueue<VariantTask>[] workerQueues = new BlockingQueue[nImportThreads];
-        for (int i = 0; i < nImportThreads; i++) {
-            workerQueues[i] = new LinkedBlockingQueue<>();
-        }
+        int nImportThreads = getImportWorkerCount();
+        BlockingQueue<VariantTask>[] workerQueues = createWorkerQueues(nImportThreads);
 
         // SHARED CACHE across all workers
         ConcurrentHashMap<String, VariantData> sharedVariantCache = new ConcurrentHashMap<>();
@@ -454,7 +448,7 @@ public class IntertekImport extends AbstractGenotypeImport<FileImportParameters>
                             if (variant != null) {
                                 int workerIndex = Math.floorMod(currentVariantId.hashCode(), nImportThreads);
                                 VariantTask task = new VariantTask(currentVariantId, new HashMap<>(sampleGenotypes), variant);
-                                dispatch(workerQueues[workerIndex], task, progress); 
+                                dispatch(workerQueues[workerIndex], task, progress);   // if this fails, the loop exits at the next line
                             }
                         }
                         
@@ -544,7 +538,7 @@ public class IntertekImport extends AbstractGenotypeImport<FileImportParameters>
             }
             
             for (BlockingQueue<VariantTask> queue : workerQueues)
-            	dispatch(queue, VariantTask.POISON_PILL, progress);
+                dispatch(queue, VariantTask.POISON_PILL, progress);
 
             // Wait for workers to complete
             for (Thread t : importThreads) {
