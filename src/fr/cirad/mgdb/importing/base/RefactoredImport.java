@@ -392,6 +392,9 @@ public abstract class RefactoredImport<T extends ImportParameters> extends Abstr
         HashMap<String, VariantData> unsavedVariants = new HashMap<>();
         HashMap<String, VariantData> variantsToResave = new HashMap<>();
         HashSet<VariantRunData> unsavedRuns = new HashSet<>();
+        // _ids of the synonym-candidate variants whose genotypes have already been taken from a line of this file: only the
+        // first line (in file order, i.e. MAP order for PLINK) providing genotypes for a variant is used, whatever the chunks
+        HashSet<String> variantIdsWithGenotypes = new HashSet<>();
         int workerProcessed = 0;
 
         while (true) {
@@ -543,7 +546,8 @@ public abstract class RefactoredImport<T extends ImportParameters> extends Abstr
                     variantsToResave.put(variantId, variant);
                 else
                     unsavedVariants.put(variantId, variant);
-                unsavedRuns.add(runToSave);
+                if (!fMayHaveSynonyms || variantIdsWithGenotypes.add(variant.getId()))
+                    unsavedRuns.add(runToSave);
 
                 for (Integer asmId : assemblyIDs) {
                     ReferencePosition rp = variant.getReferencePosition(asmId);

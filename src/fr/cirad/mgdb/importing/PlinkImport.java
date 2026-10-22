@@ -336,6 +336,9 @@ public class PlinkImport extends RefactoredImport<PlinkImportParameters> {
         final int cIndividuals = nIndividuals;
         final AtomicInteger nFinishedVariantCount = new AtomicInteger(0);
         final AtomicLong memoryPool = new AtomicLong(0);
+        // Blocks are written in marker order (rather than in the order threads finish them) so that the output file
+        // follows the MAP file, which determines how lines referring to the same variant are handled when importing
+        final AtomicInteger nextBlockToWrite = new AtomicInteger(0);
         Thread[] transposeThreads = new Thread[nConcurrentThreads];
         Type[] variantTypes = new Type[variants.length];
         Arrays.fill(variantTypes, null);
@@ -500,13 +503,22 @@ public class PlinkImport extends RefactoredImport<PlinkImportParameters> {
                                             variantTypes[blockStart + marker] = variantType;
                                         }
                                     }
+                                }
 
-                                    synchronized (outputWriter) {
-                                        outputWriter.write(variantName);
+                                synchronized (outputWriter) {
+                                    while (nextBlockToWrite.get() != blockIndex) {    // wait for previous blocks to be written
+                                        if (progress.getError() != null || progress.isAborted())
+                                            return;
+                                        outputWriter.wait(1000);
+                                    }
+                                    for (int marker = 0; marker < blockSize; marker++) {
+                                        outputWriter.write(variants[blockStart + marker]);
                                         outputWriter.write("\t");
-                                        outputWriter.write(variantLine);
+                                        outputWriter.append(transposed.get(marker), 1, transposed.get(marker).length());  // Skip the leading tab
                                         outputWriter.write("\n");
                                     }
+                                    nextBlockToWrite.incrementAndGet();
+                                    outputWriter.notifyAll();
                                 }
 
                                 progress.setCurrentStepProgress(nFinishedVariantCount.addAndGet(blockSize) * 100 / variants.length);
