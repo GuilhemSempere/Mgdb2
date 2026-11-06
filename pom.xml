@@ -219,7 +219,7 @@
         <dependency>
             <groupId>fr.cirad</groupId>
             <artifactId>GenotypeFileManipulation</artifactId>
-            <version>0.1.4-RELEASE</version>
+            <version>0.1.5-RELEASE</version>
         </dependency>
         
         <dependency>
