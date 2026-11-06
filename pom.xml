@@ -275,7 +275,7 @@
   <repositories>
     <repository>
       <id>central</id>
-      <url>http://central.maven.org/maven2/</url>
+      <url>https://repo1.maven.org/maven2/</url>
     </repository>
     <repository>
       <id>sonatype</id>
@@ -283,7 +283,7 @@
     </repository>
     <repository>
       <id>Spring Plugins</id>
-      <url>http://repo.spring.io/plugins-release/</url>
+      <url>https://repo.spring.io/plugins-release/</url>
     </repository>
 
   </repositories>
