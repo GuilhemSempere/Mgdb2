@@ -151,23 +151,22 @@ public class PlinkImport extends RefactoredImport<PlinkImportParameters> {
             LOG.warn("Unable to parse input mode. Using default (0): overwrite run if exists.");
         }
         PlinkImport instance = new PlinkImport();
-        //instance.setMaxExpectedAlleleCount(2);
-        //instance.importToMongo(args[0], args[1], args[2], args[3], new File(args[4]).toURI().toURL(), new File(args[5]), null, false, true, args[6], mode);
+        instance.setMaxExpectedAlleleCount(2);
         PlinkImportParameters params = new PlinkImportParameters(
                 args[0], //sModule
                 args[1], //sProject
                 args[2], //sRun
                 args[3], //sTechnology
                 null, // nPloidy
-                args[5], //assemblyName
+                args[6], //assemblyName
                 null, //sampleToIndividualMap
                 false,//fSkipMonomorphic
                 mode,//importMode
                 new File(args[4]).toURI().toURL(), //mainFileUrl
                 new File(args[5]).toURI().toURL(),
-                false
+                true //fCheckConsistencyBetweenSynonyms
         );
-        new PlinkImport().importToMongo(params);
+        instance.importToMongo(params);
 
     }
 
@@ -337,6 +336,9 @@ public class PlinkImport extends RefactoredImport<PlinkImportParameters> {
         final int cIndividuals = nIndividuals;
         final AtomicInteger nFinishedVariantCount = new AtomicInteger(0);
         final AtomicLong memoryPool = new AtomicLong(0);
+        // Blocks are written in marker order (rather than in the order threads finish them) so that the output file
+        // follows the MAP file, which determines how lines referring to the same variant are handled when importing
+        final AtomicInteger nextBlockToWrite = new AtomicInteger(0);
         Thread[] transposeThreads = new Thread[nConcurrentThreads];
         Type[] variantTypes = new Type[variants.length];
         Arrays.fill(variantTypes, null);
@@ -501,13 +503,22 @@ public class PlinkImport extends RefactoredImport<PlinkImportParameters> {
                                             variantTypes[blockStart + marker] = variantType;
                                         }
                                     }
+                                }
 
-                                    synchronized (outputWriter) {
-                                        outputWriter.write(variantName);
+                                synchronized (outputWriter) {
+                                    while (nextBlockToWrite.get() != blockIndex) {    // wait for previous blocks to be written
+                                        if (progress.getError() != null || progress.isAborted())
+                                            return;
+                                        outputWriter.wait(1000);
+                                    }
+                                    for (int marker = 0; marker < blockSize; marker++) {
+                                        outputWriter.write(variants[blockStart + marker]);
                                         outputWriter.write("\t");
-                                        outputWriter.write(variantLine);
+                                        outputWriter.append(transposed.get(marker), 1, transposed.get(marker).length());  // Skip the leading tab
                                         outputWriter.write("\n");
                                     }
+                                    nextBlockToWrite.incrementAndGet();
+                                    outputWriter.notifyAll();
                                 }
 
                                 progress.setCurrentStepProgress(nFinishedVariantCount.addAndGet(blockSize) * 100 / variants.length);

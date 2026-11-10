@@ -17,7 +17,6 @@
 package fr.cirad.tools;
 
 import java.io.File;
-import java.io.FileOutputStream;
 import java.io.FileReader;
 import java.io.IOException;
 import java.util.Collections;
@@ -175,11 +174,11 @@ public class AppConfig {
     }
     
     synchronized public void saveProperties(Map<String, String> propsToSet) throws IOException {
-    	FileOutputStream fos = null;
         File f = new ClassPathResource("/" + CONFIG_FILE + ".properties").getFile();
-    	FileReader fileReader = new FileReader(f);
         Properties properties = new Properties();
-        properties.load(fileReader);
+        try (FileReader fileReader = new FileReader(f)) {
+            properties.load(fileReader);
+        }
         for (String key : propsToSet.keySet()) {
         	String value = propsToSet.get(key);
 	        if (value == null) {
@@ -191,8 +190,7 @@ public class AppConfig {
 	        	LOG.info("Saving " + key + " config-property as " + value);
 	        }
         }
-        fos = new FileOutputStream(f);
-        properties.store(fos, null);
+        PropertiesFileUtils.storeAtomically(properties, f, null, null);
         props = new ResourceBundle() {
 	        @Override
 	        protected Object handleGetObject(String key) {
@@ -228,4 +226,4 @@ public class AppConfig {
         }
         return 10000; // default value
     }
-}
+}

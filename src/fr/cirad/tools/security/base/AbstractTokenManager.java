@@ -53,6 +53,9 @@ public abstract class AbstractTokenManager {
     abstract public boolean canUserReadDB(String token, String module) throws ObjectNotFoundException;    
     abstract public boolean canUserReadDB(Collection<? extends GrantedAuthority> authorities, String module) throws ObjectNotFoundException;
     
+    /** whether a database may appear in listings: like canUserReadDB, except that a hidden database requires the token to grant read access, being public is not enough */
+    abstract public boolean canUserListDB(String token, String module) throws ObjectNotFoundException;
+    
     abstract public boolean canUserWriteToProject(Collection<? extends GrantedAuthority> authorities, String sModule, int projectId);
     abstract public boolean canUserWriteToProject(String token, String sModule, int projectId);
     

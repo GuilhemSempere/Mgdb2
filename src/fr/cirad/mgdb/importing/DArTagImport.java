@@ -54,8 +54,12 @@ import htsjdk.variant.variantcontext.VariantContext.Type;
  * all markers are imported as unplaced.</p>
  *
  * <p>Genotype format: two alleles separated by a colon, e.g. {@code "A:G"} for
- * a heterozygote or {@code "A:A"} for a homozygote. Empty cells or {@code "-"}
- * are treated as missing data.</p>
+ * a heterozygote or {@code "A:A"} for a homozygote. Empty cells, {@code "-"}
+ * and {@code "-:-"} are treated as missing data. A single dash within a
+ * colon-separated genotype denotes the deleted allele of an INDEL (e.g.
+ * {@code "AT:-"}): since the
+ * preceding base is unknown, such markers are encoded using the {@code "N"}
+ * (deleted allele) / {@code "NN"} (inserted allele) convention.</p>
  *
  * <p>Because the file is sample-oriented, the genotype matrix is transposed
  * into a marker-oriented temporary TSV file (one line per marker, tab-separated
@@ -182,10 +186,6 @@ public class DArTagImport extends RefactoredImport<FileImportParameters> {
         ArrayList<String> individualNames = new ArrayList<>();
 
         readMarkerIds(fileURL, variantsAndPositions);
-        if (variantsAndPositions.isEmpty()) {
-            progress.setError("No marker columns found in DArTag file");
-            return 0;
-        }
 
         // Transpose the sample-oriented matrix into a marker-oriented temp file
         progress.setPercentageEnabled(true);
@@ -222,10 +222,16 @@ public class DArTagImport extends RefactoredImport<FileImportParameters> {
         if (progress.getError() != null || progress.isAborted())
             return 0;
 
-        int nConcurrentThreads = Math.max(1, Runtime.getRuntime().availableProcessors());
-        LOG.debug("Importing project '" + params.getProject() + "' into " + params.getModule() + " using " + nConcurrentThreads + " threads");
+        // Calculate threads and pass to importTempFileContents
+        int nNConcurrentThreads = Math.max(1, Runtime.getRuntime().availableProcessors());
+        LOG.debug("Importing project '" + params.getProject() + "' into " + params.getModule() + " using " + nNConcurrentThreads + " threads");
 
-        long count = importTempFileContents(progress, nConcurrentThreads, mongoTemplate, assembly == null ? null : assembly.getId(), rotatedFile, variantsAndPositions, existingVariantIDs, project, sRun, null, orderedIndOrSpToPopulationMap, nonSnpVariantTypeMap, null, fSkipMonomorphic);
+        // --- Call importTempFileContents with the correct signature ---
+        long count = importTempFileContents(progress, nNConcurrentThreads, mongoTemplate, 
+            assembly == null ? null : assembly.getId(), rotatedFile, variantsAndPositions, 
+            existingVariantIDs, project, sRun, null, orderedIndOrSpToPopulationMap, 
+            nonSnpVariantTypeMap, null, fSkipMonomorphic);
+        
         if (progress.getError() != null)
             throw new Exception(progress.getError());
 
@@ -256,6 +262,9 @@ public class DArTagImport extends RefactoredImport<FileImportParameters> {
                     throw new Exception("Duplicate marker ID in header: " + markerId);
                 variantsAndPositions.put(markerId, "0\t0");    // unplaced
             }
+
+            if (variantsAndPositions.isEmpty())
+                throw new Exception("No marker columns found in DArTag file");
         }
     }
 
@@ -340,14 +349,21 @@ public class DArTagImport extends RefactoredImport<FileImportParameters> {
                 for (int i = 0; i < chunkSize; i++) {
                     String variantName = markerIds[chunkStart + i];
 
-                    if (!distinctAlleles[i].isEmpty()) {
+                    // skip leading tab from the StringBuilder
+                    String variantLine = transposed[i].length() > 0 ? transposed[i].substring(1) : "";
+
+                    if (distinctAlleles[i].contains("-")) {    // INDEL: the preceding base is unknown, so use the N (shorter allele) / NN (longer allele) convention
+                        if (distinctAlleles[i].stream().filter(a -> !"-".equals(a)).count() > 1)
+                            LOG.warn("INDEL marker " + variantName + " has several non-empty alleles " + distinctAlleles[i] + ": they will all be encoded as NN");
+                        variantLine = encodeIndelGenotypes(variantLine);
+                        nonSnpVariantTypeMapToFill.put(variantName, Type.INDEL);
+                    }
+                    else if (!distinctAlleles[i].isEmpty()) {
                         Type variantType = determineType(distinctAlleles[i].stream().map(a -> Allele.create(a)).collect(Collectors.toList()));
                         if (variantType != Type.SNP)
                             nonSnpVariantTypeMapToFill.put(variantName, variantType);
                     }
 
-                    // skip leading tab from the StringBuilder
-                    String variantLine = transposed[i].length() > 0 ? transposed[i].substring(1) : "";
                     outputWriter.write(variantName);
                     outputWriter.write("\t");
                     outputWriter.write(variantLine);
@@ -371,7 +387,8 @@ public class DArTagImport extends RefactoredImport<FileImportParameters> {
      * <ul>
      *   <li>{@code "A:G"} → {@code "A/G"} (heterozygote)</li>
      *   <li>{@code "A:A"} → {@code "A"}   (collapsed homozygote, let RefactoredImport expand it)</li>
-     *   <li>empty string or {@code "-"}    → {@code null} (missing data)</li>
+     *   <li>{@code "AT:-"} → {@code "AT/-"} (INDEL, re-encoded later by {@link #encodeIndelGenotypes})</li>
+     *   <li>empty string, {@code "-"} or {@code "-:-"} → {@code null} (missing data)</li>
      * </ul>
      */
     static String normaliseGenotype(String raw) {
@@ -400,8 +417,11 @@ public class DArTagImport extends RefactoredImport<FileImportParameters> {
         String a1 = parts[0].trim().toUpperCase();
         String a2 = parts[1].trim().toUpperCase();
 
-        // Check if both alleles are valid (A, T, G, or C)
-        if (!a1.matches("[ATGC]") || !a2.matches("[ATGC]")) {
+        if ("-".equals(a1) && "-".equals(a2))
+            return null; // "-:-" is missing data, only a single dash denotes an INDEL
+
+        // Check if both alleles are valid (nucleotide sequence, or "-" for the deleted allele of an INDEL)
+        if (!a1.matches("[ATGC]+|-") || !a2.matches("[ATGC]+|-")) {
             LOG.warn("Unrecognised DArTag genotype value: '" + raw + "' — treated as missing");
             return null;
         }
@@ -411,5 +431,26 @@ public class DArTagImport extends RefactoredImport<FileImportParameters> {
         } else {
             return a1 + "/" + a2;
         }
+    }
+
+    /**
+     * Re-encodes a marker line's genotypes (as produced by
+     * {@link #normaliseGenotype}) for an INDEL marker, following the convention
+     * used by other imports when the preceding base is unknown: the deleted
+     * allele {@code "-"} becomes {@code "N"} and any other allele becomes
+     * {@code "NN"}. Missing genotypes (empty strings) are left untouched.
+     */
+    static String encodeIndelGenotypes(String variantLine) {
+        String[] genotypes = variantLine.split("\t", -1);
+        for (int j = 0; j < genotypes.length; j++) {
+            if (genotypes[j].isEmpty())
+                continue;
+
+            String[] alleles = genotypes[j].split("/");
+            for (int k = 0; k < alleles.length; k++)
+                alleles[k] = "-".equals(alleles[k]) ? "N" : "NN";
+            genotypes[j] = alleles.length == 2 && alleles[0].equals(alleles[1]) ? alleles[0] : String.join("/", alleles);
+        }
+        return String.join("\t", genotypes);
     }
 }

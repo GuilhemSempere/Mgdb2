@@ -213,15 +213,8 @@ public interface IExportHandler
         		if (!Helper.isNullOrEmptyString(ai.get(key)))
         			mdHeaders.add(key);
         }
-        boolean fAppendPopulationData = false, fAppendPopulationGroupData = false;
-        if (fGotPopulationData && !mdHeaders.contains("population")) {
-			mdHeaders.add("population");
-			fAppendPopulationData = true;
-			if (!popIdToNameMap.isEmpty() && !mdHeaders.contains("population_group")) {
-				fAppendPopulationGroupData = true;
-				mdHeaders.add("population_group");
-			}
-        }
+
+        boolean fAppendPopulationGroupData = fGotPopulationData && !popIdToNameMap.isEmpty() && mdHeaders.add(Individual.AI_FIELDNAME_POPULATION_GROUP);
 
 		StringBuffer sb = new StringBuffer(initialContents);
         for (String headerKey : mdHeaders)
@@ -231,12 +224,8 @@ public interface IExportHandler
         for (Object indOrSp : material) {
         	sb.append((indOrSp instanceof Individual ? ((Individual) indOrSp).getId() : ((GenotypingSample) indOrSp).getId().toString()));
         	LinkedHashMap<String, Object> ai = indOrSp instanceof Individual ? ((Individual) indOrSp).getAdditionalInfo() : ((GenotypingSample) indOrSp).getAdditionalInfo();
-            if (fAppendPopulationData && ((Individual) indOrSp).getPopulation() != null) {
-            	String sPop = ((Individual) indOrSp).getPopulation();
-				ai.put("population", sPop);
-				if (fAppendPopulationGroupData)
-					ai.put("population_group", popIdToNameMap.get(sPop));	// no tab here because if we are on the population column, the loop above just added one
-            }
+			if (fAppendPopulationGroupData)
+				ai.put(Individual.AI_FIELDNAME_POPULATION_GROUP, popIdToNameMap.get(((Individual) indOrSp).getPopulation()));	// no tab here because if we are on the population column, the loop above just added one
             for (String headerKey : mdHeaders)
             	sb.append(("\t" + Helper.nullToEmptyString(ai.get(headerKey))));
             sb.append("\n");

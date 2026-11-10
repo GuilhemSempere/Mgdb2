@@ -385,9 +385,9 @@ public class Helper {
         return t -> map.putIfAbsent(keyExtractor.apply(t), Boolean.TRUE) == null;
     }
 
-    public static HashMap<Integer /*project*/, List<String /*runs*/>> getRunsByProjectInCallsetCollection(Collection<Callset> samples) {
+    public static HashMap<Integer /*project*/, List<String /*runs*/>> getRunsByProjectInCallsetCollection(Collection<Callset> callsets) {
 		HashMap<Integer, List<String>> runsByProject = new HashMap<>();
-		for (String projectAndRun : samples.stream().map(sp -> sp.getProjectId() + ID_SEPARATOR + sp.getRun()).distinct().collect(Collectors.toList())) {
+		for (String projectAndRun : callsets.stream().map(sp -> sp.getProjectId() + ID_SEPARATOR + sp.getRun()).distinct().collect(Collectors.toList())) {
 			String[] separateIDs = projectAndRun.split(ID_SEPARATOR);
 			int projId = Integer.parseInt(separateIDs[0]);
 			List<String> projectRuns = runsByProject.get(projId);
@@ -515,7 +515,7 @@ public class Helper {
         MongoCollection<Document> usedVarColl = mongoTemplate.getCollection(tmpCollName == null ? mongoTemplate.getCollectionName(VariantData.class) : tmpCollName); 
         if (minMaxresult[0] == null) {
             BasicDBObject sort = new BasicDBObject("$sort", new BasicDBObject(startFieldPath, 1));
-            MongoCursor<Document> cursor = usedVarColl.aggregate(Arrays.asList(match, sort, limit)).iterator();
+            MongoCursor<Document> cursor = usedVarColl.aggregate(Arrays.asList(match, sort, limit)).collation(IExportHandler.collationObj).iterator();	// the collation lets it use the {sequence, start} index, which was created with it (otherwise it may scan the whole collection)
             if (!cursor.hasNext())
                 return false;   // no variant found matching filter
 
