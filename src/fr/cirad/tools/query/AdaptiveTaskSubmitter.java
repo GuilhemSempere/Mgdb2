@@ -27,15 +27,64 @@ public class AdaptiveTaskSubmitter {
     private final AdaptiveConcurrencyLimit limit;
     private final List<Future<Void>> futures = new ArrayList<>();
 
+    /** Set by tasks that did no actual work, see {@link #excludeCurrentTaskFromMeasurement()} */
+    private static final ThreadLocal<Boolean> UNMEASURED_TASK = new ThreadLocal<>();
+
+    /**
+     * To be called from within a submitted task that ends up doing no actual work (e.g. a chunk found empty by a cheap pre-check): its
+     * latency is then left out of the tuning. Mixing such near-instant tasks with actual ones would otherwise make the reference latency
+     * that of the former, so that any window made mostly of the latter would look congested, whatever the concurrency.
+     */
+    public static void excludeCurrentTaskFromMeasurement() {
+        UNMEASURED_TASK.set(Boolean.TRUE);
+    }
+
     public AdaptiveTaskSubmitter(ExecutorService executor, String taskGroup) {
         this(executor, taskGroup, AdaptiveConcurrencyLimit.DEFAULT_MIN_LIMIT, AdaptiveConcurrencyLimit.DEFAULT_INITIAL_LIMIT);
     }
 
+    /**
+     * Creates a submitter that never makes callers wait: tasks are handed to the shared executor as soon as submitted, its size
+     * alone bounding how many run at once, and no tuning occurs ({@link #getLimit()} returns Integer.MAX_VALUE). Waiting for a
+     * slot would otherwise delay the preparation of the next tasks while the executor may already have free threads. Only meant
+     * for a GroupedExecutor: a per-query pool must have its size follow a tuned limit.
+     */
+    public static AdaptiveTaskSubmitter withoutLimit(GroupedExecutor executor, String taskGroup) {
+        return withFixedLimit(executor, taskGroup, Integer.MAX_VALUE);
+    }
+
+    /**
+     * Creates a submitter that makes callers wait only once nMaxTasksInFlight tasks are queued or running, with no tuning: the
+     * shared executor's size bounds how many run at once, and this limit only bounds how many submitted tasks may be held in memory
+     * meanwhile (e.g. when each one carries a large list of variant IDs). Only meant for a GroupedExecutor, like {@link #withoutLimit}.
+     */
+    public static AdaptiveTaskSubmitter withFixedLimit(GroupedExecutor executor, String taskGroup, int nMaxTasksInFlight) {
+        return new AdaptiveTaskSubmitter(executor, taskGroup, nMaxTasksInFlight);
+    }
+
+    private AdaptiveTaskSubmitter(GroupedExecutor executor, String taskGroup, int nFixedLimit) {
+        this.executor = executor;
+        this.taskGroup = taskGroup;
+        limit = new AdaptiveConcurrencyLimit(taskGroup, nFixedLimit, nFixedLimit, nFixedLimit, null);
+    }
+
+    /**
+     * @param memoryKey see {@link AdaptiveConcurrencyLimit#AdaptiveConcurrencyLimit(String, int, int, int, String)}:
+     * submitters given the same key (e.g. the searches on a given database) start near the limit last reached
+     */
+    public AdaptiveTaskSubmitter(ExecutorService executor, String taskGroup, String memoryKey) {
+        this(executor, taskGroup, AdaptiveConcurrencyLimit.DEFAULT_MIN_LIMIT, AdaptiveConcurrencyLimit.DEFAULT_INITIAL_LIMIT, memoryKey);
+    }
+
     public AdaptiveTaskSubmitter(ExecutorService executor, String taskGroup, int minLimit, int initialLimit) {
+        this(executor, taskGroup, minLimit, initialLimit, null);
+    }
+
+    public AdaptiveTaskSubmitter(ExecutorService executor, String taskGroup, int minLimit, int initialLimit, String memoryKey) {
         this.executor = executor;
         this.taskGroup = taskGroup;
         int maxLimit = executor instanceof ThreadPoolExecutor ? ((ThreadPoolExecutor) executor).getMaximumPoolSize() : initialLimit;
-        limit = new AdaptiveConcurrencyLimit(taskGroup, minLimit, initialLimit, maxLimit) {
+        limit = new AdaptiveConcurrencyLimit(taskGroup, minLimit, initialLimit, maxLimit, memoryKey) {
             @Override
             protected void onLimitChanged(int newLimit) {
                 adjustPoolSize(newLimit);
@@ -68,7 +117,9 @@ public class AdaptiveTaskSubmitter {
                     task.run();
                 }
                 finally {
-                    future.releaseSlot(System.nanoTime() - submitTime);
+                    boolean fMeasured = !Boolean.TRUE.equals(UNMEASURED_TASK.get());
+                    UNMEASURED_TASK.remove();
+                    future.releaseSlot(fMeasured ? System.nanoTime() - submitTime : null);
                 }
             }));
         }

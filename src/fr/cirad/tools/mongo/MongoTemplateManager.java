@@ -78,6 +78,7 @@ import fr.cirad.mgdb.model.mongodao.MgdbDao;
 import fr.cirad.tools.AppConfig;
 import fr.cirad.tools.Helper;
 import fr.cirad.tools.PropertiesFileUtils;
+import fr.cirad.tools.query.AdaptiveTaskSubmitter;
 import fr.cirad.tools.query.GroupedExecutor;
 
 /**
@@ -186,9 +187,10 @@ public class MongoTemplateManager implements ApplicationContextAware {
 //	// for per-host ExecutorService
 //    static final private int DEFAULT_MAXIMUM_NUMBER_OF_SIMULTANEOUS_QUERY_THREADS = 20;
     
-    // for old-style queries
+    /** Thread count of a per-query pool, unless an {@link fr.cirad.tools.query.AdaptiveTaskSubmitter} tunes it */
     static final public int INITIAL_NUMBER_OF_SIMULTANEOUS_QUERY_THREADS = 10;
     static final public int MINIMUM_NUMBER_OF_SIMULTANEOUS_QUERY_THREADS = 5;
+    /** Upper bound of a per-query pool, hence of the adaptive tuning when no maxQueryThreads_&lt;host&gt; is configured */
     static final public int MAXIMUM_NUMBER_OF_SIMULTANEOUS_QUERY_THREADS = 50;
 
     @Override
@@ -355,7 +357,7 @@ public class MongoTemplateManager implements ApplicationContextAware {
 						MgdbDao.createCallsetsFromSamplesIfNecessary(mongoTemplate);
 						MgdbDao.createGeneCacheIfNecessary(db, MgdbDao.COLLECTION_NAME_GENE_CACHE);
                     } catch (Exception e) {
-						LOG.error("Error while adding ensuring data model is up to date for database " + db, e);
+						LOG.error("Error while ensuring data model is up to date for database " + db, e);
 					}
         		}
         	});
@@ -851,6 +853,36 @@ public class MongoTemplateManager implements ApplicationContextAware {
 			return executor;
 		}
 		return new ThreadPoolExecutor(INITIAL_NUMBER_OF_SIMULTANEOUS_QUERY_THREADS, MAXIMUM_NUMBER_OF_SIMULTANEOUS_QUERY_THREADS, Long.MAX_VALUE, TimeUnit.DAYS, new LinkedBlockingQueue<>(), new ThreadPoolExecutor.CallerRunsPolicy());
+	}
+
+	/**
+	 * @return the maximum number of chunk queries a single operation on sModule may run at once: maxQueryThreads_&lt;host&gt;
+	 * if configured, {@value #MAXIMUM_NUMBER_OF_SIMULTANEOUS_QUERY_THREADS} otherwise (without creating any executor)
+	 */
+	public static int getMaxQueryThreads(String sModule) {
+		GroupedExecutor executor = moduleExecutors.get(sModule);
+		return executor != null ? executor.getMaximumPoolSize() : MAXIMUM_NUMBER_OF_SIMULTANEOUS_QUERY_THREADS;
+	}
+
+	/**
+	 * Creates the submitter through which a search on sModule hands its chunk queries to an executor obtained from
+	 * {@link #getExecutor}.
+	 *
+	 * <p>When maxQueryThreads_&lt;host&gt; is configured, the search runs that many chunk queries at once from the start
+	 * (the host's threads being shared fairly between concurrent operations), as the administrator has thereby stated what
+	 * the server can take. Tuning that number from measured latency proved counterproductive there: chunk queries may each
+	 * last seconds or minutes on large databases, so each ramp-up step (which takes about one chunk query's duration) costs
+	 * a significant part of the whole search, and chunks found empty by pre-filtering make latency vary for reasons other
+	 * than congestion.
+	 *
+	 * <p>Otherwise, the number of chunk queries running at once adapts to measured latency, up to
+	 * {@value #MAXIMUM_NUMBER_OF_SIMULTANEOUS_QUERY_THREADS}, starting near the level the previous searches on sModule
+	 * reached.
+	 */
+	public static AdaptiveTaskSubmitter createSearchSubmitter(String sModule, ExecutorService executor, String taskGroup) {
+		if (executor instanceof GroupedExecutor)
+			return AdaptiveTaskSubmitter.withoutLimit((GroupedExecutor) executor, taskGroup);	// all chunk queries queued as soon as prepared, the shared pool's size bounding how many run at once
+		return new AdaptiveTaskSubmitter(executor, taskGroup, "search:" + sModule);
 	}
 
 	/**

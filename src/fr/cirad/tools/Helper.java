@@ -515,7 +515,7 @@ public class Helper {
         MongoCollection<Document> usedVarColl = mongoTemplate.getCollection(tmpCollName == null ? mongoTemplate.getCollectionName(VariantData.class) : tmpCollName); 
         if (minMaxresult[0] == null) {
             BasicDBObject sort = new BasicDBObject("$sort", new BasicDBObject(startFieldPath, 1));
-            MongoCursor<Document> cursor = usedVarColl.aggregate(Arrays.asList(match, sort, limit)).iterator();
+            MongoCursor<Document> cursor = usedVarColl.aggregate(Arrays.asList(match, sort, limit)).collation(IExportHandler.collationObj).iterator();	// the collation lets it use the {sequence, start} index, which was created with it (otherwise it may scan the whole collection)
             if (!cursor.hasNext())
                 return false;   // no variant found matching filter
 

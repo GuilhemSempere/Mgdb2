@@ -71,6 +71,7 @@ import fr.cirad.tools.Helper;
 import fr.cirad.tools.ProgressIndicator;
 import fr.cirad.tools.mongo.MongoTemplateManager;
 import fr.cirad.tools.query.AdaptiveTaskSubmitter;
+import fr.cirad.tools.query.GroupedExecutor;
 
 import javax.ejb.ObjectNotFoundException;
 
@@ -265,7 +266,11 @@ public class ExportManager
         
         ExecutorService executor = MongoTemplateManager.getExecutor(module);
         String taskGroup = "export_" + System.currentTimeMillis() + "_" + progress.getProcessId();
-        AdaptiveTaskSubmitter submitter = new AdaptiveTaskSubmitter(executor, taskGroup);
+        /* When maxQueryThreads_<host> is configured, the shared pool's size bounds how many chunks are exported at once, as for searches
+         * (tuning that number from measured latency proved counterproductive there). Unlike search chunks, each export chunk holds its list
+         * of variant IDs until processed, so the number of chunks queued or running is bounded too, to twice the pool's size: enough to
+         * always have chunks ready for freed threads, without holding a large export's whole ID list in memory. Otherwise, it is tuned. */
+        AdaptiveTaskSubmitter submitter = executor instanceof GroupedExecutor ? AdaptiveTaskSubmitter.withFixedLimit((GroupedExecutor) executor, taskGroup, 2 * ((GroupedExecutor) executor).getMaximumPoolSize()) : new AdaptiveTaskSubmitter(executor, taskGroup);
         
         AtomicInteger nChunkIndex = new AtomicInteger(0), nNextChunkToAppendToMainOS = new AtomicInteger(0), nSpeedEstimationCompletedQueryCount = new AtomicInteger(0);
         AtomicLong timeSpentReadingWithoutProjectStage = new AtomicLong(0), timeSpentReadingWithProjectStage = new AtomicLong(0);
@@ -436,7 +441,7 @@ public class ExportManager
 	            		throw new Exception("All expected (" + chunkExportTasks.length + ") export chunks already processed but markerCursor still had " + nRemaining + " elements! markerCount=" + markerCount + " and " + callSetIDsToExport.size() + " samples");
 	            	}
 
-            		chunkExportTasks[nFinalChunkIndex - 1] = submitter.submit(chunkExportThread);	// blocks while the adaptive concurrency limit is reached
+            		chunkExportTasks[nFinalChunkIndex - 1] = submitter.submit(chunkExportThread);	// blocks while the limit of chunks in flight is reached
 	                currentMarkerIDs = new ArrayList<>(nQueryChunkSize);
 
 	                // append chunks already extracted, so that temporary files don't pile up while we're still submitting
