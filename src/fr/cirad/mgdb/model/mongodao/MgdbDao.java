@@ -1211,6 +1211,14 @@ public class MgdbDao {
 			fAnythingRemoved.set(true);
         }
 		
+		// as removeProjectAndRelatedRecords does for the whole project: variants no longer refer to the run (searches filtering on projects rely on this list)
+		Criteria runCriteria = Criteria.where(Run.FIELDNAME_PROJECT_ID).is(nProjectId).and(Run.FIELDNAME_RUNNAME).is(sRun);
+		UpdateResult runRefRemovalResult = mongoTemplate.updateMulti(new Query(Criteria.where(VariantData.FIELDNAME_RUNS).elemMatch(runCriteria)), new Update().pull(VariantData.FIELDNAME_RUNS, new Query(runCriteria)), VariantData.class);
+		if (runRefRemovalResult.getModifiedCount() > 0) {
+			LOG.info("Removed " + runRefRemovalResult.getModifiedCount() + " references to run " + sRun + " of project " + nProjectId + " in variants collection of module " + sModule);
+			fAnythingRemoved.set(true);
+		}
+
 		Thread vrdCleanupThread = new Thread() {
             public void run() {
                 long nRemovedVrdCount = mongoTemplate.remove(new Query(new Criteria().andOperator(Criteria.where("_id." + VariantRunDataId.FIELDNAME_PROJECT_ID).is(nProjectId), Criteria.where("_id." + VariantRunDataId.FIELDNAME_RUNNAME).is(sRun))), VariantRunData.class).getDeletedCount();

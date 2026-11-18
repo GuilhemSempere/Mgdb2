@@ -390,7 +390,7 @@ public class ExportManager
 		                        }
 
 	                            progress.setCurrentStepProgress(extractedChunks.size() * 100l / chunkGenotypeFiles.length);
-		                        exportWriter.writeChunkRuns(chunkMarkerRunsToWrite.values(), chunkMarkerIDs, genotypeChunkOS, variantChunkOS, annotationOS, warningChunkOS);
+		                        exportWriter.writeChunkRuns(nFinalChunkIndex - 1, chunkMarkerRunsToWrite.values(), chunkMarkerIDs, genotypeChunkOS, variantChunkOS, annotationOS, warningChunkOS);
 		                        
 		        		    	// make sure data is completely written out before the files get read
 		        		        genotypeChunkOS.close();
@@ -612,5 +612,14 @@ public class ExportManager
 		}
 
 		abstract public void writeChunkRuns(Collection<Collection<VariantRunData>> markerRunsToWrite, List<String> orderedMarkerIDs, OutputStream genotypeOS, OutputStream variantOS, OutputStream annotationOS, OutputStream warningkOS) throws IOException;
+
+		/**
+		 * Called once per chunk (possibly concurrently, chunks being numbered from 0 in output order) instead of the method
+		 * above, which it calls by default: to be overridden by writers whose output for a chunk depends on the chunks
+		 * before it (e.g. VCF phasing).
+		 */
+		public void writeChunkRuns(int chunkIndex, Collection<Collection<VariantRunData>> markerRunsToWrite, List<String> orderedMarkerIDs, OutputStream genotypeOS, OutputStream variantOS, OutputStream annotationOS, OutputStream warningkOS) throws IOException {
+			writeChunkRuns(markerRunsToWrite, orderedMarkerIDs, genotypeOS, variantOS, annotationOS, warningkOS);
+		}
     }
 }
