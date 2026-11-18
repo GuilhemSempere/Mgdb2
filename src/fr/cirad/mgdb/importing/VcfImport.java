@@ -21,7 +21,6 @@ import java.util.Set;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
-import java.util.stream.StreamSupport;
 
 import org.apache.log4j.Logger;
 import org.bson.types.ObjectId;
@@ -141,9 +140,19 @@ public class VcfImport extends AbstractGenotypeImport<VCFParameters> {
         public static final VariantTask POISON_PILL = new VariantTask(null);
         
         final VariantContextHologram vcfEntry;
-        
+        /** ID of the existing variant matching this entry, or else of the one to create: resolved once, by the dispatcher (generated IDs must not be generated twice) */
+        final String variantId;
+        /** Phase-block ID of each genotype, in getGenotypesOrderedByName() order (null where unphased), or null if none is phased: see {@link #assignPhaseBlocks} */
+        final Comparable[] phaseIds;
+
         VariantTask(VariantContextHologram vcfEntry) {
+            this(vcfEntry, null, null);
+        }
+
+        VariantTask(VariantContextHologram vcfEntry, String variantId, Comparable[] phaseIds) {
             this.vcfEntry = vcfEntry;
+            this.variantId = variantId;
+            this.phaseIds = phaseIds;
         }
     }
 
@@ -215,7 +224,7 @@ public class VcfImport extends AbstractGenotypeImport<VCFParameters> {
         final Integer nAssemblyId = assembly == null ? null : assembly.getId();
         final int finalEffectAnnotationPos = effectAnnotationPos;
         final int finalGeneIdAnnotationPos = geneIdAnnotationPos;
-        HashMap<String, Comparable> phasingGroups = new HashMap<>();
+        Comparable[] phaseBlockStarts = new Comparable[header.getNGenotypeSamples()];	// only used by the dispatcher (see assignPhaseBlocks)
         HashSet<String> distinctEncounteredGeneNames = new HashSet<>();
 
         createCallSetsSamplesIndividuals(header.getSampleNamesInOrder(), mongoTemplate, project.getId(), sRun, sampleToIndividualMap, progress);
@@ -239,11 +248,9 @@ public class VcfImport extends AbstractGenotypeImport<VCFParameters> {
                             progress,
                             totalWrittenVariantCount,
                             existingVariantIDs,
-                            fSkipMonomorphic,
                             header,
                             finalEffectAnnotationPos,
                             finalGeneIdAnnotationPos,
-                            phasingGroups,
                             distinctEncounteredGeneNames
                         );
                     } catch (Throwable t) {
@@ -267,7 +274,14 @@ public class VcfImport extends AbstractGenotypeImport<VCFParameters> {
                     vcfEntry.getCommonInfo().removeAttribute("");
                 
                 VariantContextHologram hologram = new VariantContextHologram(vcfEntry);
-                
+
+                // Done here, in file order, rather than by the workers (which see variants in no particular order): the variant's ID, whether it is
+                // skipped, and its phase-block IDs, which depend on the variants before it (a generated ID must also only be generated once)
+                String variantId = resolveVariantId(hologram, existingVariantIDs);
+                if (fSkipMonomorphic && !existingVariantIDs.containsKey(variantId) && isMonomorphic(hologram))
+                    continue;	// only for new variants
+                Comparable[] phaseIds = assignPhaseBlocks(hologram, ObjectId.isValid(variantId) ? "_" + variantId : variantId /* as the variant is stored */, phaseBlockStarts);
+
                 if (chunkSize == 0) {
                     chunkSize = (int) (vcfEntry.getSampleNames().isEmpty() ? 
                         nMaxChunkSize : 
@@ -280,7 +294,7 @@ public class VcfImport extends AbstractGenotypeImport<VCFParameters> {
                     hologram.getID() : 
                     hologram.getContig() + "_" + hologram.getStart();
                 
-                if (!dispatch(workerQueues[Math.floorMod(providedId.hashCode(), nImportThreads)], new VariantTask(hologram), progress))
+                if (!dispatch(workerQueues[Math.floorMod(providedId.hashCode(), nImportThreads)], new VariantTask(hologram, variantId, phaseIds), progress))
                     break;
             }
 
@@ -339,11 +353,9 @@ public class VcfImport extends AbstractGenotypeImport<VCFParameters> {
             ProgressIndicator progress,
             AtomicInteger totalWrittenVariantCount,
             HashMap<String, String> existingVariantIDs,
-            boolean fSkipMonomorphic,
             VCFHeader header,
             int effectAnnotationPos,
             int geneIdAnnotationPos,
-            HashMap<String, Comparable> phasingGroups,
             HashSet<String> distinctEncounteredGeneNames) throws Exception {
         
         HashSet<VariantData> unsavedVariants = new HashSet<>();
@@ -358,44 +370,9 @@ public class VcfImport extends AbstractGenotypeImport<VCFParameters> {
             if (task == VariantTask.POISON_PILL || progress.getError() != null || progress.isAborted())
                 break;
             
-            VariantContextHologram hologram = task.vcfEntry;            
-			String variantId = null;
-			boolean hasValidId = hologram.hasID() && !".".equals(hologram.getID()) && !hologram.getID().isEmpty();
-			
-			List<String> idAndSynonyms = hasValidId ? Arrays.asList(new String[]{hologram.getID()}) : null;
-			try {
-				for (String variantDescForPos : getIdentificationStrings(hologram.getType().toString(), hologram.getContig(), (long) hologram.getStart(), idAndSynonyms)) {
-			        variantId = existingVariantIDs.get(variantDescForPos);
-			        if (variantId != null)
-			        	break;
-				}
-			} catch (Exception e) {		// No position and no ID - will create new variant
-			    LOG.debug("Cannot build identification strings: " + e.getMessage());
-			}
+            VariantContextHologram hologram = task.vcfEntry;
+            String variantId = task.variantId;
 
-			if (variantId == null) {	// Not found, create new variant
-			    if (hasValidId)
-			        variantId = (ObjectId.isValid(hologram.getID()) ? "_" : "") + hologram.getID();
-			    else
-			        variantId = generateFallbackVariantId();
-			}
-            
-            // Skip monomorphic (only for new variants)
-            if (fSkipMonomorphic && !existingVariantIDs.containsKey(variantId)) {
-                String[] distinctGTs = StreamSupport.stream(
-                    java.util.Spliterators.spliteratorUnknownSize(
-                        hologram.getGenotypesOrderedByName().iterator(), 
-                        java.util.Spliterator.ORDERED), false)
-                    .map(gt -> gt.getGenotypeString())
-                    .filter(gt -> gt.charAt(0) != '.')
-                    .distinct()
-                    .toArray(String[]::new);
-                if (distinctGTs.length == 0 || 
-                    (distinctGTs.length == 1 && Arrays.stream(distinctGTs[0].split("/")).distinct().count() < 2)) {
-                    continue;
-                }
-            }
-            
             // Get or load variant from cache
             VariantData variant = variantCache.get(variantId);
             if (variant == null) {
@@ -418,7 +395,7 @@ public class VcfImport extends AbstractGenotypeImport<VCFParameters> {
                 hologram,
                 project,
                 sRun,
-                phasingGroups,
+                task.phaseIds,
                 effectAnnotationPos,
                 geneIdAnnotationPos,
                 distinctEncounteredGeneNames
@@ -458,6 +435,69 @@ public class VcfImport extends AbstractGenotypeImport<VCFParameters> {
                 unsavedVariants, unsavedRuns);
             progress.setCurrentStepProgress(totalWrittenVariantCount.addAndGet(unsavedVariants.size()));
         }
+    }
+
+    /** Whether the entry's called genotypes all hold one same allele (phased or not), see {@link VCFParameters#isSkipMonomorphic()} */
+    private static boolean isMonomorphic(VariantContextHologram hologram) {
+        Set<String> calledAlleles = new HashSet<>();
+        for (Genotype genotype : hologram.getGenotypesOrderedByName())
+            for (Allele allele : genotype.getAlleles())
+                if (allele.isCalled() && calledAlleles.add(allele.getBaseString()) && calledAlleles.size() > 1)
+                    return false;
+        return true;
+    }
+
+    /**
+     * Assigns each phased genotype of the entry the ID of its phase block, i.e. of the variant its sample's current block
+     * started at: the sample's first entry, or its last entry with a called but unphased genotype (the rule Gigwa always
+     * applied), so that exports (see AbstractVariantData.toVariantContext) write genotypes phased exactly where they were.
+     * Depends on the entries before this one, hence must be called in file order.
+     *
+     * @param storedVariantId  ID the variant is stored under
+     * @param phaseBlockStarts for each sample (in getGenotypesOrderedByName() order, which is the same for all entries),
+     *                         ID of the variant its current phase block started at; updated here
+     * @return the phase-block ID of each genotype, in getGenotypesOrderedByName() order (null where unphased), or null if none is phased
+     */
+    private static Comparable[] assignPhaseBlocks(VariantContextHologram hologram, String storedVariantId, Comparable[] phaseBlockStarts) {
+        Comparable[] phaseIds = null;
+        int genotypeIndex = -1;
+        for (Genotype genotype : hologram.getGenotypesOrderedByName()) {
+            genotypeIndex++;
+            boolean isPhased = genotype.isPhased();
+            if (phaseBlockStarts[genotypeIndex] == null || (!isPhased && !genotype.isNoCall()))
+                phaseBlockStarts[genotypeIndex] = storedVariantId;
+            if (isPhased) {
+                if (phaseIds == null)
+                    phaseIds = new Comparable[phaseBlockStarts.length];
+                phaseIds[genotypeIndex] = phaseBlockStarts[genotypeIndex];
+            }
+        }
+        return phaseIds;
+    }
+
+    /** ID of the existing variant matching this VCF entry, or else ID to use for creating it */
+    private String resolveVariantId(VariantContextHologram hologram, HashMap<String, String> existingVariantIDs) {
+		String variantId = null;
+		boolean hasValidId = hologram.hasID() && !".".equals(hologram.getID()) && !hologram.getID().isEmpty();
+
+		List<String> idAndSynonyms = hasValidId ? Arrays.asList(new String[]{hologram.getID()}) : null;
+		try {
+			for (String variantDescForPos : getIdentificationStrings(hologram.getType().toString(), hologram.getContig(), (long) hologram.getStart(), idAndSynonyms)) {
+		        variantId = existingVariantIDs.get(variantDescForPos);
+		        if (variantId != null)
+		        	break;
+			}
+		} catch (Exception e) {		// No position and no ID - will create new variant
+		    LOG.debug("Cannot build identification strings: " + e.getMessage());
+		}
+
+		if (variantId == null) {	// Not found, create new variant
+		    if (hasValidId)
+		        variantId = (ObjectId.isValid(hologram.getID()) ? "_" : "") + hologram.getID();
+		    else
+		        variantId = generateFallbackVariantId();
+		}
+		return variantId;
     }
 
     private static class SeekableByteChannelAdapter implements SeekableByteChannel {
@@ -737,7 +777,7 @@ public class VcfImport extends AbstractGenotypeImport<VCFParameters> {
             VariantContextHologram vc,
             GenotypingProject project,
             String runName,
-            HashMap<String, Comparable> phasingGroup,
+            Comparable[] phaseIds,
             int effectAnnotationPos,
             int geneIdAnnotationPos,
             HashSet<String> distinctEncounteredGeneNames) throws Exception {
@@ -847,15 +887,13 @@ public class VcfImport extends AbstractGenotypeImport<VCFParameters> {
         }
 
         Iterator<Genotype> genotypes = vc.getGenotypesOrderedByName().iterator();
+        int genotypeIndex = -1;	// position in getGenotypesOrderedByName(), which phaseIds is aligned on
         while (genotypes.hasNext()) {
             Genotype genotype = genotypes.next();
+            genotypeIndex++;
 
             boolean isPhased = genotype.isPhased();
             String sIndOrSpId = genotype.getSampleName();
-
-            Comparable phasedGroup = phasingGroup.get(sIndOrSpId);
-            if (phasedGroup == null || (!isPhased && !genotype.isNoCall()))
-                phasingGroup.put(sIndOrSpId, variantToFeed.getId());
 
             List<String> gtAllelesAsStrings = genotype.getAlleles().stream()
                 .map(allele -> allele.getBaseString())
@@ -868,7 +906,7 @@ public class VcfImport extends AbstractGenotypeImport<VCFParameters> {
             SampleGenotype aGT = new SampleGenotype(gtCode);
             if (isPhased) {
                 aGT.getAdditionalInfo().put(VariantData.GT_FIELD_PHASED_GT, VariantData.rebuildVcfFormatGenotype(knownAlleleStringToIndexMap, gtAllelesAsStrings, isPhased, true));
-                aGT.getAdditionalInfo().put(VariantData.GT_FIELD_PHASED_ID, phasingGroup.get(sIndOrSpId));
+                aGT.getAdditionalInfo().put(VariantData.GT_FIELD_PHASED_ID, phaseIds[genotypeIndex]);	// assigned by the dispatcher, in file order (see assignPhaseBlocks)
             }
             if (genotype.hasGQ()) {
                 aGT.getAdditionalInfo().put(VariantData.GT_FIELD_GQ, genotype.getGQ());
@@ -989,4 +1027,4 @@ public class VcfImport extends AbstractGenotypeImport<VCFParameters> {
             this.start = start;
         }
     }
-}
+}
