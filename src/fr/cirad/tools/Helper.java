@@ -35,7 +35,7 @@ import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
-import org.apache.commons.lang.StringUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.log4j.Logger;
 import org.bson.Document;
 import org.springframework.data.mongodb.core.MongoTemplate;
@@ -364,6 +364,41 @@ public class Helper {
     
     public static long estimDocCount(String sModule,String collName) {
     	return estimDocCount(MongoTemplateManager.get(sModule), collName);
+    }
+
+    /** Matches the sequence field of a variant's position, whether it is stored as the default reference position or for a given assembly */
+    private static final java.util.regex.Pattern SEQUENCE_FIELD_PATTERN = java.util.regex.Pattern.compile(
+    		"(" + java.util.regex.Pattern.quote(fr.cirad.mgdb.model.mongo.subtypes.AbstractVariantData.FIELDNAME_REFERENCE_POSITION) + "|" + java.util.regex.Pattern.quote(fr.cirad.mgdb.model.mongo.subtypes.AbstractVariantData.FIELDNAME_POSITIONS) + "\\.\\d+)\\." + java.util.regex.Pattern.quote(ReferencePosition.FIELDNAME_SEQUENCE));
+
+    /**
+     * Tells whether a query on the variant collection (or on a temporary copy of it) filters on sequence.
+     *
+     * The compound sequence / position indexes are built with IExportHandler.collationObj, and MongoDB only uses them for string comparisons
+     * when the query has that same collation: without it, a filter on sequence makes the query scan the whole collection (or all variants
+     * within the position range, whatever their sequence). Conversely, the other indexes (_id, variant type...) use the simple collation,
+     * so a query that does not filter on sequence (e.g. on variant IDs) must be run without collation to remain able to use them.
+     *
+     * @param query a query document (Document / BasicDBObject), or a list of criteria (e.g. BasicDBList)
+     * @return true if any field of the query (at any nesting level) is a variant position's sequence
+     */
+    public static boolean isFilteringOnSequence(Object query) {
+        if (query instanceof Map)
+            for (Map.Entry<?, ?> entry : ((Map<?, ?>) query).entrySet()) {
+                if ((entry.getKey() instanceof String && SEQUENCE_FIELD_PATTERN.matcher((String) entry.getKey()).matches()) || isFilteringOnSequence(entry.getValue()))
+                    return true;
+            }
+        else if (query instanceof Collection)
+            for (Object item : (Collection<?>) query)
+                if (isFilteringOnSequence(item))
+                    return true;
+        return false;
+    }
+
+    /**
+     * @return IExportHandler.collationObj if the query filters on sequence, null (i.e. no collation) otherwise. See isFilteringOnSequence()
+     */
+    public static com.mongodb.client.model.Collation getPositionCollationIfFilteringOnSequence(Object query) {
+        return isFilteringOnSequence(query) ? IExportHandler.collationObj : null;
     }
     
     public static long estimDocCount(String sModule, Class documentClass) {

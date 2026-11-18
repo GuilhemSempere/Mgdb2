@@ -37,7 +37,7 @@ import javax.security.sasl.AuthenticationException;
 import javax.servlet.http.HttpSession;
 
 import org.apache.commons.collections.CollectionUtils;
-import org.apache.commons.lang.StringUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.log4j.Logger;
 import org.brapi.v2.model.Germplasm;
 import org.brapi.v2.model.GermplasmAttributeValue;

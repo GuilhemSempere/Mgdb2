@@ -44,7 +44,7 @@ import javax.servlet.http.HttpServletResponse;
 
 import fr.cirad.mgdb.model.mongo.maintypes.*;
 import org.apache.commons.io.FileUtils;
-import org.apache.commons.lang.StringUtils;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.log4j.Logger;
 import org.bson.types.ObjectId;
 import org.springframework.dao.DuplicateKeyException;
