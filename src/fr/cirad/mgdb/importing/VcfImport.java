@@ -225,6 +225,7 @@ public class VcfImport extends AbstractGenotypeImport<VCFParameters> {
         final int finalEffectAnnotationPos = effectAnnotationPos;
         final int finalGeneIdAnnotationPos = geneIdAnnotationPos;
         Comparable[] phaseBlockStarts = new Comparable[header.getNGenotypeSamples()];	// only used by the dispatcher (see assignPhaseBlocks)
+        Object[] currentPhaseSets = new Object[header.getNGenotypeSamples()];	// likewise
         HashSet<String> distinctEncounteredGeneNames = new HashSet<>();
 
         createCallSetsSamplesIndividuals(header.getSampleNamesInOrder(), mongoTemplate, project.getId(), sRun, sampleToIndividualMap, progress);
@@ -280,7 +281,7 @@ public class VcfImport extends AbstractGenotypeImport<VCFParameters> {
                 String variantId = resolveVariantId(hologram, existingVariantIDs);
                 if (fSkipMonomorphic && !existingVariantIDs.containsKey(variantId) && isMonomorphic(hologram))
                     continue;	// only for new variants
-                Comparable[] phaseIds = assignPhaseBlocks(hologram, ObjectId.isValid(variantId) ? "_" + variantId : variantId /* as the variant is stored */, phaseBlockStarts);
+                Comparable[] phaseIds = assignPhaseBlocks(hologram, ObjectId.isValid(variantId) ? "_" + variantId : variantId /* as the variant is stored */, phaseBlockStarts, currentPhaseSets);
 
                 if (chunkSize == 0) {
                     chunkSize = (int) (vcfEntry.getSampleNames().isEmpty() ? 
@@ -454,16 +455,37 @@ public class VcfImport extends AbstractGenotypeImport<VCFParameters> {
      * Depends on the entries before this one, hence must be called in file order.
      *
      * @param storedVariantId  ID the variant is stored under
+     * A phased genotype carrying a PS field (as Gigwa's own exports write) instead belongs to the block of the sample's previous one
+     * if it has the same PS, and otherwise starts a new block, unphased genotypes being transparent then (VCF: phased genotypes with
+     * the same PS are in the same phase set).
+     *
      * @param phaseBlockStarts for each sample (in getGenotypesOrderedByName() order, which is the same for all entries),
      *                         ID of the variant its current phase block started at; updated here
+     * @param currentPhaseSets for each sample (same order), the PS of its last phased genotype if it had one, and the variant its block started at (PhaseSetBlock); updated here
      * @return the phase-block ID of each genotype, in getGenotypesOrderedByName() order (null where unphased), or null if none is phased
      */
-    private static Comparable[] assignPhaseBlocks(VariantContextHologram hologram, String storedVariantId, Comparable[] phaseBlockStarts) {
+    /** A sample's current phase set (PS) and the ID of the variant where the corresponding block started, see assignPhaseBlocks */
+    private record PhaseSetBlock(String phaseSet, Comparable blockStart) {}
+
+    private static Comparable[] assignPhaseBlocks(VariantContextHologram hologram, String storedVariantId, Comparable[] phaseBlockStarts, Object[] currentPhaseSets) {
         Comparable[] phaseIds = null;
         int genotypeIndex = -1;
         for (Genotype genotype : hologram.getGenotypesOrderedByName()) {
             genotypeIndex++;
             boolean isPhased = genotype.isPhased();
+            Object phaseSet = isPhased ? genotype.getAnyAttribute(VCFConstants.PHASE_SET_KEY) : null;
+            if (phaseSet != null && !VCFConstants.MISSING_VALUE_v4.equals(phaseSet.toString())) {	// explicit phase set: a block lasts as long as the sample's PS does
+                PhaseSetBlock current = (PhaseSetBlock) currentPhaseSets[genotypeIndex];
+                if (current == null || !current.phaseSet().equals(phaseSet.toString()))
+                    currentPhaseSets[genotypeIndex] = current = new PhaseSetBlock(phaseSet.toString(), storedVariantId);
+                phaseBlockStarts[genotypeIndex] = current.blockStart();
+                if (phaseIds == null)
+                    phaseIds = new Comparable[phaseBlockStarts.length];
+                phaseIds[genotypeIndex] = current.blockStart();
+                continue;
+            }
+            if (isPhased)
+                currentPhaseSets[genotypeIndex] = null;	// a phased genotype without PS ends the phase set (unphased ones are transparent to it)
             if (phaseBlockStarts[genotypeIndex] == null || (!isPhased && !genotype.isNoCall()))
                 phaseBlockStarts[genotypeIndex] = storedVariantId;
             if (isPhased) {

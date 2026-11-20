@@ -546,15 +546,11 @@ public class Helper {
         
         BasicDBObject limit = new BasicDBObject("$limit", 1);
         String startFieldPath = refPosPathWithTrailingDot + ReferencePosition.FIELDNAME_START_SITE;
-        com.mongodb.client.model.Collation positionCollation = Helper.getPositionCollationIfFilteringOnSequence(match);
 
         MongoCollection<Document> usedVarColl = mongoTemplate.getCollection(tmpCollName == null ? mongoTemplate.getCollectionName(VariantData.class) : tmpCollName); 
         if (minMaxresult[0] == null) {
             BasicDBObject sort = new BasicDBObject("$sort", new BasicDBObject(startFieldPath, 1));
-            com.mongodb.client.AggregateIterable<Document> aggregate = usedVarColl.aggregate(Arrays.asList(match, sort, limit));
-            if (positionCollation != null)
-                aggregate = aggregate.collation(positionCollation);
-            MongoCursor<Document> cursor = aggregate.iterator();
+            MongoCursor<Document> cursor = usedVarColl.aggregate(Arrays.asList(match, sort, limit)).collation(IExportHandler.collationObj).iterator();	// the collation lets it use the {sequence, start} index, which was created with it (otherwise it may scan the whole collection)
             if (!cursor.hasNext())
                 return false;   // no variant found matching filter
 
@@ -564,10 +560,7 @@ public class Helper {
 
         if (minMaxresult[1] == null) {
             BasicDBObject sort = new BasicDBObject("$sort", new BasicDBObject(startFieldPath, -1));
-            com.mongodb.client.AggregateIterable<Document> aggregate = usedVarColl.aggregate(Arrays.asList(match, sort, limit));
-            if (positionCollation != null)
-                aggregate = aggregate.collation(positionCollation);
-            MongoCursor<Document> cursor = aggregate.iterator();
+            MongoCursor<Document> cursor = usedVarColl.aggregate(Arrays.asList(match, sort, limit)).collation(IExportHandler.collationObj).iterator();
             if (!cursor.hasNext())
                 return false;   // no variant found matching filter
 

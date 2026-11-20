@@ -658,26 +658,43 @@ abstract public class AbstractVariantData
 		return toVariantContext(mongoTemplate, runs, nAssemblyId, exportVariantIDs, callSetsToExport, individualPositions, individualsByPop, workWithSamples, annotationFieldThresholds, previousPhasingIds, warningOS, synonym, null);
 	}
 
+	/** A phase block as seen from a given callset: those of different callsets (e.g. phased in different runs) never match */
+	public record PhaseBlockRef(int callsetId, Object phaseId) {}
+
 	/**
-	 * A phased genotype exported unphased because whether it continues its callset's phase block depended on a state
-	 * (see previousPhasingIds) that was not known yet: it was built unphased, and must be made phased, with alleles
-	 * phasedAlleles, if that state turns out to hold phaseId for its callset.
+	 * Phasing state of an output column (see previousPhasingIds): the phase block (qualified by its callset) of its last phased
+	 * genotype, and the phase set (PS) written for it.
+	 *
+	 * <p>Phased genotypes (those holding GT_FIELD_PHASED_GT) are written phased, in their phased allele order, with a PS field:
+	 * consecutive phased genotypes of a column that belong to the same block of the same callset share a PS, the position of the
+	 * first of them (as the VCF specification recommends), unphased genotypes being transparent. An individual's genotypes may come
+	 * from several callsets: blocks of different callsets never share a PS.
 	 */
-	public record UndecidedPhasing(String sample, Object phaseId, List<Allele> phasedAlleles) {}
+	public record PhaseSetState(PhaseBlockRef block, int phaseSet) {}
+
+	/**
+	 * A phased genotype whose phase set could not be decided when building its VariantContext, because the phasing state of its
+	 * column (see previousPhasingIds) was not known yet: it was given its own position as a provisional PS, which it shares with
+	 * the column's next genotypes of the same block, and which must be replaced with the PS of the column's state if that state
+	 * turns out to be for the same block.
+	 */
+	public record UndecidedPhasing(String sample, PhaseBlockRef block, int provisionalPhaseSet) {}
 
 	/**
 	 * Same as above, for callers exporting variants out of order (e.g. concurrently).
 	 *
-	 * @param previousPhasingIds phasing state: for each callset, the phase-block ID of its last exported genotype, or the ID of
-	 *        the variant it belongs to if it was unphased; updated here
-	 * @param undecidedPhasing if not null, receives (by callset ID) the phased genotypes whose callset has no entry in
-	 *        previousPhasingIds yet: they are built unphased, the caller being expected to fix them once that state is known
-	 *        (see UndecidedPhasing). If null, such genotypes are exported unphased (i.e. the state is assumed complete).
+	 * @param previousPhasingIds phasing state: for each output column (individual or sample index, see individualPositions), its
+	 *        PhaseSetState; updated here
+	 * @param undecidedPhasing if not null, receives (by output column index) the phased genotypes whose column has no entry in
+	 *        previousPhasingIds yet: they are given a provisional PS, the caller being expected to fix it once that state is known
+	 *        (see UndecidedPhasing). If null, the state is assumed complete.
 	 */
 	public VariantContext toVariantContext(MongoTemplate mongoTemplate, Collection<VariantRunData> runs, Integer nAssemblyId, boolean exportVariantIDs, Collection<Callset> callSetsToExport, Map<String, Integer> individualPositions, Map<String /*population*/, Collection<String>> individualsByPop, boolean workWithSamples, Map<String /*population*/, HashMap<String, Float>> annotationFieldThresholds, HashMap<Integer, Object> previousPhasingIds, OutputStream warningOS, String synonym, Map<Integer, UndecidedPhasing> undecidedPhasing) throws Exception
 	{
 		ArrayList<Genotype> genotypes = new ArrayList<Genotype>();
 		String sRefAllele = knownAlleles.isEmpty() ? null : knownAlleles.iterator().next();
+		ReferencePosition variantReferencePosition = getReferencePosition(nAssemblyId);
+		long variantPosition = variantReferencePosition != null ? variantReferencePosition.getStartSite() : 0;	// see PhaseSetState
 
         HashMap<Integer, SampleGenotype> sampleGenotypes = new HashMap<>();
         HashSet<VariantRunData> runsWhereDataWasFound = new HashSet<>();
@@ -762,21 +779,22 @@ abstract public class AbstractVariantData
             SampleGenotype sampleGenotype = sampleGenotypes.get(csId);
 
             Object currentPhId = sampleGenotype.getAdditionalInfo().get(GT_FIELD_PHASED_ID);
-            boolean isPhased = currentPhId != null && currentPhId.equals(previousPhasingIds.get(csId));
-            if (undecidedPhasing != null && currentPhId != null && !currentPhId.equals(getVariantId()) /* a block starting here is never phased with the previous genotype */ && !previousPhasingIds.containsKey(csId)) {
-                String phasedGtCode = (String) sampleGenotype.getAdditionalInfo().get(GT_FIELD_PHASED_GT);
-                List<String> phasedAlleleStrings = genotypeStringCache.get(phasedGtCode);
-                if (phasedAlleleStrings == null) {
-                    phasedAlleleStrings = safelyGetAllelesFromGenotypeCode(phasedGtCode, mongoTemplate);
-                    genotypeStringCache.put(phasedGtCode, phasedAlleleStrings);
+            String phasedGtCode = (String) sampleGenotype.getAdditionalInfo().get(GT_FIELD_PHASED_GT);
+            boolean isPhased = currentPhId != null && phasedGtCode != null;
+            Integer phaseSet = null;
+            if (isPhased) {	// see PhaseSetState
+                PhaseBlockRef block = new PhaseBlockRef(csId, currentPhId);
+                PhaseSetState state = (PhaseSetState) previousPhasingIds.get(nIndividualIndex);
+                if (state != null && state.block().equals(block))
+                    phaseSet = state.phaseSet();
+                else {
+                    phaseSet = (int) Math.min(Integer.MAX_VALUE, variantPosition);
+                    if (state == null && undecidedPhasing != null && !currentPhId.equals(getVariantId()) /* a block starting here does not continue anything */)
+                        undecidedPhasing.put(nIndividualIndex, new UndecidedPhasing(entry.getKey(), block, phaseSet));
+                    previousPhasingIds.put(nIndividualIndex, new PhaseSetState(block, phaseSet));
                 }
-                boolean fAllPhasedAllelesNoCall = !phasedAlleleStrings.stream().filter(all -> !all.isEmpty()).findAny().isPresent();
-                List<Allele> phasedAlleles = new ArrayList<>(phasedAlleleStrings.size());
-                for (String sAllele : phasedAlleleStrings)
-                    phasedAlleles.add(Allele.create(sAllele.length() == 0 ? (fAllPhasedAllelesNoCall ? Allele.NO_CALL_STRING : "<DEL>") : sAllele, sRefAllele.equals(sAllele)));
-                undecidedPhasing.put(csId, new UndecidedPhasing(entry.getKey(), currentPhId, phasedAlleles));
             }
-            String gtCode = isPhased ? (String) sampleGenotype.getAdditionalInfo().get(GT_FIELD_PHASED_GT) : mostFrequentGenotype;
+            String gtCode = isPhased ? phasedGtCode : mostFrequentGenotype;
             List<String> alleles = genotypeStringCache.get(gtCode);
             if (alleles == null) {
                 alleles = safelyGetAllelesFromGenotypeCode(gtCode, mongoTemplate);
@@ -787,7 +805,6 @@ abstract public class AbstractVariantData
                 warningOS.write(("- Dissimilar genotypes found for variant " + (synonym == null ? getVariantId() : synonym) + ", individual " + entry.getKey() + ". " + "Exporting most frequent: " + StringUtils.join(alleles, "/") + "\n").getBytes());
 
             ArrayList<Allele> individualAlleles = new ArrayList<>(alleles.size());
-            previousPhasingIds.put(csId, currentPhId == null ? getVariantId() : currentPhId);
 //            if (alleles.size() == 0)
 //                continue;    /* skip this individual because there is no genotype for it */
             
@@ -803,6 +820,8 @@ abstract public class AbstractVariantData
             if (individualAlleles.size() > 0)
             {
                 gb.phased(isPhased);
+                if (phaseSet != null)
+                    gb.attribute(VCFConstants.PHASE_SET_KEY, phaseSet);
                 String genotypeFilters = (String) sampleGenotype.getAdditionalInfo().get(FIELD_FILTERS);
                 if (genotypeFilters != null && genotypeFilters.length() > 0)
                     gb.filter(genotypeFilters);
